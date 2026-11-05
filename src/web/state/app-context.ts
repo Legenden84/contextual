@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { Change, Deployment, Rule, TreeNode } from '@/data/sample'
-import type { Health } from '@/lib/api'
+import type { FileContent, Health } from '@/lib/api'
 
 export type Screen = 'welcome' | 'workspace' | 'settings'
 export type Theme = 'dark' | 'light'
@@ -45,6 +45,27 @@ export interface ToastState {
   title: string
   detail: string
   undoable: boolean
+  tone?: 'error'
+  /** Backup to restore on Undo (real folders). */
+  backupId?: string
+}
+
+/** The opened project: the built-in sample, or a folder on this machine. */
+export interface Project {
+  kind: 'sample' | 'folder'
+  name: string
+  /** Absolute path on the machine the server runs on. */
+  root: string
+  branch: string | null
+  /** The scan stopped early because the folder is very large. */
+  truncated: boolean
+}
+
+export interface RecentProject {
+  name: string
+  path: string
+  /** ISO timestamp. */
+  openedAt: string
 }
 
 export interface Settings {
@@ -75,6 +96,13 @@ export interface Totals {
 export interface AppState {
   screen: Screen
   theme: Theme
+
+  project: Project | null
+  recents: RecentProject[]
+  folderDialogOpen: boolean
+  /** Folder of the last opened project, where the Open folder dialog starts. */
+  lastFolder: string | null
+  scanning: boolean
 
   tree: TreeNode[]
   selected: ReadonlySet<string>
@@ -109,7 +137,15 @@ export interface AppState {
 }
 
 export interface AppActions {
-  openProject(): void
+  openFolderDialog(): void
+  closeFolderDialog(): void
+  /** Scans and opens a folder. Resolves to an error message, or null on success. */
+  openFolder(path: string): Promise<string | null>
+  openSample(): void
+  clearRecents(): void
+  rescan(): void
+  /** Contents of a project file (cached after the first read). */
+  loadFile(path: string): Promise<FileContent>
   closeProject(): void
   openSettings(): void
   closeSettings(): void
@@ -144,7 +180,8 @@ export interface AppActions {
   setIncludeAll(on: boolean): void
   openApply(): void
   closeApply(): void
-  apply(): void
+  /** Writes the selected changes. Resolves to an error message, or null on success. */
+  apply(backup: boolean): Promise<string | null>
   undoApply(): void
   dismissToast(): void
 

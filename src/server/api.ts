@@ -3,11 +3,20 @@
 //   GET  /api/health      Configuration status (never the API key).
 //   POST /api/test        Round-trip to the deployment, returns latency.
 //   POST /api/chat        { messages } → NDJSON stream of ChatEvent.
+//   GET  /api/fs/dirs     ?path=&hidden=1 → sub-folders, for the Open folder dialog.
+//   POST /api/project/scan   { root, options } → explorer tree, rules, branch.
+//   POST /api/project/read   { root, paths } → file contents.
+//   POST /api/project/apply  { root, changes, backup } → writes the selected changes.
+//   POST /api/project/undo   { root, backupId } → restores from that backup.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AzureOpenAI } from 'openai'
 import { readFoundryConfig, type ConfigResult, type FoundryConfig } from './config.ts'
 import { createFoundryClient, describeError, streamChat, testConnection, type ChatMessage } from './foundry.ts'
+import { listDirs } from './fs/browse.ts'
+import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
+import { PathError } from './fs/paths.ts'
+import { scanProject, type ScanOptions } from './fs/scan.ts'
 
 type Env = Record<string, string | undefined>
 type Next = (err?: unknown) => void
@@ -65,6 +74,52 @@ function parseMessages(body: unknown): ChatMessage[] {
       throw new HttpError(400, `messages[${i}] needs a role (system, user, assistant) and string content.`)
     return { role: role as ChatMessage['role'], content }
   })
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+
+function str(body: Record<string, unknown>, key: string): string {
+  const v = body[key]
+  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `\`${key}\` must be a non-empty string.`)
+  return v
+}
+
+function strList(body: Record<string, unknown>, key: string, max: number): string[] {
+  const v = body[key]
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new HttpError(400, `\`${key}\` must be an array of strings.`)
+  if (v.length > max) throw new HttpError(400, `\`${key}\` has more than ${max} entries.`)
+  return v as string[]
+}
+
+function scanOptions(v: unknown): ScanOptions {
+  const o = isObj(v) ? v : {}
+  return {
+    exclusions: Array.isArray(o.exclusions) ? o.exclusions.filter((x): x is string => typeof x === 'string') : [],
+    maxFileSizeKb: typeof o.maxFileSizeKb === 'number' && o.maxFileSizeKb > 0 ? o.maxFileSizeKb : 256,
+    respectGitignore: o.respectGitignore !== false,
+    skipBinary: o.skipBinary !== false,
+    includeHidden: o.includeHidden === true,
+  }
+}
+
+function applyList(v: unknown): ApplyChange[] {
+  if (!Array.isArray(v) || !v.length) throw new HttpError(400, '`changes` must be a non-empty array.')
+  return v.map((c, i) => {
+    if (!isObj(c) || typeof c.path !== 'string' || !['A', 'M', 'D'].includes(c.status as string))
+      throw new HttpError(400, `changes[${i}] needs a path and a status (A, M, D).`)
+    return {
+      path: c.path,
+      status: c.status as ApplyChange['status'],
+      content: typeof c.content === 'string' ? c.content : undefined,
+      expected: typeof c.expected === 'string' ? c.expected : undefined,
+    }
+  })
+}
+
+async function readObject(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const body = await readJson(req)
+  if (!isObj(body)) throw new HttpError(400, 'Request body must be a JSON object.')
+  return body
 }
 
 function publicConfig(result: ConfigResult) {
@@ -136,11 +191,34 @@ export function createApi(getEnv: () => Env) {
         return res.end()
       }
 
+      if (route === 'GET /api/fs/dirs')
+        return sendJson(res, 200, await listDirs(url.searchParams.get('path'), url.searchParams.get('hidden') === '1'))
+
+      if (route === 'POST /api/project/scan') {
+        const body = await readObject(req)
+        return sendJson(res, 200, await scanProject(str(body, 'root'), scanOptions(body.options)))
+      }
+
+      if (route === 'POST /api/project/read') {
+        const body = await readObject(req)
+        return sendJson(res, 200, { files: await readFiles(str(body, 'root'), strList(body, 'paths', 5000)) })
+      }
+
+      if (route === 'POST /api/project/apply') {
+        const body = await readObject(req)
+        return sendJson(res, 200, await applyChanges(str(body, 'root'), applyList(body.changes), body.backup !== false))
+      }
+
+      if (route === 'POST /api/project/undo') {
+        const body = await readObject(req)
+        return sendJson(res, 200, await undoApply(str(body, 'root'), str(body, 'backupId')))
+      }
+
       throw new HttpError(404, `No route for ${route}.`)
     } catch (err) {
       if (abort.signal.aborted) return
       if (res.headersSent) return res.end()
-      if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message })
+      if (err instanceof HttpError || err instanceof PathError) return sendJson(res, err.status, { error: err.message })
       const { status, message } = describeError(err)
       return sendJson(res, status, { error: message })
     }

@@ -15,6 +15,8 @@ export interface TreeNode {
   excluded?: string
   /** Changed on disk since it was loaded into context. */
   changedOnDisk?: boolean
+  /** Last modified time from the scan, for real folders. */
+  mtimeMs?: number
 }
 
 export interface Rule {

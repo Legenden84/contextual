@@ -77,3 +77,87 @@ export async function streamChat(
   }
   if (buffer.trim()) onEvent(JSON.parse(buffer) as ChatEvent)
 }
+
+// ------------------------------------------------------------------ project files
+
+export interface DirListing {
+  path: string
+  parent: string | null
+  dirs: { name: string; path: string; project: boolean }[]
+  places: { label: string; path: string }[]
+  truncated: boolean
+}
+
+export interface ScanOptions {
+  exclusions: string[]
+  maxFileSizeKb: number
+  respectGitignore: boolean
+  skipBinary: boolean
+  includeHidden: boolean
+}
+
+export interface ScanNode {
+  name: string
+  path: string
+  kind: 'dir' | 'file'
+  tokens?: number
+  children?: ScanNode[]
+  excluded?: string
+  mtimeMs?: number
+}
+
+export interface ScanResult {
+  name: string
+  root: string
+  branch: string | null
+  tree: ScanNode[]
+  rules: { path: string; type: 'Rule' | 'Skill'; tokens: number; content: string }[]
+  files: number
+  truncated: boolean
+}
+
+export interface FileContent {
+  path: string
+  content?: string
+  mtimeMs?: number
+  error?: string
+}
+
+export interface ApplyChange {
+  path: string
+  status: 'A' | 'M' | 'D'
+  content?: string
+  expected?: string
+}
+
+export interface ApplyResult {
+  created: number
+  overwritten: number
+  deleted: number
+  backupId: string | null
+  backupPath: string | null
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!res.ok) throw await errorFrom(res)
+  return (await res.json()) as T
+}
+
+export async function listDirs(path: string | null, hidden: boolean): Promise<DirListing> {
+  const q = new URLSearchParams({ path: path ?? '', hidden: hidden ? '1' : '0' })
+  const res = await fetch(`/api/fs/dirs?${q}`)
+  if (!res.ok) throw await errorFrom(res)
+  return (await res.json()) as DirListing
+}
+
+export const scanProject = (root: string, options: ScanOptions) => postJson<ScanResult>('/api/project/scan', { root, options })
+
+export const readFiles = (root: string, paths: string[]) =>
+  postJson<{ files: FileContent[] }>('/api/project/read', { root, paths }).then((r) => r.files)
+
+export const applyChanges = (root: string, changes: ApplyChange[], backup: boolean) =>
+  postJson<ApplyResult>('/api/project/apply', { root, changes, backup })
+
+export const undoApply = (root: string, backupId: string) =>
+  postJson<{ restored: number; removed: number }>('/api/project/undo', { root, backupId })

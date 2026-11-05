@@ -20,10 +20,11 @@ proposed changes. The model never writes to disk; applying is an explicit user a
   - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds the messages (rules +
     output format as system prompt, history, context files); `lib/changes.ts` turns a reply's
     `### FILE:` / `### DELETE:` blocks into the Changes panel.
-  - `data/sample.ts` — the Inventory.Api sample project from the design system. Replace with
-    data from `src/server` once it exists.
-  - Deep links for reviewing states: `#workspace`, `#preview` (amber context bar), `#diff`,
-    `#split`, `#apply`, `#applied`, `#settings`; add `,light` for the light theme.
+  - `data/sample.ts` — the Inventory.Api sample project from the design system, opened from
+    the Welcome screen ("sample"). Real folders come from `src/server/fs` via `/api/project/*`.
+  - `#open=<path>` opens a folder directly. Sample deep links for reviewing design states:
+    `#workspace`, `#preview` (amber context bar), `#diff`, `#split`, `#apply`, `#applied`,
+    `#settings`; add `,light` for the light theme.
 - `src/server/` — Node code that runs inside the local Vite process (`plugin.ts` mounts `/api`).
   No dedicated backend server, no Next.js, no React Server Components. Talks to Azure AI Foundry
   through the `openai` SDK's `AzureOpenAI` client. See `src/server/README.md` for routes.

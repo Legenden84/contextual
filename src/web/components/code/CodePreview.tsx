@@ -1,7 +1,7 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { useCopy } from '@/hooks/useCopy'
-import { fileContents } from '@/data/sample'
+import type { FileContent } from '@/lib/api'
 import { fmtN } from '@/lib/format'
 import { LANG_LABEL, langFromPath } from '@/lib/syntax'
 import { findNode } from '@/lib/tree'
@@ -10,14 +10,25 @@ import { CodeView } from './CodeView'
 
 /** Read-only preview tab opened from the explorer. */
 export function CodePreview({ path }: { path: string }) {
-  const { tree, selected } = useApp()
+  const { tree, selected, loadFile, project } = useApp()
   const [wrap, setWrap] = useState(false)
-  const [current, setCurrent] = useState(34)
+  const [current, setCurrent] = useState<number | undefined>(project?.kind === 'sample' ? 34 : undefined)
+  const [file, setFile] = useState<FileContent | null>(null)
   const [copied, copy] = useCopy()
-  const content = fileContents[path]
   const node = findNode(tree, path)
   const parts = path.split('/')
   const lang = langFromPath(path)
+  const content = file?.content
+
+  // Reload when the scan reports a new modified time for this file.
+  const mtime = node?.mtimeMs
+  useEffect(() => {
+    let live = true
+    void loadFile(path).then((f) => live && setFile(f))
+    return () => {
+      live = false
+    }
+  }, [loadFile, path, mtime])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -30,16 +41,16 @@ export function CodePreview({ path }: { path: string }) {
         ))}
         <span className="flex-1" />
         <span>
-          {LANG_LABEL[lang]} · UTF-8 · {fmtN(node?.tokens ?? 0)} tokens · {selected.has(path) ? 'in context' : 'not in context'}
+          {LANG_LABEL[lang]} · UTF-8 · ~{fmtN(node?.tokens ?? 0)} tokens · {selected.has(path) ? 'in context' : 'not in context'}
         </span>
-        <Button variant="ghost" size="xs" icon="copy" disabled={!content} onClick={() => content && copy(content)}>
+        <Button variant="ghost" size="xs" icon="copy" disabled={content == null} onClick={() => content != null && copy(content)}>
           {copied ? 'Copied' : 'Copy'}
         </Button>
         <Button variant="ghost" size="xs" icon="wrap" aria-pressed={wrap} onClick={() => setWrap((w) => !w)}>
           Wrap lines
         </Button>
       </div>
-      {content ? (
+      {content != null ? (
         <CodeView
           code={content}
           path={path}
@@ -51,7 +62,7 @@ export function CodePreview({ path }: { path: string }) {
         />
       ) : (
         <div className="flex flex-1 items-center justify-center bg-surface-100 text-ui-small text-ink-muted">
-          The sample project has no contents for this file.
+          {file ? `Cannot preview this file: ${file.error}` : 'Loading…'}
         </div>
       )}
     </div>

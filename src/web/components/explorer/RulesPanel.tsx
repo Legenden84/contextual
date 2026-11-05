@@ -41,7 +41,11 @@ export function RulesPanel({ fill }: { fill?: boolean }) {
         <>
           {app.rules.map((r) => {
             const on = app.rulesOn.has(r.path)
-            const { dir, name } = splitPath(r.path)
+            // Skills are all called SKILL.md: show the skill's folder name instead.
+            const skill = /(?:^|\/)([^/]+)\/SKILL\.md$/i.exec(r.path)
+            const { dir, name } = skill
+              ? { name: skill[1], dir: r.path.slice(0, r.path.length - skill[0].length + (skill[0].startsWith('/') ? 1 : 0)) }
+              : splitPath(r.path)
             return (
               <div
                 key={r.path}

@@ -11,8 +11,10 @@ export function Toast() {
       role="status"
       className="absolute right-4 bottom-10 z-11 flex w-[380px] items-center gap-3 rounded-lg border border-border-strong bg-surface-200 p-3 shadow-modal"
     >
-      <span className="inline-flex size-6 flex-none items-center justify-center rounded-full bg-success text-surface-100">
-        <Icon name="check" className="size-3.5" strokeWidth={2} />
+      <span
+        className={`inline-flex size-6 flex-none items-center justify-center rounded-full text-surface-100 ${toast.tone === 'error' ? 'bg-danger' : 'bg-success'}`}
+      >
+        <Icon name={toast.tone === 'error' ? 'warning' : 'check'} className="size-3.5" strokeWidth={2} />
       </span>
       <div>
         <b className="font-semibold text-ink-strong">{toast.title}</b>

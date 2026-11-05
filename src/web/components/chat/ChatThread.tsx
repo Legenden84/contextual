@@ -148,15 +148,33 @@ function NoteMessage({ msg }: { msg: ChatMessage }) {
 }
 
 export function ChatThread() {
-  const { messages } = useApp()
+  const { messages, totals, project } = useApp()
   const end = useRef<HTMLDivElement>(null)
+  // Messages present when the thread opened (the sample conversation) don't trigger scrolling.
+  const [initialCount] = useState(messages.length)
   const last = messages[messages.length - 1]
-  const follow = messages.length > 2 ? `${messages.length}:${last?.text.length ?? 0}` : ''
+  const follow = messages.length > initialCount ? `${messages.length}:${last?.text.length ?? 0}` : ''
 
   // Keep the newest message in view while it streams.
   useEffect(() => {
     if (follow) end.current?.scrollIntoView({ block: 'end' })
   }, [follow])
+
+  if (!messages.length)
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6">
+        <div className="max-w-[420px] text-center text-ui-prose text-ink-muted">
+          <Icon name="sparkle" className="mx-auto mb-3 size-6 text-accent-ink" />
+          <p className="mb-2 text-ink">Ask for a change in {project?.name}.</p>
+          <p className="text-ui-body">
+            {totals.files
+              ? `${totals.files} ${totals.files === 1 ? 'file is' : 'files are'} ticked and will be sent with your message.`
+              : 'Tick the files the model should see in the explorer, then describe the change below.'}{' '}
+            The model only proposes edits; nothing is written until you apply.
+          </p>
+        </div>
+      </div>
+    )
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">

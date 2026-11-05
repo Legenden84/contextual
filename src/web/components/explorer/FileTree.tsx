@@ -6,7 +6,6 @@ import { Icon } from '@/components/ui/Icon'
 import { Switch } from '@/components/ui/Switch'
 import { Tag } from '@/components/ui/Tag'
 import { TextInput } from '@/components/ui/TextInput'
-import { project } from '@/data/sample'
 import { fmtK } from '@/lib/format'
 import { checkState, filterTree, nodeStats, sortNodes } from '@/lib/tree'
 import { cn } from '@/lib/utils'
@@ -111,7 +110,7 @@ export function FileTree() {
       <div className="flex h-8 flex-none items-center gap-1.5 pr-2 pl-3">
         <span className="text-ui-caption text-ink-muted uppercase">Explorer</span>
         <span className="flex-1" />
-        <IconButton icon="refresh" label="Refresh changed files" onClick={app.refreshStale} />
+        <IconButton icon="refresh" label="Rescan folder" onClick={app.rescan} />
         <IconButton icon="dots" label="More" />
       </div>
       <div className="flex flex-col gap-1.5 px-3 pb-1.5">
@@ -145,7 +144,9 @@ export function FileTree() {
         <span className="inline-flex w-3.5 text-ink-muted">
           <Icon name="chevronDown" className="size-3.5" />
         </span>
-        <b className="font-semibold">{project.name}</b>
+        <b className="truncate font-semibold" title={app.project?.root}>
+          {app.project?.name}
+        </b>
         <span className="flex-1" />
         <span className="font-mono text-[11px] tracking-normal text-ink-muted normal-case">
           {files} files · {fmtK(tokens)}
@@ -160,6 +161,11 @@ export function FileTree() {
           <span className="flex-1" />
           <LinkButton onClick={app.refreshStale}>Refresh</LinkButton>
         </div>
+      )}
+      {app.project?.truncated && (
+        <p className="mx-2 mb-1 rounded-sm bg-warning-bg px-2 py-[3px] text-ui-small text-ink">
+          Large folder: only the first 20,000 entries are listed. Add exclusions in Settings.
+        </p>
       )}
       <div role="tree" aria-label="Project files" className="min-h-0 flex-1 overflow-auto pb-1.5">
         {sortNodes(nodes).map((n) => (

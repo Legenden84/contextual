@@ -3,7 +3,6 @@ import { Button, IconButton } from '@/components/ui/Button'
 import { Checkbox, CheckLabel } from '@/components/ui/Checkbox'
 import { Icon } from '@/components/ui/Icon'
 import { LineCounts } from '@/components/ui/Status'
-import { project } from '@/data/sample'
 import { computeDiff } from '@/lib/diff'
 import { splitPath } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -23,9 +22,19 @@ function backupFolder() {
 
 /** Lists what will happen to each selected file before anything is written. */
 export function ApplyDialog() {
-  const { changes, include, closeApply, apply } = useApp()
+  const { changes, include, closeApply, apply, project } = useApp()
   const [backup, setBackup] = useState(true)
   const [reveal, setReveal] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const run = () => {
+    setBusy(true)
+    setError(null)
+    void apply(backup).then((err) => {
+      setBusy(false)
+      if (err) setError(err)
+    })
+  }
   const folder = useMemo(() => backupFolder(), [])
 
   const picked = useMemo(
@@ -59,7 +68,7 @@ export function ApplyDialog() {
 
         <div className="flex flex-col gap-3 px-4 pb-4">
           <p className="text-ink-muted">
-            These files will be written to <span className="font-mono text-[12px]">{project.path}</span>. Nothing else is
+            These files will be written to <span className="font-mono text-[12px]">{project?.root}</span>. Nothing else is
             touched.
           </p>
 
@@ -98,14 +107,23 @@ export function ApplyDialog() {
           <CheckLabel onToggle={() => setReveal((r) => !r)} control={<Checkbox state={reveal} onChange={() => setReveal((r) => !r)} />}>
             Show in explorer after apply
           </CheckLabel>
+          {!backup && (
+            <p className="text-ui-small text-warning">Without a backup, this apply cannot be undone.</p>
+          )}
+          {error && (
+            <p role="alert" className="flex items-start gap-1.5 text-ui-small text-danger">
+              <Icon name="warning" className="mt-px size-3.5" />
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2 border-t border-border bg-surface-000 px-4 py-3">
           <span className="text-ui-small text-ink-muted">Writes are exact file contents from the response. No merging.</span>
           <span className="flex-1" />
           <Button onClick={closeApply}>Cancel</Button>
-          <Button variant="primary" disabled={picked.length === 0} onClick={apply} autoFocus>
-            Apply {picked.length} {picked.length === 1 ? 'file' : 'files'}
+          <Button variant="primary" disabled={picked.length === 0 || busy} onClick={run} autoFocus>
+            {busy ? 'Writing…' : `Apply ${picked.length} ${picked.length === 1 ? 'file' : 'files'}`}
           </Button>
         </div>
       </div>

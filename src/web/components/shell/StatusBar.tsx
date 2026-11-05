@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { Icon } from '@/components/ui/Icon'
-import { project } from '@/data/sample'
 import { fmtN } from '@/lib/format'
 import { describeFoundry } from '@/lib/foundry-status'
 import { useApp } from '@/state/app-context'
@@ -10,7 +9,7 @@ function Item({ children, className }: { children: ReactNode; className?: string
 }
 
 export function StatusBar() {
-  const { screen, settings, deployment, totals, openSettings, foundry } = useApp()
+  const { screen, settings, deployment, totals, openSettings, foundry, project, scanning } = useApp()
   const label = describeFoundry(foundry)
   const tone = label.tone === 'ok' ? '[&_svg]:text-success' : label.tone === 'warn' ? 'text-warning' : ''
   const dep = settings.deployments[deployment] ?? settings.deployments[0]
@@ -30,7 +29,7 @@ export function StatusBar() {
         <>
           <Item>
             <Icon name="branch" />
-            {project.branch}
+            {project?.branch ?? 'no git'}
           </Item>
           <span title={label.detail} className={`inline-flex items-center gap-1 [&_svg]:size-3.5 ${tone}`}>
             <Icon name="cloud" />
@@ -41,6 +40,12 @@ export function StatusBar() {
             Read-only: nothing is written until you apply
           </Item>
           <span className="flex-1" />
+          {scanning && (
+            <Item>
+              <Icon name="refresh" className="animate-spin" />
+              Scanning…
+            </Item>
+          )}
           {screen === 'settings' ? (
             <Item>Saved</Item>
           ) : (
