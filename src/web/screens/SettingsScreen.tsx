@@ -177,7 +177,10 @@ function FoundrySection({ s, update }: { s: Settings; update: (p: Partial<Settin
             ? 'The deployment comes from AZURE_OPENAI_DEPLOYMENT. '
             : 'Showing sample deployments until the server is configured. '}
           The context limit drives the context bar (amber at 75%, red at 95%).
-          {health && !health.contextLimit && ' AZURE_OPENAI_CONTEXT_LIMIT is not set, so 128,000 is assumed.'} Settings
+          {health && !health.contextLimit && ' AZURE_OPENAI_CONTEXT_LIMIT is not set, so 128,000 is assumed.'}
+          {health && (health.inputPricePer1M || health.outputPricePer1M)
+            ? ' Prices come from AZURE_OPENAI_INPUT_PRICE_PER_1M / _OUTPUT_PRICE_PER_1M in .env.local.'
+            : ''} Settings
           are saved in this browser.
         </p>
       </Field>

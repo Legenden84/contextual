@@ -214,7 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         setFoundry({ state: 'ready', health: h })
         setSettings((s) => {
-          // Keep limit and prices typed in Settings for this deployment; .env.local's limit wins.
+          // .env.local wins for limit and prices; otherwise keep what was typed in Settings.
           const saved = s.deployments.find((d) => d.name === h.deployment)
           return {
             ...s,
@@ -223,8 +223,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
               {
                 name: h.deployment,
                 limit: h.contextLimit ?? saved?.limit ?? FALLBACK_CONTEXT_LIMIT,
-                inPrice: saved?.inPrice ?? 0,
-                outPrice: saved?.outPrice ?? 0,
+                inPrice: h.inputPricePer1M ?? saved?.inPrice ?? 0,
+                outPrice: h.outputPricePer1M ?? saved?.outPrice ?? 0,
               },
             ],
           }

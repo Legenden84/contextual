@@ -53,7 +53,7 @@ export function ContextBar() {
           ~${totals.cost.toFixed(3)} / message
         </span>
       ) : (
-        <span className="text-[11px] whitespace-nowrap" title="Set input and output prices in Settings → Deployments">
+        <span className="text-[11px] whitespace-nowrap" title="Set AZURE_OPENAI_INPUT_PRICE_PER_1M and AZURE_OPENAI_OUTPUT_PRICE_PER_1M in .env.local">
           Cost: prices not set
         </span>
       )}

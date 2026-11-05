@@ -13,6 +13,9 @@ export interface FoundryConfig {
   maxCompletionTokens: number
   /** Context window used by the context bar. Unset until you confirm it for the model. */
   contextLimit?: number
+  /** USD per 1M input / output tokens, for cost estimates. */
+  inputPricePer1M?: number
+  outputPricePer1M?: number
 }
 
 export const REQUIRED_ENV = [
@@ -58,6 +61,8 @@ export function readFoundryConfig(env: Env): ConfigResult {
 
   const maxCompletionTokens = positive(env, 'AZURE_OPENAI_MAX_COMPLETION_TOKENS', invalid) ?? 16384
   const contextLimit = positive(env, 'AZURE_OPENAI_CONTEXT_LIMIT', invalid)
+  const inputPricePer1M = positive(env, 'AZURE_OPENAI_INPUT_PRICE_PER_1M', invalid)
+  const outputPricePer1M = positive(env, 'AZURE_OPENAI_OUTPUT_PRICE_PER_1M', invalid)
 
   if (missing.length || invalid.length) return { ok: false, missing, invalid }
 
@@ -72,6 +77,8 @@ export function readFoundryConfig(env: Env): ConfigResult {
       modelName: value('AZURE_OPENAI_MODEL_NAME') ?? deployment,
       maxCompletionTokens,
       contextLimit,
+      inputPricePer1M,
+      outputPricePer1M,
     },
   }
 }

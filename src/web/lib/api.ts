@@ -10,6 +10,8 @@ export type Health =
       modelName: string
       maxCompletionTokens: number
       contextLimit?: number
+      inputPricePer1M?: number
+      outputPricePer1M?: number
     }
   | { configured: false; missing: string[]; invalid: string[] }
 
