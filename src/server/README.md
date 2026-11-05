@@ -12,20 +12,27 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 | `fs/paths.ts` | Path normalising (`C:\x` → `/mnt/c/x`, `\\wsl$\Ubuntu\…` → `/…`, `~`) and keeping paths inside the project |
 | `fs/browse.ts` | Folder listing for the Open folder dialog |
 | `fs/scan.ts` | Project scan: tree, token estimates, exclusions, git branch, instruction files |
+| `fs/condense.ts` | Condensed copies of large HTML/SVG (embedded data and minified code replaced by placeholders) |
+| `fs/images.ts` | Image formats sent to the model as pictures |
 | `fs/files.ts` | Reading files; saving applied changes (editor-style) and Undo |
 
 ## Routes
 
 - `GET /api/health` → `{ configured, endpoint, deployment, modelName, … }` or `{ configured: false, missing, invalid }`. Never returns the key.
 - `POST /api/test` → `{ ok, latencyMs }` (a 16-token round trip).
-- `POST /api/chat` with `{ "messages": [{ "role": "system" | "user" | "assistant", "content": "…" }] }`
+- `POST /api/chat` with `{ "messages": [{ "role": "system" | "user" | "assistant", "content": "…" }] }`;
+  user messages may instead have `content: [{ type: "text", … }, { type: "image_url", image_url: { url: "data:image/png;base64,…" } }]`
   → `application/x-ndjson`, one event per line: `delta` (text), `usage`, `done`, or `error`.
 
 - `GET /api/fs/dirs?path=&hidden=1` → sub-folders of a path, plus Home, `/` and Windows drives.
 - `POST /api/project/scan` `{ root, options }` → tree, rules, branch. Exclusion reasons: `ignored: <dir>`,
   `lock file`, `.gitignore` (root `.gitignore` only), `binary`, `too large`, `hidden`, `secrets` (`.env*`, always).
-- `POST /api/project/read` `{ root, paths }` → contents (text only, up to 2 MB each), with LF line endings
-  and no BOM.
+  Images are marked `image` (~765 tokens each). Large HTML/SVG get `condensedFrom`, and `tokens` and the size
+  limit use the condensed size. "too large" files can still be ticked one by one in the UI.
+- `POST /api/project/read` `{ root, paths, condense? }` → contents (text up to 2 MB each, LF line endings,
+  no BOM). PNG/JPEG/GIF/WebP files come back as `image` data URLs (up to 20 MB). With `condense`, HTML/SVG
+  of 32 KB or more come back condensed, with `condensedFrom` set; the client sends those as read-only
+  references and never offers changes to them.
 - `POST /api/project/apply` `{ root, changes, backup }` → saves the changes in place in the working tree,
   like Save in an editor: nothing is staged or committed. Each file keeps its line endings (CRLF/LF),
   BOM and final-newline setting, so `git diff` shows only the real edits. Every file is checked first

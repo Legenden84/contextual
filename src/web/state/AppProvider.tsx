@@ -5,8 +5,9 @@ import * as api from '@/lib/api'
 import { parseChanges } from '@/lib/changes'
 import { estimateTokens, fmtK } from '@/lib/format'
 import { parseMarkdown } from '@/lib/markdown'
-import { buildMessages, systemPrompt, type ContextFile } from '@/lib/prompt'
-import { biggestFolder, checkState, findNode, nodeStats, selectableFiles } from '@/lib/tree'
+import { toAttachment, type Attachment } from '@/lib/images'
+import { buildMessages, systemPrompt, withImages, type ContextFile } from '@/lib/prompt'
+import { biggestFolder, checkState, findNode, nodeStats, pickableFiles, selectableFiles } from '@/lib/tree'
 import {
   AppContext,
   type AppActions,
@@ -28,6 +29,7 @@ import {
 const DIFF_MODE_KEY = 'contextual.diffMode'
 const THEME_KEY = 'contextual.theme'
 const RECENTS_KEY = 'contextual.recentProjects'
+const SETTINGS_KEY = 'contextual.settings'
 /** Used for the context bar until AZURE_OPENAI_CONTEXT_LIMIT is set. */
 export const FALLBACK_CONTEXT_LIMIT = 128000
 /** Don't rescan on window focus more often than this. */
@@ -104,6 +106,22 @@ const initialSettings: Settings = {
   outputPrompt: sample.outputPrompt,
 }
 
+/** Settings saved in this browser, merged over the defaults (unknown or mistyped fields are ignored). */
+function readSettings(): Settings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>
+    const s = { ...initialSettings }
+    if (Array.isArray(saved.exclusions) && saved.exclusions.every((x) => typeof x === 'string')) s.exclusions = saved.exclusions
+    if (typeof saved.maxFileSizeKb === 'number' && saved.maxFileSizeKb > 0) s.maxFileSizeKb = saved.maxFileSizeKb
+    for (const k of ['respectGitignore', 'skipBinary', 'includeHidden'] as const) if (typeof saved[k] === 'boolean') s[k] = saved[k]
+    if (typeof saved.outputPrompt === 'string' && saved.outputPrompt.trim()) s.outputPrompt = saved.outputPrompt
+    if (Array.isArray(saved.deployments) && saved.deployments.length) s.deployments = saved.deployments
+    return s
+  } catch {
+    return initialSettings
+  }
+}
+
 const sampleMessages: ChatMessage[] = [
   { id: 'u1', role: 'user', text: sample.userPrompt, time: '14:31', meta: '12 files · 3 rules · full context' },
   {
@@ -156,6 +174,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [deployment, setDeployment] = useState(0)
   const [contextMode, setContextMode] = useState<ContextMode>('full')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  /** Files sent as condensed references: replies can't change them. */
+  const referenceOnly = useRef(new Set<string>())
   const abortRef = useRef<AbortController | null>(null)
 
   const [previewTabs, setPreviewTabs] = useState<string[]>([])
@@ -170,7 +191,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [applyOpen, setApplyOpen] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
-  const [settings, setSettings] = useState<Settings>(initialSettings)
+  const [settings, setSettings] = useState<Settings>(readSettings)
+
+  useEffect(() => writePref(SETTINGS_KEY, JSON.stringify(settings)), [settings])
 
   useEffect(() => {
     const root = document.documentElement
@@ -190,11 +213,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return
         }
         setFoundry({ state: 'ready', health: h })
-        setSettings((s) => ({
-          ...s,
-          defaultDeployment: 0,
-          deployments: [{ name: h.deployment, limit: h.contextLimit ?? FALLBACK_CONTEXT_LIMIT, inPrice: 0, outPrice: 0 }],
-        }))
+        setSettings((s) => {
+          // Keep limit and prices typed in Settings for this deployment; .env.local's limit wins.
+          const saved = s.deployments.find((d) => d.name === h.deployment)
+          return {
+            ...s,
+            defaultDeployment: 0,
+            deployments: [
+              {
+                name: h.deployment,
+                limit: h.contextLimit ?? saved?.limit ?? FALLBACK_CONTEXT_LIMIT,
+                inPrice: saved?.inPrice ?? 0,
+                outPrice: saved?.outPrice ?? 0,
+              },
+            ],
+          }
+        })
         setDeployment(0)
       })
       .catch((err: unknown) => {
@@ -213,6 +247,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetWorkspace = useCallback(() => {
     contents.current.clear()
     sentMtimes.current.clear()
+    referenceOnly.current.clear()
+    setAttachments([])
     setFilter('')
     setRulePreview(null)
     setActiveTab('chat')
@@ -298,8 +334,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setRawTree(r.tree)
       setProject((p) => (p ? { ...p, branch: r.branch, truncated: r.truncated } : p))
-      const selectable = new Set(selectableFiles(r.tree))
-      setSelected((s) => new Set([...s].filter((p) => selectable.has(p))))
+      const pickable = pickableFiles(r.tree)
+      setSelected((s) => new Set([...s].filter((p) => pickable.has(p))))
       setStale(changed)
       setRules((old) => {
         const content = new Map(old.map((x) => [x.path, x.content]))
@@ -425,7 +461,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const onRules = rules.filter((r) => rulesOn.has(r.path))
     const ruleTokens = onRules.reduce((a, r) => a + r.tokens, 0)
     const history = messages.reduce((a, m) => a + (m.role === 'note' ? 0 : estimateTokens(m.text)), 0)
-    const raw = fileTokens + ruleTokens + estimateTokens(settings.outputPrompt) + sample.USER_MESSAGE_TOKENS + history
+    const pictures = attachments.reduce((a, x) => a + x.tokens, 0)
+    const raw = fileTokens + ruleTokens + pictures + estimateTokens(settings.outputPrompt) + sample.USER_MESSAGE_TOKENS + history
     const tokens = Math.round(raw / 100) * 100
     const dep = settings.deployments[deployment] ?? settings.deployments[0]
     const share = tokens / dep.limit
@@ -443,7 +480,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cost,
       hint: big ? `${big.name}: ${fmtK(big.tokens)}` : null,
     }
-  }, [tree, selected, rules, rulesOn, messages, settings.deployments, settings.outputPrompt, deployment])
+  }, [tree, selected, rules, rulesOn, messages, attachments, settings.deployments, settings.outputPrompt, deployment])
 
   const toggleSet = useCallback(
     <T,>(setter: (fn: (s: ReadonlySet<T>) => ReadonlySet<T>) => void, value: T) =>
@@ -485,13 +522,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const paths = [...selected].sort()
           if (folder) {
             try {
-              const read = await api.readFiles(project.root, paths)
+              const read = await api.readFiles(project.root, paths, true)
               for (const f of read) {
-                if (f.content == null) continue
-                contents.current.set(f.path, f.content)
                 if (f.mtimeMs != null) sentMtimes.current.set(f.path, f.mtimeMs)
+                if (f.condensedFrom) referenceOnly.current.add(f.path)
+                else referenceOnly.current.delete(f.path)
+                // Keep only real contents as diff originals; condensed copies are references.
+                if (f.content != null && !f.condensedFrom) contents.current.set(f.path, f.content)
               }
-              files = read.map((f) => ({ path: f.path, content: f.content }))
+              files = read.map((f) => ({ path: f.path, content: f.content, image: f.image, condensed: !!f.condensedFrom }))
               setStale((s) => new Set([...s].filter((p) => !paths.includes(p))))
             } catch (err) {
               abortRef.current = null
@@ -507,11 +546,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.streaming)
           .map((m) => ({
             role: m.role as 'user' | 'assistant',
-            content: m.role === 'user' && !full ? (m.sent ?? m.text) : m.text,
+            content:
+              m.role === 'user' ? (!full ? (m.sent ?? m.text) : withImages(m.text, m.images ?? [])) : m.text,
           }))
         const onRules = rules.filter((r) => rulesOn.has(r.path))
-        const apiMessages = buildMessages({ system: systemPrompt(onRules, settings.outputPrompt), history, text, files })
+        const images = attachments.map((a) => ({ name: a.name, url: a.url }))
+        const apiMessages = buildMessages({
+          system: systemPrompt(onRules, settings.outputPrompt),
+          history,
+          text,
+          files,
+          attachments: images,
+        })
         const sent = apiMessages[apiMessages.length - 1].content
+        setAttachments([])
 
         const time = now()
         const aiId = newId('a')
@@ -522,6 +570,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             role: 'user',
             text,
             sent,
+            images,
             time,
             meta: `${totals.files} files · ${totals.rules} rules · ${full ? 'full context' : 'new message only'}`,
           },
@@ -574,6 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               exists: (p) => !!findNode(tree, p),
               original: (p) => (folder ? contents.current.get(p) : sample.fileContents[p]),
               changedOnDisk: (p) => stale.has(p),
+              readOnly: (p) => referenceOnly.current.has(p),
             })
 
         const priced = dep.inPrice > 0 || dep.outPrice > 0
@@ -600,7 +650,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (proposed.length) setInclude(includeFor(proposed))
       })()
     },
-    [project, settings, deployment, contextMode, messages, selected, rules, rulesOn, totals, stale, tree, updateMessage, addNote],
+    [project, settings, deployment, contextMode, messages, attachments, selected, rules, rulesOn, totals, stale, tree, updateMessage, addNote],
   )
 
   // ---------------------------------------------------------------- apply
@@ -730,6 +780,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setDeployment,
       setContextMode,
       send,
+      addAttachments: async (files) => {
+        const errors: string[] = []
+        for (const f of files) {
+          try {
+            const a = await toAttachment(f, newId('img'))
+            setAttachments((list) => [...list, a])
+          } catch (err) {
+            errors.push(errorText(err, `${f.name}: could not read the picture.`))
+          }
+        }
+        return errors.length ? errors.join(' ') : null
+      },
+      removeAttachment: (id) => setAttachments((list) => list.filter((a) => a.id !== id)),
       stop: () => abortRef.current?.abort(),
       refreshHealth: () => void refreshHealth(),
 
@@ -787,6 +850,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     contextMode,
     messages,
     streaming,
+    attachments,
     previewTabs,
     activeTab,
     centerView,

@@ -52,11 +52,12 @@ export function parseMarkdown(src: string): Block[] {
       filePath = undefined
     } else if (file) {
       flushPara()
-      filePath = file[1].trim()
+      // Strip a trailing note such as "(condensed reference, read-only…)".
+      filePath = file[1].trim().replace(/\s+\(.*\)$/, '')
       blocks.push({ kind: 'file', path: filePath })
     } else if (del) {
       flushPara()
-      blocks.push({ kind: 'delete', path: del[1].trim() })
+      blocks.push({ kind: 'delete', path: del[1].trim().replace(/\s+\(.*\)$/, '') })
     } else if (/^\s*[-*] /.test(line)) {
       flushPara()
       const items: { status?: 'A' | 'M' | 'D'; inline: Inline[] }[] = []

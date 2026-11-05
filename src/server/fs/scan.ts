@@ -5,6 +5,8 @@ import { open, readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import ignore, { type Ignore } from 'ignore'
 import picomatch from 'picomatch'
+import { condense, CONDENSE_MIN_BYTES, isCondensable } from './condense.ts'
+import { IMAGE_EXT, MAX_IMAGE_BYTES } from './images.ts'
 import { normalizeInputPath, PathError, toRel } from './paths.ts'
 
 export interface ScanOptions {
@@ -23,7 +25,14 @@ export interface ScanNode {
   children?: ScanNode[]
   excluded?: string
   mtimeMs?: number
+  /** Sent to the model as a picture, not as text. */
+  image?: boolean
+  /** Large HTML/SVG sent condensed: `tokens` is the condensed size; this is the original. */
+  condensedFrom?: number
 }
+
+/** Tokens a picture costs at high detail (OpenAI/Azure vision); used when dimensions are unknown. */
+export const IMAGE_TOKENS_ESTIMATE = 765
 
 export interface RuleFile {
   path: string
@@ -43,6 +52,8 @@ export interface ScanResult {
   truncated: boolean
 }
 
+/** Larger HTML/SVG files aren't condensed during the scan (same cap as reading). */
+const MAX_CONDENSE_BYTES = 2 * 1024 * 1024
 /** Stop listing after this many entries, so a huge folder can't hang the app. */
 const MAX_ENTRIES = 20000
 /** Never listed or traversed: VCS internals and Contextual's own backups. */
@@ -211,17 +222,36 @@ export async function scanProject(input: string, opts: ScanOptions): Promise<Sca
         continue
       }
       let excluded = exclusionFor(rel, e.name, false)
-      if (!excluded && info.size > maxBytes) excluded = `too large (${Math.round(info.size / 1024)} KB)`
-      if (!excluded && opts.skipBinary && (BINARY_EXT.test(e.name) || (await looksBinary(abs).catch(() => true))))
+      const image = IMAGE_EXT.test(e.name)
+      let tokens = image ? IMAGE_TOKENS_ESTIMATE : estimateTokens(info.size)
+      let condensedFrom: number | undefined
+
+      // Large HTML/SVG: measure the condensed copy, which is what gets sent.
+      if (!excluded && !image && isCondensable(e.name) && info.size >= CONDENSE_MIN_BYTES && info.size <= MAX_CONDENSE_BYTES) {
+        try {
+          const small = condense(await readFile(abs, 'utf8'))
+          condensedFrom = tokens
+          tokens = estimateTokens(Buffer.byteLength(small))
+        } catch {
+          // Unreadable: fall back to the raw size.
+        }
+      }
+
+      const sentBytes = condensedFrom ? tokens * 4 : info.size
+      if (!excluded && image && info.size > MAX_IMAGE_BYTES) excluded = `too large (${Math.round(info.size / 1024)} KB)`
+      if (!excluded && !image && sentBytes > maxBytes) excluded = `too large (${Math.round(info.size / 1024)} KB)`
+      if (!excluded && !image && opts.skipBinary && (BINARY_EXT.test(e.name) || (await looksBinary(abs).catch(() => true))))
         excluded = 'binary'
       if (!excluded) files++
       out.push({
         name: e.name,
         path: rel,
         kind: 'file',
-        tokens: estimateTokens(info.size),
+        tokens,
         excluded,
         mtimeMs: Math.round(info.mtimeMs),
+        ...(image && { image: true }),
+        ...(condensedFrom && { condensedFrom }),
       })
     }
     return out

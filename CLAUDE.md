@@ -19,7 +19,8 @@ proposed changes. The model never writes to disk; applying is an explicit user a
   - `state/` — `AppProvider` holds all UI state; components read it with `useApp()`.
   - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds the messages (rules +
     output format as system prompt, history, context files); `lib/changes.ts` turns a reply's
-    `### FILE:` / `### DELETE:` blocks into the Changes panel.
+    `### FILE:` / `### DELETE:` blocks into the Changes panel; `lib/images.ts` reads pasted/dropped
+    pictures (scaled to 2048px, vision token estimate). Settings are saved in localStorage.
   - `data/sample.ts` — the Inventory.Api sample project from the design system, opened from
     the Welcome screen ("sample"). Real folders come from `src/server/fs` via `/api/project/*`.
   - `#open=<path>` opens a folder directly. Sample deep links for reviewing design states:

@@ -44,6 +44,19 @@ function UserMessage({ msg }: { msg: ChatMessage }) {
         <p>
           <InlineText inline={parseInline(msg.text)} />
         </p>
+        {!!msg.images?.length && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {msg.images.map((img, i) => (
+              <a key={i} href={img.url} target="_blank" rel="noreferrer" title={img.name}>
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  className="h-24 w-auto max-w-[240px] rounded-md border border-border object-cover"
+                />
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

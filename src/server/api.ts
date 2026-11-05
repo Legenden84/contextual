@@ -12,7 +12,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AzureOpenAI } from 'openai'
 import { readFoundryConfig, type ConfigResult, type FoundryConfig } from './config.ts'
-import { createFoundryClient, describeError, streamChat, testConnection, type ChatMessage } from './foundry.ts'
+import { createFoundryClient, describeError, streamChat, testConnection, type ChatMessage, type ContentPart } from './foundry.ts'
 import { listDirs } from './fs/browse.ts'
 import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
 import { PathError } from './fs/paths.ts'
@@ -21,7 +21,8 @@ import { scanProject, type ScanOptions } from './fs/scan.ts'
 type Env = Record<string, string | undefined>
 type Next = (err?: unknown) => void
 
-const MAX_BODY_BYTES = 8 * 1024 * 1024
+/** Chat requests can carry several pictures as base64 (up to 20 MB each at Azure's limit). */
+const MAX_BODY_BYTES = 64 * 1024 * 1024
 const ROLES = new Set(['system', 'user', 'assistant'])
 
 class HttpError extends Error {
@@ -68,11 +69,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 function parseMessages(body: unknown): ChatMessage[] {
   const list = (body as { messages?: unknown })?.messages
   if (!Array.isArray(list) || list.length === 0) throw new HttpError(400, '`messages` must be a non-empty array.')
-  return list.map((m, i) => {
+  return list.map((m, i): ChatMessage => {
     const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
-    if (typeof role !== 'string' || !ROLES.has(role) || typeof content !== 'string')
-      throw new HttpError(400, `messages[${i}] needs a role (system, user, assistant) and string content.`)
-    return { role: role as ChatMessage['role'], content }
+    if (typeof role !== 'string' || !ROLES.has(role))
+      throw new HttpError(400, `messages[${i}] needs a role (system, user, assistant).`)
+    if (typeof content === 'string') return { role: role as 'user', content }
+    if (role === 'user' && Array.isArray(content) && content.length)
+      return { role: 'user', content: content.map((p, j) => contentPart(p, `messages[${i}].content[${j}]`)) }
+    throw new HttpError(400, `messages[${i}] needs string content (or text and image parts for user messages).`)
   })
 }
 
@@ -120,6 +124,16 @@ async function readObject(req: IncomingMessage): Promise<Record<string, unknown>
   const body = await readJson(req)
   if (!isObj(body)) throw new HttpError(400, 'Request body must be a JSON object.')
   return body
+}
+
+function contentPart(p: unknown, where: string): ContentPart {
+  if (isObj(p) && p.type === 'text' && typeof p.text === 'string') return { type: 'text', text: p.text }
+  if (isObj(p) && p.type === 'image_url' && isObj(p.image_url) && typeof p.image_url.url === 'string') {
+    const url = p.image_url.url
+    if (!/^data:image\/(png|jpeg|gif|webp);base64,/.test(url)) throw new HttpError(400, `${where}: images must be PNG, JPEG, GIF or WebP data URLs.`)
+    return { type: 'image_url', image_url: { url, detail: 'high' } }
+  }
+  throw new HttpError(400, `${where} must be a text or image_url part.`)
 }
 
 function publicConfig(result: ConfigResult) {
@@ -201,7 +215,8 @@ export function createApi(getEnv: () => Env) {
 
       if (route === 'POST /api/project/read') {
         const body = await readObject(req)
-        return sendJson(res, 200, { files: await readFiles(str(body, 'root'), strList(body, 'paths', 5000)) })
+        const files = await readFiles(str(body, 'root'), strList(body, 'paths', 5000), { condense: body.condense === true })
+        return sendJson(res, 200, { files })
       }
 
       if (route === 'POST /api/project/apply') {

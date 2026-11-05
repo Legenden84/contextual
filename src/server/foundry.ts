@@ -5,10 +5,13 @@ import type { FoundryConfig } from './config.ts'
 
 export type ChatRole = 'system' | 'user' | 'assistant'
 
-export interface ChatMessage {
-  role: ChatRole
-  content: string
-}
+/** Text, or text and pictures (user messages only). */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+
+export type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'assistant'; content: string }
+  | { role: 'user'; content: string | ContentPart[] }
 
 /** Events streamed to the browser, one JSON object per line. */
 export type ChatEvent =

@@ -41,7 +41,8 @@ export function CodePreview({ path }: { path: string }) {
         ))}
         <span className="flex-1" />
         <span>
-          {LANG_LABEL[lang]} · UTF-8 · ~{fmtN(node?.tokens ?? 0)} tokens · {selected.has(path) ? 'in context' : 'not in context'}
+          {node?.image ? 'Picture' : `${LANG_LABEL[lang]} · UTF-8`} · ~{fmtN(node?.tokens ?? 0)} tokens
+          {node?.condensedFrom ? ` (condensed from ~${fmtN(node.condensedFrom)})` : ''} · {selected.has(path) ? 'in context' : 'not in context'}
         </span>
         <Button variant="ghost" size="xs" icon="copy" disabled={content == null} onClick={() => content != null && copy(content)}>
           {copied ? 'Copied' : 'Copy'}
@@ -50,7 +51,11 @@ export function CodePreview({ path }: { path: string }) {
           Wrap lines
         </Button>
       </div>
-      {content != null ? (
+      {file?.image ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface-100 p-6">
+          <img src={file.image} alt={path} className="max-h-full max-w-full rounded-md border border-border" />
+        </div>
+      ) : content != null ? (
         <CodeView
           code={content}
           path={path}

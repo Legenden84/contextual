@@ -177,8 +177,8 @@ function FoundrySection({ s, update }: { s: Settings; update: (p: Partial<Settin
             ? 'The deployment comes from AZURE_OPENAI_DEPLOYMENT. '
             : 'Showing sample deployments until the server is configured. '}
           The context limit drives the context bar (amber at 75%, red at 95%).
-          {health && !health.contextLimit && ' AZURE_OPENAI_CONTEXT_LIMIT is not set, so 128,000 is assumed.'} Edits here
-          last for this session.
+          {health && !health.contextLimit && ' AZURE_OPENAI_CONTEXT_LIMIT is not set, so 128,000 is assumed.'} Settings
+          are saved in this browser.
         </p>
       </Field>
     </Section>

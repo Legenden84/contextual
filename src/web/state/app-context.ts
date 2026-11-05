@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { Change, Deployment, Rule, TreeNode } from '@/data/sample'
-import type { FileContent, Health } from '@/lib/api'
+import type { ApiContent, FileContent, Health } from '@/lib/api'
+import type { Attachment } from '@/lib/images'
 
 export type Screen = 'welcome' | 'workspace' | 'settings'
 export type Theme = 'dark' | 'light'
@@ -21,8 +22,10 @@ export interface ChatMessage {
   changes?: Change[]
   /** Assistant: still receiving text. */
   streaming?: boolean
-  /** User: the content actually sent, including any context block. */
-  sent?: string
+  /** User: the content actually sent, including any context block and pictures. */
+  sent?: ApiContent
+  /** User: pictures attached to the message. */
+  images?: { name: string; url: string }[]
   /** Note: colour of the notice. */
   tone?: 'warn' | 'error'
 }
@@ -119,6 +122,8 @@ export interface AppState {
   contextMode: ContextMode
   messages: ChatMessage[]
   streaming: boolean
+  /** Pictures waiting to be sent with the next message. */
+  attachments: Attachment[]
 
   previewTabs: string[]
   activeTab: 'chat' | string
@@ -166,6 +171,9 @@ export interface AppActions {
   setDeployment(i: number): void
   setContextMode(m: ContextMode): void
   send(text: string): void
+  /** Adds pasted/dropped/picked pictures. Resolves to an error message, or null. */
+  addAttachments(files: File[]): Promise<string | null>
+  removeAttachment(id: string): void
   stop(): void
   refreshHealth(): void
 

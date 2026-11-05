@@ -11,6 +11,8 @@ export interface ChangeContext {
   original: (path: string) => string | undefined
   /** Has the file changed on disk since it was loaded into context? */
   changedOnDisk: (path: string) => boolean
+  /** Sent only as a condensed reference: never offered for apply. */
+  readOnly?: (path: string) => boolean
 }
 
 const CONFLICT = 'Changed on disk after it was sent. The proposal was made against the older version.'
@@ -18,6 +20,7 @@ const CONFLICT = 'Changed on disk after it was sent. The proposal was made again
 export function parseChanges(response: string, ctx: ChangeContext): Change[] {
   const byPath = new Map<string, Change>()
   for (const b of parseMarkdown(response)) {
+    if ((b.kind === 'code' || b.kind === 'delete') && b.path && ctx.readOnly?.(b.path)) continue
     if (b.kind === 'code' && b.path) {
       const old = ctx.original(b.path) ?? ''
       byPath.set(b.path, {

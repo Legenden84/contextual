@@ -17,6 +17,10 @@ export interface TreeNode {
   changedOnDisk?: boolean
   /** Last modified time from the scan, for real folders. */
   mtimeMs?: number
+  /** Sent to the model as a picture. */
+  image?: boolean
+  /** Large HTML/SVG sent condensed: `tokens` is the condensed size, this the original. */
+  condensedFrom?: number
 }
 
 export interface Rule {

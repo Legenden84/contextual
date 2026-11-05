@@ -129,6 +129,13 @@ const PATHS = {
       <path d="M4.5 5v6M11.5 7c0 3-7 2-7 4" />
     </>
   ),
+  image: (
+    <>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <circle cx="5.5" cy="6" r="1.2" />
+      <path d="M14.5 10.5l-3.5-3.5-6.5 6.5" />
+    </>
+  ),
   sun: (
     <>
       <circle cx="8" cy="8" r="3" />

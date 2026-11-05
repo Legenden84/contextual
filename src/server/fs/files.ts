@@ -7,14 +7,25 @@ import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { condense, CONDENSE_MIN_BYTES, isCondensable } from './condense.ts'
+import { IMAGE_EXT, imageMime, MAX_IMAGE_BYTES } from './images.ts'
 import { normalizeInputPath, PathError, resolveInside, resolveInsideReal } from './paths.ts'
 
 export interface FileContent {
   path: string
   /** Text with LF line endings and no BOM; saving restores the file's own format. */
   content?: string
+  /** For image files: a data URL to send as a picture. */
+  image?: string
+  /** The content is a condensed copy (original size in bytes); send it as a read-only reference. */
+  condensedFrom?: number
   mtimeMs?: number
   error?: string
+}
+
+export interface ReadOptions {
+  /** Condense large HTML/SVG (for sending to the model; previews want the real file). */
+  condense?: boolean
 }
 
 /** Largest file sent as context or shown in a preview. */
@@ -56,7 +67,7 @@ const NEW_FILE_FORMAT: TextFormat = { eol: '\n', bom: false, finalNewline: true 
 
 const sha = (s: string) => createHash('sha1').update(s).digest('hex')
 
-export async function readFiles(rootInput: string, paths: string[]): Promise<FileContent[]> {
+export async function readFiles(rootInput: string, paths: string[], opts: ReadOptions = {}): Promise<FileContent[]> {
   const root = normalizeInputPath(rootInput)
   return Promise.all(
     paths.map(async (rel): Promise<FileContent> => {
@@ -64,10 +75,19 @@ export async function readFiles(rootInput: string, paths: string[]): Promise<Fil
         const abs = await resolveInsideReal(root, rel)
         const info = await stat(abs)
         if (!info.isFile()) return { path: rel, error: 'not a file' }
+        const mtimeMs = Math.round(info.mtimeMs)
+        if (IMAGE_EXT.test(rel)) {
+          if (info.size > MAX_IMAGE_BYTES) return { path: rel, error: `too large (${Math.round(info.size / 1024)} KB)` }
+          const data = (await readFile(abs)).toString('base64')
+          return { path: rel, image: `data:${imageMime(rel)};base64,${data}`, mtimeMs }
+        }
         if (info.size > MAX_READ_BYTES) return { path: rel, error: `too large (${Math.round(info.size / 1024)} KB)` }
         const buf = await readFile(abs)
         if (buf.subarray(0, 8000).includes(0)) return { path: rel, error: 'binary' }
-        return { path: rel, content: decode(buf.toString('utf8')).text, mtimeMs: Math.round(info.mtimeMs) }
+        const text = decode(buf.toString('utf8')).text
+        if (opts.condense && isCondensable(rel) && info.size >= CONDENSE_MIN_BYTES)
+          return { path: rel, content: condense(text), condensedFrom: info.size, mtimeMs }
+        return { path: rel, content: text, mtimeMs }
       } catch (err) {
         if (err instanceof PathError) return { path: rel, error: err.message }
         return { path: rel, error: 'not found' }

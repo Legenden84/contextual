@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/Switch'
 import { Tag } from '@/components/ui/Tag'
 import { TextInput } from '@/components/ui/TextInput'
 import { fmtK } from '@/lib/format'
-import { checkState, filterTree, nodeStats, sortNodes } from '@/lib/tree'
+import { checkState, filterTree, isOverridable, nodeStats, sortNodes } from '@/lib/tree'
 import { cn } from '@/lib/utils'
 import { useApp } from '@/state/app-context'
 
@@ -22,8 +22,11 @@ function TreeRow({ node, depth, forceOpen }: { node: TreeNode; depth: number; fo
   const state = checkState(node, app.selected)
   const fileSelected = !isDir && app.selected.has(node.path)
   const active = !isDir && app.centerView === 'chat' && app.activeTab === node.path
+  // Too large for the size limit, but can be ticked on its own.
+  const optIn = isOverridable(node)
+  const blocked = !!node.excluded && !optIn
 
-  const tokens = node.excluded ? '' : isDir ? (stats.selectedTokens ? fmtK(stats.selectedTokens) : '') : fmtK(node.tokens ?? 0)
+  const tokens = blocked ? '' : isDir ? (stats.selectedTokens ? fmtK(stats.selectedTokens) : '') : fmtK(node.tokens ?? 0)
   const tokenTone =
     (isDir && stats.selectedTokens) || fileSelected
       ? fileSelected && (node.tokens ?? 0) > BIG_FILE
@@ -33,7 +36,7 @@ function TreeRow({ node, depth, forceOpen }: { node: TreeNode; depth: number; fo
 
   const onRowClick = () => {
     if (isDir) app.toggleOpen(node.path)
-    else if (!node.excluded) app.openPreview(node.path)
+    else if (!blocked) app.openPreview(node.path)
   }
 
   return (
@@ -47,7 +50,7 @@ function TreeRow({ node, depth, forceOpen }: { node: TreeNode; depth: number; fo
         style={{ paddingLeft: 6 + depth * 12 }}
         className={cn(
           'group relative flex h-row cursor-default items-center gap-[5px] pr-3 text-ui-body whitespace-nowrap text-ink hover:bg-surface-hover',
-          node.excluded && 'text-ink-faint',
+          (blocked || (optIn && !fileSelected)) && 'text-ink-faint',
           active && 'bg-surface-selected shadow-[inset_0_0_0_1px_var(--focus-ring)] hover:bg-surface-selected',
         )}
       >
@@ -62,14 +65,14 @@ function TreeRow({ node, depth, forceOpen }: { node: TreeNode; depth: number; fo
         </span>
         <Checkbox
           state={state}
-          disabled={!!node.excluded}
-          label={`Include ${node.name}`}
+          disabled={blocked}
+          label={optIn ? `Include ${node.name} anyway (over the size limit)` : `Include ${node.name}`}
           onChange={() => (isDir ? app.toggleFolder(node) : app.toggleFile(node.path))}
         />
         {isDir ? (
           <FolderGlyph open={open} className={cn(node.excluded && 'opacity-45')} />
         ) : (
-          <FileGlyph name={node.name} className={cn(node.excluded && 'opacity-45')} />
+          <FileGlyph name={node.name} className={cn(blocked && 'opacity-45')} />
         )}
         <span className="truncate">{node.name}</span>
         {node.changedOnDisk && (
@@ -77,9 +80,24 @@ function TreeRow({ node, depth, forceOpen }: { node: TreeNode; depth: number; fo
             <Icon name="refresh" className="size-3" />
           </span>
         )}
-        {node.excluded && <Tag tone="excluded">excluded</Tag>}
+        {node.image && !blocked && (
+          <span className="inline-flex text-ink-muted" title="Sent to the model as a picture">
+            <Icon name="eye" className="size-3" />
+          </span>
+        )}
+        {node.condensedFrom && (
+          <Tag title={`Sent condensed: embedded images, fonts and minified code are left out (~${fmtK(node.condensedFrom)} tokens in full). Read-only for the model.`}>
+            condensed
+          </Tag>
+        )}
+        {blocked && <Tag tone="excluded">excluded</Tag>}
+        {optIn && (
+          <Tag tone="warn" title={`${node.excluded}. Over Max file size in Settings; tick to include anyway.`}>
+            too large
+          </Tag>
+        )}
         <span className="flex-1" />
-        {node.excluded && (
+        {blocked && (
           <span className="pointer-events-none absolute -top-[26px] right-16 z-3 hidden rounded-sm border border-border-strong bg-surface-300 px-2 py-0.5 text-[11px] text-ink shadow-popover group-hover:block">
             {node.excluded}
           </span>

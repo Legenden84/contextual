@@ -15,9 +15,14 @@ export type Health =
 
 export type ChatRole = 'system' | 'user' | 'assistant'
 
+export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'high' } }
+
+/** Text, or (user messages) text and pictures. */
+export type ApiContent = string | ContentPart[]
+
 export interface ApiMessage {
   role: ChatRole
-  content: string
+  content: ApiContent
 }
 
 export type ChatEvent =
@@ -104,6 +109,8 @@ export interface ScanNode {
   children?: ScanNode[]
   excluded?: string
   mtimeMs?: number
+  image?: boolean
+  condensedFrom?: number
 }
 
 export interface ScanResult {
@@ -119,6 +126,10 @@ export interface ScanResult {
 export interface FileContent {
   path: string
   content?: string
+  /** Image files: a data URL to send as a picture. */
+  image?: string
+  /** Content is a condensed copy of a large HTML/SVG file (original size in bytes). */
+  condensedFrom?: number
   mtimeMs?: number
   error?: string
 }
@@ -152,8 +163,9 @@ export async function listDirs(path: string | null, hidden: boolean): Promise<Di
 
 export const scanProject = (root: string, options: ScanOptions) => postJson<ScanResult>('/api/project/scan', { root, options })
 
-export const readFiles = (root: string, paths: string[]) =>
-  postJson<{ files: FileContent[] }>('/api/project/read', { root, paths }).then((r) => r.files)
+/** With `condense`, large HTML/SVG come back condensed (for sending); previews want the real file. */
+export const readFiles = (root: string, paths: string[], condense = false) =>
+  postJson<{ files: FileContent[] }>('/api/project/read', { root, paths, condense }).then((r) => r.files)
 
 export const applyChanges = (root: string, changes: ApplyChange[], backup: boolean) =>
   postJson<ApplyResult>('/api/project/apply', { root, changes, backup })

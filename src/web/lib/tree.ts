@@ -11,7 +11,15 @@ export interface NodeStats {
   selectedTokens: number
 }
 
+/** Excluded only for size: can still be ticked on its own ("Include anyway"). */
+export const isOverridable = (n: TreeNode) => n.kind === 'file' && !!n.excluded && n.excluded.startsWith('too large')
+
 export function nodeStats(node: TreeNode, selected: ReadonlySet<string>): NodeStats {
+  if (isOverridable(node)) {
+    // Counted only once ticked, so it never makes a folder look partly selected on its own.
+    const on = selected.has(node.path)
+    return { files: on ? 1 : 0, selected: on ? 1 : 0, selectedTokens: on ? (node.tokens ?? 0) : 0 }
+  }
   if (node.excluded) return { files: 0, selected: 0, selectedTokens: 0 }
   if (node.kind === 'file') {
     const on = selected.has(node.path)
@@ -28,13 +36,25 @@ export function nodeStats(node: TreeNode, selected: ReadonlySet<string>): NodeSt
 }
 
 export function checkState(node: TreeNode, selected: ReadonlySet<string>): CheckState {
+  if (isOverridable(node)) return selected.has(node.path) ? 'on' : 'off'
   if (node.excluded) return 'off'
   const s = nodeStats(node, selected)
   if (s.selected === 0) return 'off'
   return s.selected === s.files ? 'on' : 'mixed'
 }
 
-/** All selectable file paths at or below the given nodes. */
+/** Files that can be ticked at all: selectable ones plus too-large ones (opt-in). */
+export function pickableFiles(nodes: TreeNode[]): Set<string> {
+  const out = new Set<string>()
+  const walk = (n: TreeNode) => {
+    if (n.kind === 'file' && (!n.excluded || isOverridable(n))) out.add(n.path)
+    else if (!n.excluded) n.children?.forEach(walk)
+  }
+  nodes.forEach(walk)
+  return out
+}
+
+/** All selectable file paths at or below the given nodes (not including too-large opt-ins). */
 export function selectableFiles(nodes: TreeNode[]): string[] {
   const out: string[] = []
   const walk = (n: TreeNode) => {
