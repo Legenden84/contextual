@@ -1,5 +1,5 @@
 import { Icon } from '@/components/ui/Icon'
-import { EST_OUTPUT_TOKENS } from '@/data/sample'
+import { EST_OUTPUT_TOKENS } from '@/data/defaults'
 import { fmtK, fmtN } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useApp } from '@/state/app-context'

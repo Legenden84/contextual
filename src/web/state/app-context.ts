@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Change, Deployment, Rule, TreeNode } from '@/data/sample'
+import type { Change, Deployment, Rule, TreeNode } from '@/data/types'
 import type { ApiContent, ApiKind, ApiMessage, FileContent, Health, ThreadSummary } from '@/lib/api'
 import type { Attachment } from '@/lib/images'
 
@@ -54,9 +54,8 @@ export interface ToastState {
   backupId?: string
 }
 
-/** The opened project: the built-in sample, or a folder on this machine. */
+/** The opened project: a folder on this machine. */
 export interface Project {
-  kind: 'sample' | 'folder'
   name: string
   /** Absolute path on the machine the server runs on. */
   root: string
@@ -169,7 +168,6 @@ export interface AppActions {
   closeFolderDialog(): void
   /** Scans and opens a folder. Resolves to an error message, or null on success. */
   openFolder(path: string): Promise<string | null>
-  openSample(): void
   clearRecents(): void
   rescan(): void
   /** Contents of a project file (cached after the first read). */

@@ -10,8 +10,6 @@ import { splitPath } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useApp, type DiffMode } from '@/state/app-context'
 
-/** Sample response: the new command and the deletion start folded, as in the design. */
-const START_COLLAPSED = new Set([1, 2, 4])
 
 /** Full-width diff for one response, replacing the chat and Changes columns. */
 export function DiffScreen() {
@@ -106,7 +104,7 @@ export function DiffScreen() {
               onToggleInclude={() => toggleInclude(c.path)}
               mode={diffMode}
               defaultCollapsed={
-                diffFocus ? c.path !== diffFocus : response?.id === 'a1' ? START_COLLAPSED.has(i) : changes.length > 3 && i > 0
+                diffFocus ? c.path !== diffFocus : changes.length > 3 && i > 0
               }
               expandAll={expandAll}
             />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as sample from '@/data/sample'
-import type { Change, Rule, TreeNode } from '@/data/sample'
+import { defaultExclusions, EST_OUTPUT_TOKENS, outputPrompt, PLACEHOLDER_DEPLOYMENT, USER_MESSAGE_TOKENS } from '@/data/defaults'
+import type { Change, Rule, TreeNode } from '@/data/types'
 import * as api from '@/lib/api'
 import { parseChanges } from '@/lib/changes'
 import { estimateTokens, fmtK } from '@/lib/format'
@@ -68,16 +68,6 @@ function now(): string {
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
 
-/** With "Respect .gitignore" off, files excluded only by .gitignore become selectable (sample only; folders rescan). */
-function applyGitignore(nodes: TreeNode[], respect: boolean): TreeNode[] {
-  if (respect) return nodes
-  return nodes.map((n) => ({
-    ...n,
-    excluded: n.excluded === '.gitignore' ? undefined : n.excluded,
-    children: n.children && applyGitignore(n.children, respect),
-  }))
-}
-
 function withStale(nodes: TreeNode[], stale: ReadonlySet<string>): TreeNode[] {
   return nodes.map((n) => ({
     ...n,
@@ -97,14 +87,14 @@ function fileMtimes(nodes: TreeNode[], out = new Map<string, number>()): Map<str
 const includeFor = (changes: Change[]) => Object.fromEntries(changes.map((c) => [c.path, !c.conflict]))
 
 const initialSettings: Settings = {
-  deployments: sample.deployments,
+  deployments: [PLACEHOLDER_DEPLOYMENT],
   defaultDeployment: 0,
-  exclusions: sample.defaultExclusions,
+  exclusions: defaultExclusions,
   maxFileSizeKb: 256,
   respectGitignore: true,
   skipBinary: true,
   includeHidden: false,
-  outputPrompt: sample.outputPrompt,
+  outputPrompt,
 }
 
 /** Settings saved in this browser, merged over the defaults (unknown or mistyped fields are ignored). */
@@ -116,32 +106,10 @@ function readSettings(): Settings {
     if (typeof saved.maxFileSizeKb === 'number' && saved.maxFileSizeKb > 0) s.maxFileSizeKb = saved.maxFileSizeKb
     for (const k of ['respectGitignore', 'skipBinary', 'includeHidden'] as const) if (typeof saved[k] === 'boolean') s[k] = saved[k]
     if (typeof saved.outputPrompt === 'string' && saved.outputPrompt.trim()) s.outputPrompt = saved.outputPrompt
-    if (Array.isArray(saved.deployments) && saved.deployments.length) s.deployments = saved.deployments
     return s
   } catch {
     return initialSettings
   }
-}
-
-const sampleMessages: ChatMessage[] = [
-  { id: 'u1', role: 'user', text: sample.userPrompt, time: '14:31', meta: '12 files · 3 rules · full context' },
-  {
-    id: 'a1',
-    role: 'assistant',
-    text: sample.assistantResponse,
-    time: '14:32',
-    model: 'gpt-4.1',
-    meta: '18.4k in / 2.1k out · $0.054',
-    changes: sample.changes,
-  },
-]
-
-const sampleProject: Project = {
-  kind: 'sample',
-  name: sample.project.name,
-  root: sample.project.path,
-  branch: sample.project.branch,
-  truncated: false,
 }
 
 let nextId = 0
@@ -220,7 +188,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [settings, setSettings] = useState<Settings>(readSettings)
 
-  useEffect(() => writePref(SETTINGS_KEY, JSON.stringify(settings)), [settings])
+  useEffect(() => {
+    const { deployments: _fromServer, defaultDeployment: _default, ...saved } = settings
+    void _fromServer
+    void _default
+    writePref(SETTINGS_KEY, JSON.stringify(saved))
+  }, [settings])
 
   useEffect(() => {
     const root = document.documentElement
@@ -285,29 +258,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setToast(null)
   }, [])
 
-  const loadSample = useCallback(() => {
-    resetWorkspace()
-    setProject(sampleProject)
-    setRawTree(sample.tree)
-    setSelected(new Set(sample.initialSelection))
-    setOpen(new Set(sample.initialOpen))
-    setStale(new Set(['src/Inventory.Api/Endpoints/OrderEndpoints.cs']))
-    setRules(sample.rules)
-    setRulesOn(new Set(sample.initialRulesOn))
-    setMessages(sampleMessages)
-    setThread({
-      ...freshThread(),
-      transcript: [
-        { role: 'user', content: sample.userPrompt },
-        { role: 'assistant', content: sample.assistantResponse },
-      ],
-    })
-    setThreads([])
-    setPreviewTabs(['src/Inventory.Domain/Orders/Order.cs'])
-    setInclude(includeFor(sample.changes))
-    setScreen('workspace')
-  }, [resetWorkspace])
-
   const scanOptions = useMemo<api.ScanOptions>(
     () => ({
       exclusions: settings.exclusions,
@@ -348,7 +298,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const r = await api.scanProject(path, scanOptions)
         lastScanKey.current = JSON.stringify(scanOptions)
         resetWorkspace()
-        setProject({ kind: 'folder', name: r.name, root: r.root, branch: r.branch, truncated: r.truncated })
+        setProject({ name: r.name, root: r.root, branch: r.branch, truncated: r.truncated })
         setRawTree(r.tree)
         setSelected(new Set())
         setOpen(new Set())
@@ -388,7 +338,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** Re-reads the open folder: new/removed files, exclusions, and files changed since they were sent. */
   const rescan = useCallback(async () => {
-    if (project?.kind !== 'folder') return
+    if (!project) return
     try {
       setScanning(true)
       const r = await api.scanProject(project.root, scanOptions)
@@ -417,7 +367,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Exclusion settings changed: rescan the open folder.
   useEffect(() => {
-    if (project?.kind !== 'folder' || scanKey === lastScanKey.current) return
+    if (!project || scanKey === lastScanKey.current) return
     const t = window.setTimeout(() => void rescan(), 400)
     return () => window.clearTimeout(t)
   }, [scanKey, project, rescan])
@@ -425,7 +375,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Coming back to the window: pick up files changed in the editor.
   const lastFocusScan = useRef(0)
   useEffect(() => {
-    if (project?.kind !== 'folder') return
+    if (!project) return
     const onFocus = () => {
       if (Date.now() - lastFocusScan.current < FOCUS_RESCAN_MS) return
       lastFocusScan.current = Date.now()
@@ -437,10 +387,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadFile = useCallback(
     async (path: string): Promise<api.FileContent> => {
-      if (project?.kind === 'sample') {
-        const content = sample.fileContents[path]
-        return content != null ? { path, content } : { path, error: 'The sample project has no contents for this file.' }
-      }
       if (!project) return { path, error: 'No project is open.' }
       const cached = contents.current.get(path)
       if (cached != null) return { path, content: cached }
@@ -466,39 +412,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })
   }, [openFolder])
 
-  // Deep links to the design-system states, for reviewing the mockup (sample project):
-  // #workspace #preview #heavy #diff #split #apply #applied #settings, plus #light.
-  useEffect(() => {
-    if (window.location.hash.startsWith('#open=')) return
-    const tags = new Set(window.location.hash.slice(1).split(/[,+]/).filter(Boolean))
-    if (!tags.size) return
-    if (tags.has('light')) setTheme('light')
-    if (![...tags].some((t) => t !== 'light')) return
-    loadSample()
-    if (tags.has('settings')) setScreen('settings')
-    if (tags.has('preview') || tags.has('heavy')) {
-      setActiveTab('src/Inventory.Domain/Orders/Order.cs')
-      setDeployment(1)
-      setRulesOn((s) => new Set(s).add('CLAUDE.md'))
-      setSelected((s) => {
-        const next = new Set(s)
-        for (const f of selectableFiles(sample.tree).filter((p) => p.startsWith('src/Inventory.Infrastructure/'))) next.add(f)
-        return next
-      })
-      setOpen((s) => new Set(s).add('src/Inventory.Infrastructure').add('src/Inventory.Infrastructure/Migrations'))
-    }
-    if (tags.has('diff') || tags.has('split')) setCenterView('diff')
-    if (tags.has('split')) setDiffModeState('split')
-    if (tags.has('apply')) setApplyOpen(true)
-    if (tags.has('applied'))
-      setToast({ title: '4 files written', detail: 'Backup saved · 1 deleted, 2 created, 1 overwritten', undoable: true })
-  }, [loadSample])
-
   // ---------------------------------------------------------------- derived state
 
   const tree = useMemo(
-    () => withStale(project?.kind === 'folder' ? rawTree : applyGitignore(rawTree, settings.respectGitignore), stale),
-    [project, rawTree, settings.respectGitignore, stale],
+    () => withStale(rawTree, stale),
+    [rawTree, stale],
   )
 
   // The Changes panel follows the latest response that proposed file changes.
@@ -535,13 +453,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let newFileTokens = 0
     for (const p of selected) if (resendAll || !thread.fileVersions[p] || stale.has(p)) newFileTokens += sizes.get(p) ?? 0
     const pictures = attachments.reduce((a, x) => a + x.tokens, 0)
-    const newTokens = newFileTokens + pictures + sample.USER_MESSAGE_TOKENS
+    const newTokens = newFileTokens + pictures + USER_MESSAGE_TOKENS
     const raw = ruleTokens + estimateTokens(settings.outputPrompt) + conversationTokens + newTokens
     const tokens = Math.round(raw / 100) * 100
     const dep = settings.deployments[deployment] ?? settings.deployments[0]
     const share = tokens / dep.limit
     const level = share >= 0.95 ? 'danger' : share >= 0.75 ? 'warn' : 'ok'
-    const cost = (tokens / 1e6) * dep.inPrice + (sample.EST_OUTPUT_TOKENS / 1e6) * dep.outPrice
+    const cost = (tokens / 1e6) * dep.inPrice + (EST_OUTPUT_TOKENS / 1e6) * dep.outPrice
     const big = level === 'ok' ? null : biggestFolder(tree, selected)
     return {
       files,
@@ -588,7 +506,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const ctrl = new AbortController()
       abortRef.current = ctrl
       const dep = settings.deployments[deployment] ?? settings.deployments[0]
-      const folder = project.kind === 'folder'
       const forceAll = resendAll
       const base = thread
 
@@ -596,23 +513,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Read the selected files now, so the model sees what is on disk at this moment.
         const paths = [...selected].sort()
         let read: api.FileContent[]
-        if (folder) {
-          try {
-            read = await api.readFiles(project.root, paths, true)
-          } catch (err) {
-            abortRef.current = null
-            addNote(`Not sent: could not read the selected files. ${errorText(err, '')}`, 'error')
-            return
-          }
-          for (const f of read) {
-            if (f.mtimeMs != null) sentMtimes.current.set(f.path, f.mtimeMs)
-            if (f.condensedFrom) referenceOnly.current.add(f.path)
-            else referenceOnly.current.delete(f.path)
-            // Keep only real contents as diff originals; condensed copies are references.
-            if (f.content != null && !f.condensedFrom) contents.current.set(f.path, f.content)
-          }
-          setStale((s) => new Set([...s].filter((p) => !paths.includes(p))))
-        } else read = paths.map((path) => ({ path, content: sample.fileContents[path] }))
+        try {
+          read = await api.readFiles(project.root, paths, true)
+        } catch (err) {
+          abortRef.current = null
+          addNote(`Not sent: could not read the selected files. ${errorText(err, '')}`, 'error')
+          return
+        }
+        for (const f of read) {
+          if (f.mtimeMs != null) sentMtimes.current.set(f.path, f.mtimeMs)
+          if (f.condensedFrom) referenceOnly.current.add(f.path)
+          else referenceOnly.current.delete(f.path)
+          // Keep only real contents as diff originals; condensed copies are references.
+          if (f.content != null && !f.condensedFrom) contents.current.set(f.path, f.content)
+        }
+        setStale((s) => new Set([...s].filter((p) => !paths.includes(p))))
 
         // Only files the model doesn't have yet (or that changed since) are attached.
         const versions = { ...base.fileVersions }
@@ -697,7 +612,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const touched = parseMarkdown(reply)
           .map((b) => (b.kind === 'code' ? b.path : b.kind === 'delete' ? b.path : undefined))
           .filter((p): p is string => !!p && !!findNode(tree, p))
-        const missing = folder ? touched.filter((p) => !contents.current.has(p)) : []
+        const missing = touched.filter((p) => !contents.current.has(p))
         if (missing.length) {
           try {
             for (const f of await api.readFiles(project.root, missing)) if (f.content != null) contents.current.set(f.path, f.content)
@@ -710,7 +625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? []
           : parseChanges(reply, {
               exists: (p) => !!findNode(tree, p),
-              original: (p) => (folder ? contents.current.get(p) : sample.fileContents[p]),
+              original: (p) => contents.current.get(p),
               changedOnDisk: (p) => stale.has(p),
               readOnly: (p) => referenceOnly.current.has(p),
             })
@@ -746,9 +661,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [project, settings, deployment, resendAll, thread, attachments, selected, rules, rulesOn, stale, tree, updateMessage, addNote],
   )
 
-  // Save the conversation after each completed turn (folders only; the sample isn't saved).
+  // Save the conversation after each completed turn.
   useEffect(() => {
-    if (project?.kind !== 'folder' || streaming || !thread.transcript.length) return
+    if (!project || streaming || !thread.transcript.length) return
     const root = project.root
     const t = window.setTimeout(() => {
       const title = messages.find((m) => m.role === 'user')?.text.slice(0, 80) ?? 'Conversation'
@@ -771,11 +686,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const parts = [count('D') && `${count('D')} deleted`, count('A') && `${count('A')} created`, count('M') && `${count('M')} overwritten`].filter(Boolean)
       const title = `${picked.length} ${picked.length === 1 ? 'file' : 'files'} saved`
 
-      if (project.kind === 'sample') {
-        setApplyOpen(false)
-        setToast({ title, detail: `Sample project, nothing written · ${parts.join(', ')}`, undoable: true })
-        return null
-      }
       try {
         const r = await api.applyChanges(
           project.root,
@@ -818,10 +728,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const undoApply = useCallback(() => {
-    if (project?.kind !== 'folder' || !toast?.backupId) {
-      setToast({ title: 'Changes undone', detail: 'Restored the previous versions', undoable: false })
-      return
-    }
+    if (!project || !toast?.backupId) return
     const id = toast.backupId
     api
       .undoApply(project.root, id)
@@ -840,7 +747,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openFolderDialog: () => setFolderDialogOpen(true),
       closeFolderDialog: () => setFolderDialogOpen(false),
       openFolder,
-      openSample: loadSample,
       clearRecents: () => {
         writePref(RECENTS_KEY, '[]')
         setRecents([])
@@ -907,7 +813,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setActiveTab('chat')
       },
       openThread: (id) => {
-        if (abortRef.current || project?.kind !== 'folder') return
+        if (abortRef.current || !project) return
         const root = project.root
         void api
           .loadThread<SavedThread>(root, id)
@@ -961,7 +867,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       updateSettings: (patch) => setSettings((s) => ({ ...s, ...patch })),
     }),
-    [openFolder, loadSample, rescan, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
+    [openFolder, rescan, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
   )
 
   const value: AppContextValue = {

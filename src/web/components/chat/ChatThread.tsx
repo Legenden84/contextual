@@ -166,7 +166,7 @@ function NoteMessage({ msg }: { msg: ChatMessage }) {
 export function ChatThread() {
   const { messages, totals, project } = useApp()
   const end = useRef<HTMLDivElement>(null)
-  // Messages present when the thread opened (the sample conversation) don't trigger scrolling.
+  // Messages present when the thread opened (a restored conversation) don't trigger scrolling.
   const [initialCount] = useState(messages.length)
   const last = messages[messages.length - 1]
   const follow = messages.length > initialCount ? `${messages.length}:${last?.text.length ?? 0}` : ''

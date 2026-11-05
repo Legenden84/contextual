@@ -1,4 +1,4 @@
-import type { ChangeStatus } from '@/data/sample'
+import type { ChangeStatus } from '@/data/types'
 import { cn } from '@/lib/utils'
 
 const LETTER_TONE: Record<ChangeStatus, string> = {

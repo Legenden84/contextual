@@ -3,7 +3,6 @@ import { Logo } from '@/components/shell/Logo'
 import { Button, LinkButton } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { FolderGlyph } from '@/components/ui/FileGlyph'
-import { Tag } from '@/components/ui/Tag'
 import { describeFoundry } from '@/lib/foundry-status'
 import { useApp } from '@/state/app-context'
 
@@ -31,7 +30,7 @@ const ROW = 'flex w-full cursor-pointer items-center gap-3 border-b border-borde
 
 /** Empty state: no project open. */
 export function WelcomeScreen() {
-  const { openFolderDialog, openFolder, openSample, openSettings, foundry, recents, clearRecents } = useApp()
+  const { openFolderDialog, openFolder, openSettings, foundry, recents, clearRecents } = useApp()
   const label = describeFoundry(foundry)
 
   useEffect(() => {
@@ -90,7 +89,12 @@ export function WelcomeScreen() {
 
           <div>
             <div className="mb-3 text-ui-caption text-ink-muted uppercase">Recent</div>
-            <div className="mb-3 overflow-hidden rounded-md border border-border">
+            {recents.length === 0 && (
+              <p className="mb-3 rounded-md border border-dashed border-border px-3 py-4 text-ui-small text-ink-muted">
+                Folders you open appear here.
+              </p>
+            )}
+            <div className={recents.length ? 'mb-3 overflow-hidden rounded-md border border-border' : 'hidden'}>
               {recents.map((r) => (
                 <button key={r.path} type="button" onClick={() => void openFolder(r.path)} className={ROW}>
                   <FolderGlyph open={false} />
@@ -101,14 +105,6 @@ export function WelcomeScreen() {
                   <span className="w-20 text-right text-ui-small text-ink-muted">{ago(r.openedAt)}</span>
                 </button>
               ))}
-              <button type="button" onClick={openSample} className={ROW}>
-                <FolderGlyph open={false} />
-                <span className="flex flex-1 flex-col leading-[18px]">
-                  <b className="font-medium text-ink-strong">Inventory.Api</b>
-                  <span className="text-ui-small text-ink-muted">Sample project from the design system</span>
-                </span>
-                <Tag>sample</Tag>
-              </button>
             </div>
             {recents.length > 0 && <LinkButton onClick={clearRecents}>Clear recent</LinkButton>}
           </div>

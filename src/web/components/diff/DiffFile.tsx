@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { Change } from '@/data/sample'
+import type { Change } from '@/data/types'
 import { Button, IconButton } from '@/components/ui/Button'
 import { Checkbox, CheckLabel } from '@/components/ui/Checkbox'
 import { Icon } from '@/components/ui/Icon'

@@ -35,7 +35,7 @@ export function ThreadMenu() {
       <Button variant="ghost" size="xs" icon="plus" disabled={streaming || !messages.length} onClick={newChat}>
         New chat
       </Button>
-      {project?.kind === 'folder' && (
+      {project && (
         <Button
           variant="ghost"
           size="xs"

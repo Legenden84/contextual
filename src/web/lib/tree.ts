@@ -1,4 +1,4 @@
-import type { TreeNode } from '@/data/sample'
+import type { TreeNode } from '@/data/types'
 
 export type CheckState = 'on' | 'off' | 'mixed'
 

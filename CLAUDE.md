@@ -23,11 +23,9 @@ proposed changes. The model never writes to disk; applying is an explicit user a
     and are saved per project through `/api/threads`; `lib/changes.ts` turns a reply's
     `### FILE:` / `### DELETE:` blocks into the Changes panel; `lib/images.ts` reads pasted/dropped
     pictures (scaled to 2048px, vision token estimate). Settings are saved in localStorage.
-  - `data/sample.ts` — the Inventory.Api sample project from the design system, opened from
-    the Welcome screen ("sample"). Real folders come from `src/server/fs` via `/api/project/*`.
-  - `#open=<path>` opens a folder directly. Sample deep links for reviewing design states:
-    `#workspace`, `#preview` (amber context bar), `#diff`, `#split`, `#apply`, `#applied`,
-    `#settings`; add `,light` for the light theme.
+  - `data/types.ts` — shared types; `data/defaults.ts` — output-format prompt, default exclusions,
+    token estimates. Project files come from `src/server/fs` via `/api/project/*`.
+  - `#open=<path>` opens a folder directly (bookmarkable).
 - `src/server/` — Node code that runs inside the local Vite process (`plugin.ts` mounts `/api`).
   No dedicated backend server, no Next.js, no React Server Components. Talks to Azure AI Foundry
   through the `openai` SDK's `AzureOpenAI` client. See `src/server/README.md` for routes.

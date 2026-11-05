@@ -8,7 +8,7 @@ import { InlineCode } from '@/components/ui/InlineCode'
 import { Segmented } from '@/components/ui/Segmented'
 import { Radio, Switch } from '@/components/ui/Switch'
 import { TextInput } from '@/components/ui/TextInput'
-import { defaultExclusions, outputPrompt } from '@/data/sample'
+import { defaultExclusions, outputPrompt } from '@/data/defaults'
 import { testConnection } from '@/lib/api'
 import { estimateTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -158,7 +158,7 @@ function FoundrySection({ s, update }: { s: Settings; update: (p: Partial<Settin
                   <Radio on={s.defaultDeployment === i} label={`Make ${d.name} the default`} onChange={() => update({ defaultDeployment: i })} />
                 </td>
                 <td className="font-mono whitespace-nowrap">{d.name}</td>
-                <td className="font-mono whitespace-nowrap text-ink-muted">{health?.modelName ?? 'sample'}</td>
+                <td className="font-mono whitespace-nowrap text-ink-muted">{health?.modelName ?? '—'}</td>
                 <td>
                   <TextInput size="sm" mono value={d.limit.toLocaleString('en-US')} onChange={(e) => setDep(i, { limit: num(e.target.value) })} />
                 </td>
@@ -175,13 +175,13 @@ function FoundrySection({ s, update }: { s: Settings; update: (p: Partial<Settin
         <p className="text-ui-small text-ink-muted">
           {health
             ? 'The deployment comes from AZURE_OPENAI_DEPLOYMENT. '
-            : 'Showing sample deployments until the server is configured. '}
+            : 'No deployment until AZURE_OPENAI_* is set in .env.local. '}
           The context limit drives the context bar (amber at 75%, red at 95%).
           {health && !health.contextLimit && ' AZURE_OPENAI_CONTEXT_LIMIT is not set, so 128,000 is assumed.'}
           {health && (health.inputPricePer1M || health.outputPricePer1M)
             ? ' Prices come from AZURE_OPENAI_INPUT_PRICE_PER_1M / _OUTPUT_PRICE_PER_1M in .env.local.'
-            : ''} Settings
-          are saved in this browser.
+            : ''} Edits to
+          this table last for this session; set them in .env.local to keep them.
         </p>
       </Field>
     </Section>

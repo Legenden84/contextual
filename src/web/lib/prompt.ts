@@ -2,7 +2,7 @@
 // user turn with only the files the model doesn't have yet (new, changed, or "Resend all files").
 // Pictures (pasted screenshots, ticked image files) go as image parts of the user turn.
 
-import type { Rule } from '@/data/sample'
+import type { Rule } from '@/data/types'
 import type { ApiContent, ContentPart } from './api'
 import { langFromPath } from './syntax'
 

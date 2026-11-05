@@ -3,7 +3,7 @@ import { CodeBlock } from '@/components/code/CodeBlock'
 import { InlineCode } from '@/components/ui/InlineCode'
 import { StatusLetter } from '@/components/ui/Status'
 import { Tag } from '@/components/ui/Tag'
-import type { Change } from '@/data/sample'
+import type { Change } from '@/data/types'
 import { computeDiff } from '@/lib/diff'
 import { parseMarkdown, type Inline } from '@/lib/markdown'
 

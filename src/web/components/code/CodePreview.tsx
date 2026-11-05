@@ -10,9 +10,9 @@ import { CodeView } from './CodeView'
 
 /** Read-only preview tab opened from the explorer. */
 export function CodePreview({ path }: { path: string }) {
-  const { tree, selected, loadFile, project } = useApp()
+  const { tree, selected, loadFile } = useApp()
   const [wrap, setWrap] = useState(false)
-  const [current, setCurrent] = useState<number | undefined>(project?.kind === 'sample' ? 34 : undefined)
+  const [current, setCurrent] = useState<number | undefined>(undefined)
   const [file, setFile] = useState<FileContent | null>(null)
   const [copied, copy] = useCopy()
   const node = findNode(tree, path)

@@ -1,4 +1,4 @@
-import type { TreeNode } from '@/data/sample'
+import type { TreeNode } from '@/data/types'
 import { IconButton, LinkButton } from '@/components/ui/Button'
 import { Checkbox, CheckLabel } from '@/components/ui/Checkbox'
 import { FileGlyph, FolderGlyph } from '@/components/ui/FileGlyph'

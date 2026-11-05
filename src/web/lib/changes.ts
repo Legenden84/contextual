@@ -1,7 +1,7 @@
 // Turns an assistant response into proposed file changes, from the `### FILE:` and
 // `### DELETE:` headers the output-format prompt asks for.
 
-import type { Change } from '@/data/sample'
+import type { Change } from '@/data/types'
 import { parseMarkdown } from './markdown'
 
 export interface ChangeContext {
