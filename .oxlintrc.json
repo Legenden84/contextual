@@ -16,6 +16,7 @@
   },
   "ignorePatterns": [
     ".claude/**",
-    "dist/**"
+    "dist/**",
+    "docs/**"
   ]
 }
