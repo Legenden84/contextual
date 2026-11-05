@@ -1,15 +1,15 @@
 import type { ReactNode } from 'react'
 import { Icon } from '@/components/ui/Icon'
-import { fmtN } from '@/lib/format'
 import { describeFoundry } from '@/lib/foundry-status'
 import { useApp } from '@/state/app-context'
+import { UsagePopover } from './UsagePopover'
 
 function Item({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={`inline-flex items-center gap-1 [&_svg]:size-3.5 ${className ?? ''}`}>{children}</span>
 }
 
 export function StatusBar() {
-  const { screen, settings, deployment, totals, openSettings, foundry, project, scanning } = useApp()
+  const { screen, settings, deployment, openSettings, foundry, project, scanning } = useApp()
   const label = describeFoundry(foundry)
   const tone = label.tone === 'ok' ? '[&_svg]:text-success' : label.tone === 'warn' ? 'text-warning' : ''
   const dep = settings.deployments[deployment] ?? settings.deployments[0]
@@ -50,9 +50,7 @@ export function StatusBar() {
             <Item>Saved</Item>
           ) : (
             <>
-              <Item>
-                {totals.files} files · {totals.rules} rules · ~{fmtN(totals.tokens)} tokens
-              </Item>
+              <UsagePopover />
               <button type="button" onClick={openSettings} className="inline-flex cursor-pointer items-center gap-1 hover:text-ink [&_svg]:size-3.5">
                 <Icon name="gear" />
                 Settings

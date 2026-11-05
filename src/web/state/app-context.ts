@@ -29,6 +29,10 @@ export interface ChatMessage {
   tone?: 'warn' | 'error'
   /** Assistant: which Azure API answered (Responses keeps the conversation on Azure's side). */
   api?: ApiKind
+  /** Assistant: tokens reported by Azure for this reply. */
+  usage?: { inputTokens: number; outputTokens: number; cachedTokens: number }
+  /** Assistant: cost of this reply in USD, at the prices when it was sent (absent if prices weren't set). */
+  cost?: number
 }
 
 export type FoundryStatus =
@@ -111,6 +115,15 @@ export interface Totals {
   level: 'ok' | 'warn' | 'danger'
   /** Estimated cost of the next message in USD. */
   cost: number
+  /** Cost of the replies so far in this chat (USD), from Azure's reported token counts. */
+  chatCost: number
+  /** Tokens billed so far in this chat. */
+  chatInputTokens: number
+  /** Of the input tokens, how many Azure served from its prompt cache. */
+  chatCachedTokens: number
+  chatOutputTokens: number
+  /** Replies in this chat that have usage. */
+  chatReplies: number
   hint: string | null
 }
 

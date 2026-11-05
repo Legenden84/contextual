@@ -461,7 +461,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const level = share >= 0.95 ? 'danger' : share >= 0.75 ? 'warn' : 'ok'
     const cost = (tokens / 1e6) * dep.inPrice + (EST_OUTPUT_TOKENS / 1e6) * dep.outPrice
     const big = level === 'ok' ? null : biggestFolder(tree, selected)
+    // What this chat has cost so far, from the token counts Azure reported for each reply.
+    let chatCost = 0
+    let chatInputTokens = 0
+    let chatOutputTokens = 0
+    let chatCachedTokens = 0
+    let chatReplies = 0
+    for (const m of messages) {
+      if (!m.usage) continue
+      chatReplies++
+      chatInputTokens += m.usage.inputTokens
+      chatCachedTokens += m.usage.cachedTokens
+      chatOutputTokens += m.usage.outputTokens
+      chatCost += m.cost ?? 0
+    }
     return {
+      chatCost,
+      chatInputTokens,
+      chatCachedTokens,
+      chatOutputTokens,
+      chatReplies,
       files,
       rules: onRules.length,
       fileTokens,
@@ -474,7 +493,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cost,
       hint: big ? `${big.name}: ${fmtK(big.tokens)}` : null,
     }
-  }, [tree, selected, rules, rulesOn, thread, resendAll, stale, attachments, settings.deployments, settings.outputPrompt, deployment])
+  }, [tree, selected, rules, rulesOn, thread, resendAll, stale, attachments, messages, settings.deployments, settings.outputPrompt, deployment])
 
   const toggleSet = useCallback(
     <T,>(setter: (fn: (s: ReadonlySet<T>) => ReadonlySet<T>) => void, value: T) =>
@@ -631,16 +650,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
             })
 
         const priced = dep.inPrice > 0 || dep.outPrice > 0
+        const cost = u && priced ? (u.inputTokens / 1e6) * dep.inPrice + (u.outputTokens / 1e6) * dep.outPrice : undefined
         const meta = u
           ? `${fmtK(u.inputTokens)} in${u.cachedTokens ? ` (${fmtK(u.cachedTokens)} cached)` : ''} / ${fmtK(u.outputTokens)} out` +
-            (priced ? ` · $${((u.inputTokens / 1e6) * dep.inPrice + (u.outputTokens / 1e6) * dep.outPrice).toFixed(3)}` : '')
+            (cost != null ? ` · $${cost.toFixed(3)}` : '')
           : undefined
 
         setMessages((ms) => {
           const next = ms.flatMap<ChatMessage>((m) => {
             if (m.id !== aiId) return [m]
             if (!reply) return []
-            return [{ ...m, streaming: false, meta, changes: proposed, api: done?.api }]
+            return [{ ...m, streaming: false, meta, changes: proposed, api: done?.api, usage: u ?? undefined, cost }]
           })
           const note = (t: string, tone: 'warn' | 'error') => next.push({ id: newId('n'), role: 'note', text: t, time: now(), tone })
           if (failure) note(failure, failure === 'Stopped.' ? 'warn' : 'error')
