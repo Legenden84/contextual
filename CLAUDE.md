@@ -17,8 +17,10 @@ proposed changes. The model never writes to disk; applying is an explicit user a
   - `lib/` — pure logic: `syntax.ts` (highlighter), `diff.ts` (LCS diff, hunks), `markdown.ts`
     (response parser), `tree.ts` (selection/token sums), `utils.ts` (`cn()`).
   - `state/` — `AppProvider` holds all UI state; components read it with `useApp()`.
-  - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds the messages (rules +
-    output format as system prompt, history, context files); `lib/changes.ts` turns a reply's
+  - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds each turn (rules + output
+    format as system prompt; only files new to the conversation or changed since, tracked by hash in
+    `ThreadState.fileVersions`); conversations continue via the Responses API's `previous_response_id`
+    and are saved per project through `/api/threads`; `lib/changes.ts` turns a reply's
     `### FILE:` / `### DELETE:` blocks into the Changes panel; `lib/images.ts` reads pasted/dropped
     pictures (scaled to 2048px, vision token estimate). Settings are saved in localStorage.
   - `data/sample.ts` — the Inventory.Api sample project from the design system, opened from

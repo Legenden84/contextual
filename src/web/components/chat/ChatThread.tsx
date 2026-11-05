@@ -3,7 +3,7 @@ import { DiffFile } from '@/components/diff/DiffFile'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { Segmented } from '@/components/ui/Segmented'
-import { Chip } from '@/components/ui/Tag'
+import { Chip, Tag } from '@/components/ui/Tag'
 import { computeDiff } from '@/lib/diff'
 import { parseInline } from '@/lib/markdown'
 import { useApp, type ChatMessage } from '@/state/app-context'
@@ -88,6 +88,9 @@ function AssistantMessage({ msg }: { msg: ChatMessage }) {
           Foundry · {msg.time}
           {msg.meta && ` · ${msg.meta}`}
         </span>
+        {msg.api === 'responses' && (
+          <Tag title="Azure stores this conversation (Responses API), so the next message only uploads what's new.">context kept by Azure</Tag>
+        )}
         <span className="flex-1" />
         {changes.length > 0 && (
           <Segmented

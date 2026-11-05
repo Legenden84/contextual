@@ -7,7 +7,8 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 | --- | --- |
 | `plugin.ts` | Loads `.env` / `.env.local` (server-only) and mounts `/api` |
 | `config.ts` | Reads and validates the Azure AI Foundry variables |
-| `foundry.ts` | `AzureOpenAI` client from the `openai` SDK, streaming chat, connection test |
+| `foundry.ts` | Conversation turns: Responses API (`previous_response_id`) with fallback to chat completions; connection test |
+| `threads.ts` | Saved conversations per project (`~/.cache/contextual/threads/`) |
 | `api.ts` | Routes, body parsing, same-origin check |
 | `fs/paths.ts` | Path normalising (`C:\x` → `/mnt/c/x`, `\\wsl$\Ubuntu\…` → `/…`, `~`) and keeping paths inside the project |
 | `fs/browse.ts` | Folder listing for the Open folder dialog |
@@ -20,9 +21,17 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 
 - `GET /api/health` → `{ configured, endpoint, deployment, modelName, … }` or `{ configured: false, missing, invalid }`. Never returns the key.
 - `POST /api/test` → `{ ok, latencyMs }` (a 16-token round trip).
-- `POST /api/chat` with `{ "messages": [{ "role": "system" | "user" | "assistant", "content": "…" }] }`;
-  user messages may instead have `content: [{ type: "text", … }, { type: "image_url", image_url: { url: "data:image/png;base64,…" } }]`
-  → `application/x-ndjson`, one event per line: `delta` (text), `usage`, `done`, or `error`.
+- `POST /api/chat` with `{ system, history, input, previousResponseId }` → `application/x-ndjson`, one event
+  per line: `delta` (text), `usage` (with `cachedTokens`), `done` (`responseId`, `api`, `chainReset`), or `error`.
+  `input` (and user turns in `history`) is a string or `[{ type: "text", … }, { type: "image_url", image_url: { url: "data:image/png;base64,…" } }]`.
+  - **Responses API first:** on Azure's v1 endpoint (`<endpoint>/openai/v1/responses`, `store: true`), sending
+    `system` as `instructions` and only `input` plus `previous_response_id`. Azure keeps the conversation (~30 days).
+  - If the stored chain is gone, it retries once with the full `history` and reports `chainReset`.
+  - If the deployment has no Responses API (404 / unsupported), it uses chat completions with
+    `[system, ...history, input]` from then on. `history` is kept byte-for-byte stable by the client, so
+    Azure's prompt cache applies.
+- `GET /api/threads?root=` · `GET /api/threads/<id>?root=` · `POST /api/threads/save { root, id, summary, thread }` ·
+  `POST /api/threads/delete { root, id }` → saved conversations (last 30 per project, outside the project).
 
 - `GET /api/fs/dirs?path=&hidden=1` → sub-folders of a path, plus Home, `/` and Windows drives.
 - `POST /api/project/scan` `{ root, options }` → tree, rules, branch. Exclusion reasons: `ignored: <dir>`,

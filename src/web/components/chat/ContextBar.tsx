@@ -18,6 +18,12 @@ export function ContextBar() {
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         <Icon name="files" className="size-3.5" />
         <b className="font-medium text-ink">{totals.files} files</b> · {totals.rules} rules · ~{fmtN(totals.tokens)} tokens
+        {totals.conversationTokens > 0 && (
+          <span title="The model re-reads the earlier conversation each turn (often from Azure's prompt cache); only new or changed files, pictures and your message are added.">
+            {' '}
+            (~{fmtN(totals.newTokens)} new)
+          </span>
+        )}
       </span>
       <span
         role="meter"

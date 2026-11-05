@@ -1,11 +1,11 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { Button, IconButton } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
-import { Segmented } from '@/components/ui/Segmented'
+import { CheckLabel } from '@/components/ui/Checkbox'
+import { Switch } from '@/components/ui/Switch'
 import { fmtK } from '@/lib/format'
 import { IMAGE_TYPES } from '@/lib/images'
 import { cn } from '@/lib/utils'
-import type { ContextMode } from '@/state/app-context'
 import { useApp } from '@/state/app-context'
 import { ContextBar } from './ContextBar'
 import { ModelPicker } from './ModelPicker'
@@ -22,7 +22,7 @@ const imagesIn = (list: FileList | DataTransferItemList | null | undefined): Fil
 
 /** Context bar, message box with picture attachments, deployment picker and per-message context mode. */
 export function Composer() {
-  const { contextMode, setContextMode, send, stop, streaming, attachments, addAttachments, removeAttachment } = useApp()
+  const { resendAll, setResendAll, thread, send, stop, streaming, attachments, addAttachments, removeAttachment } = useApp()
   const [text, setText] = useState('')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,16 +118,17 @@ export function Composer() {
         )}
         <div className="flex items-center gap-2 pt-1 pr-1.5 pb-1.5 pl-2">
           <ModelPicker />
-          <Segmented<ContextMode>
-            size="sm"
-            label="Context to send"
-            value={contextMode}
-            onChange={setContextMode}
-            options={[
-              { value: 'full', label: 'Resend full context' },
-              { value: 'new', label: 'Only send new message' },
-            ]}
-          />
+          {thread.transcript.length > 0 && (
+            <CheckLabel
+              className="text-ui-small text-ink-muted"
+              onToggle={() => setResendAll(!resendAll)}
+              control={<Switch on={resendAll} label="Resend all files" onChange={() => setResendAll(!resendAll)} />}
+            >
+              <span title="The model already has unchanged files from earlier in this chat. Turn on to send every ticked file again with the next message.">
+                Resend all files
+              </span>
+            </CheckLabel>
+          )}
           <IconButton icon="image" label="Attach pictures" onClick={() => picker.current?.click()} />
           <input
             ref={picker}

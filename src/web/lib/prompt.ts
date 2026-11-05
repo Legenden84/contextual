@@ -1,9 +1,9 @@
-// Builds the messages sent to the model: rules + output format as the system prompt,
-// the conversation so far, and (with "Resend full context") the selected files.
-// Pictures (pasted screenshots, ticked image files) go as image parts of the user message.
+// Builds what is sent to the model: rules + output format as the system prompt, and each new
+// user turn with only the files the model doesn't have yet (new, changed, or "Resend all files").
+// Pictures (pasted screenshots, ticked image files) go as image parts of the user turn.
 
 import type { Rule } from '@/data/sample'
-import type { ApiContent, ApiMessage, ContentPart } from './api'
+import type { ApiContent, ContentPart } from './api'
 import { langFromPath } from './syntax'
 
 export interface ContextFile {
@@ -71,18 +71,41 @@ export function withImages(text: string, images: ContextImage[]): ApiContent {
   return parts
 }
 
-export function buildMessages(opts: {
-  system: string
-  history: ApiMessage[]
+/**
+ * The new user turn. Only files that are new to this conversation or changed since they were
+ * last sent are attached; the model already has the others from earlier turns.
+ */
+export function buildTurn(opts: {
   text: string
-  files: ContextFile[] | null
+  /** New or changed files (attached in full). */
+  files: ContextFile[]
+  /** Still selected and unchanged since sent earlier in this conversation. */
+  unchanged: string[]
+  /** Sent earlier but no longer selected. */
+  removed: string[]
   attachments: ContextImage[]
-}): ApiMessage[] {
-  const files = opts.files ?? []
-  const body = opts.files ? `${contextBlock(files)}\n\n# Request\n\n${opts.text}` : opts.text
+}): ApiContent {
+  const sections: string[] = []
+  if (opts.files.length) sections.push(contextBlock(opts.files))
+  if (opts.unchanged.length)
+    sections.push(
+      `# Unchanged files\n\nStill in context, unchanged since sent earlier in this conversation:\n${opts.unchanged.map((p) => `- ${p}`).join('\n')}`,
+    )
+  if (opts.removed.length)
+    sections.push(`# Removed from context\n\nIgnore these files from earlier messages:\n${opts.removed.map((p) => `- ${p}`).join('\n')}`)
+  const body = sections.length ? `${sections.join('\n\n')}\n\n# Request\n\n${opts.text}` : opts.text
   const images = [
-    ...files.filter((f) => f.image != null).map((f) => ({ name: f.path, url: f.image! })),
+    ...opts.files.filter((f) => f.image != null).map((f) => ({ name: f.path, url: f.image! })),
     ...opts.attachments,
   ]
-  return [{ role: 'system', content: opts.system }, ...opts.history, { role: 'user', content: withImages(body, images) }]
+  return withImages(body, images)
 }
+
+/** Plain text of a turn, for token estimates. */
+export function contentText(content: ApiContent): string {
+  return typeof content === 'string' ? content : content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
+}
+
+/** Pictures in a turn. */
+export const contentImages = (content: ApiContent): number =>
+  typeof content === 'string' ? 0 : content.filter((p) => p.type === 'image_url').length

@@ -2,21 +2,34 @@
 //
 //   GET  /api/health      Configuration status (never the API key).
 //   POST /api/test        Round-trip to the deployment, returns latency.
-//   POST /api/chat        { messages } → NDJSON stream of ChatEvent.
+//   POST /api/chat        { system, history, input, previousResponseId } → NDJSON stream of ChatEvent.
 //   GET  /api/fs/dirs     ?path=&hidden=1 → sub-folders, for the Open folder dialog.
 //   POST /api/project/scan   { root, options } → explorer tree, rules, branch.
 //   POST /api/project/read   { root, paths } → file contents.
 //   POST /api/project/apply  { root, changes, backup } → writes the selected changes.
 //   POST /api/project/undo   { root, backupId } → restores from that backup.
+//   GET  /api/threads        ?root= → saved conversations for a project, newest first.
+//   GET  /api/threads/<id>   ?root= → one saved conversation.
+//   POST /api/threads/save   { root, id, summary, thread } → saves a conversation.
+//   POST /api/threads/delete { root, id } → deletes one.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AzureOpenAI } from 'openai'
 import { readFoundryConfig, type ConfigResult, type FoundryConfig } from './config.ts'
-import { createFoundryClient, describeError, streamChat, testConnection, type ChatMessage, type ContentPart } from './foundry.ts'
+import {
+  createFoundryClients,
+  describeError,
+  streamConversation,
+  testConnection,
+  type ChatMessage,
+  type ContentPart,
+  type ConversationRequest,
+  type FoundryClients,
+} from './foundry.ts'
 import { listDirs } from './fs/browse.ts'
 import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
 import { PathError } from './fs/paths.ts'
 import { scanProject, type ScanOptions } from './fs/scan.ts'
+import { deleteThread, listThreads, loadThread, saveThread } from './threads.ts'
 
 type Env = Record<string, string | undefined>
 type Next = (err?: unknown) => void
@@ -66,18 +79,34 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function parseMessages(body: unknown): ChatMessage[] {
-  const list = (body as { messages?: unknown })?.messages
-  if (!Array.isArray(list) || list.length === 0) throw new HttpError(400, '`messages` must be a non-empty array.')
+function parseMessages(list: unknown, name: string): ChatMessage[] {
+  if (!Array.isArray(list)) throw new HttpError(400, `\`${name}\` must be an array.`)
   return list.map((m, i): ChatMessage => {
     const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
-    if (typeof role !== 'string' || !ROLES.has(role))
-      throw new HttpError(400, `messages[${i}] needs a role (system, user, assistant).`)
+    if (typeof role !== 'string' || !ROLES.has(role) || role === 'system')
+      throw new HttpError(400, `${name}[${i}] needs a role (user or assistant).`)
     if (typeof content === 'string') return { role: role as 'user', content }
     if (role === 'user' && Array.isArray(content) && content.length)
-      return { role: 'user', content: content.map((p, j) => contentPart(p, `messages[${i}].content[${j}]`)) }
-    throw new HttpError(400, `messages[${i}] needs string content (or text and image parts for user messages).`)
+      return { role: 'user', content: content.map((p, j) => contentPart(p, `${name}[${i}].content[${j}]`)) }
+    throw new HttpError(400, `${name}[${i}] needs string content (or text and image parts for user messages).`)
   })
+}
+
+function parseConversation(body: unknown): ConversationRequest {
+  if (!isObj(body)) throw new HttpError(400, 'Request body must be a JSON object.')
+  if (typeof body.system !== 'string') throw new HttpError(400, '`system` must be a string.')
+  const input = body.input
+  const parsedInput =
+    typeof input === 'string' && input
+      ? input
+      : Array.isArray(input) && input.length
+        ? input.map((p, j) => contentPart(p, `input[${j}]`))
+        : null
+  if (!parsedInput) throw new HttpError(400, '`input` must be a non-empty string or array of parts.')
+  const prev = body.previousResponseId
+  if (prev != null && (typeof prev !== 'string' || !/^[\w-]{1,200}$/.test(prev)))
+    throw new HttpError(400, '`previousResponseId` must be a response id or null.')
+  return { system: body.system, history: parseMessages(body.history ?? [], 'history'), input: parsedInput, previousResponseId: prev ?? null }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
@@ -145,12 +174,12 @@ function publicConfig(result: ConfigResult) {
 
 /** Builds the /api middleware. `getEnv` is read per request so .env.local edits apply after a restart. */
 export function createApi(getEnv: () => Env) {
-  let cached: { key: string; client: AzureOpenAI } | null = null
+  let cached: { key: string; clients: FoundryClients } | null = null
 
-  const clientFor = (cfg: FoundryConfig) => {
+  const clientsFor = (cfg: FoundryConfig) => {
     const key = JSON.stringify([cfg.endpoint, cfg.apiKey, cfg.apiVersion, cfg.deployment])
-    if (cached?.key !== key) cached = { key, client: createFoundryClient(cfg) }
-    return cached.client
+    if (cached?.key !== key) cached = { key, clients: createFoundryClients(cfg) }
+    return cached.clients
   }
 
   const requireConfig = (): FoundryConfig => {
@@ -181,14 +210,14 @@ export function createApi(getEnv: () => Env) {
 
       if (route === 'POST /api/test') {
         const cfg = requireConfig()
-        const ms = await testConnection(clientFor(cfg), cfg, abort.signal)
+        const ms = await testConnection(clientsFor(cfg).chat, cfg, abort.signal)
         return sendJson(res, 200, { ok: true, latencyMs: ms, deployment: cfg.deployment })
       }
 
       if (route === 'POST /api/chat') {
         const cfg = requireConfig()
-        const messages = parseMessages(await readJson(req))
-        const stream = streamChat(clientFor(cfg), cfg, messages, abort.signal)
+        const conversation = parseConversation(await readJson(req))
+        const stream = streamConversation(clientsFor(cfg), cfg, conversation, abort.signal)
 
         // Wait for the first event so connection/auth errors still get a proper status code.
         const first = await stream.next()
@@ -227,6 +256,33 @@ export function createApi(getEnv: () => Env) {
       if (route === 'POST /api/project/undo') {
         const body = await readObject(req)
         return sendJson(res, 200, await undoApply(str(body, 'root'), str(body, 'backupId')))
+      }
+
+      if (route === 'GET /api/threads') return sendJson(res, 200, { threads: await listThreads(url.searchParams.get('root') ?? '') })
+
+      const threadMatch = /^GET \/api\/threads\/([\w-]+)$/.exec(route)
+      if (threadMatch) return sendJson(res, 200, await loadThread(url.searchParams.get('root') ?? '', threadMatch[1]))
+
+      if (route === 'POST /api/threads/save') {
+        const body = await readObject(req)
+        const summary = isObj(body.summary) ? body.summary : {}
+        await saveThread(
+          str(body, 'root'),
+          str(body, 'id'),
+          {
+            title: typeof summary.title === 'string' ? summary.title.slice(0, 200) : 'Conversation',
+            updatedAt: new Date().toISOString(),
+            turns: typeof summary.turns === 'number' ? summary.turns : 0,
+          },
+          body.thread,
+        )
+        return sendJson(res, 200, { ok: true })
+      }
+
+      if (route === 'POST /api/threads/delete') {
+        const body = await readObject(req)
+        await deleteThread(str(body, 'root'), str(body, 'id'))
+        return sendJson(res, 200, { ok: true })
       }
 
       throw new HttpError(404, `No route for ${route}.`)

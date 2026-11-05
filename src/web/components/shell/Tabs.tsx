@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Tag } from '@/components/ui/Tag'
 import { splitPath } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { ThreadMenu } from '@/components/chat/ThreadMenu'
 import { useApp } from '@/state/app-context'
 
 const TAB = 'relative flex cursor-pointer items-center gap-1.5 border-r border-border px-3 text-ui-body text-ink-muted'
@@ -41,6 +42,7 @@ export function Tabs() {
         )
       })}
       <span className="flex-1" />
+      <ThreadMenu />
     </div>
   )
 }

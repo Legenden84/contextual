@@ -1,12 +1,11 @@
 import { createContext, useContext } from 'react'
 import type { Change, Deployment, Rule, TreeNode } from '@/data/sample'
-import type { ApiContent, FileContent, Health } from '@/lib/api'
+import type { ApiContent, ApiKind, ApiMessage, FileContent, Health, ThreadSummary } from '@/lib/api'
 import type { Attachment } from '@/lib/images'
 
 export type Screen = 'welcome' | 'workspace' | 'settings'
 export type Theme = 'dark' | 'light'
 export type DiffMode = 'unified' | 'split'
-export type ContextMode = 'full' | 'new'
 export type CenterView = 'chat' | 'diff'
 
 export interface ChatMessage {
@@ -28,6 +27,8 @@ export interface ChatMessage {
   images?: { name: string; url: string }[]
   /** Note: colour of the notice. */
   tone?: 'warn' | 'error'
+  /** Assistant: which Azure API answered (Responses keeps the conversation on Azure's side). */
+  api?: ApiKind
 }
 
 export type FoundryStatus =
@@ -82,12 +83,30 @@ export interface Settings {
   outputPrompt: string
 }
 
+/** The conversation as the model has seen it, so each turn sends only what's new. */
+export interface ThreadState {
+  id: string
+  /** Azure's id for the last reply (Responses API); null when the transcript must be sent. */
+  responseId: string | null
+  /** Which API answered last. */
+  api: ApiKind | null
+  /** Turns exactly as sent and received, in order (a stable prefix for prompt caching). */
+  transcript: ApiMessage[]
+  /** Version (hash) of each file the model has, by path. */
+  fileVersions: Record<string, string>
+}
+
 export interface Totals {
   files: number
   rules: number
   fileTokens: number
   ruleTokens: number
+  /** Estimated input tokens of the next request (everything the model reads). */
   tokens: number
+  /** Of those, the part that is new: files not yet sent, pictures, the message. */
+  newTokens: number
+  /** Of those, the earlier conversation (re-read by the model, often from cache). */
+  conversationTokens: number
   /** Share of the active deployment's context limit, 0–1+. */
   share: number
   level: 'ok' | 'warn' | 'danger'
@@ -119,7 +138,11 @@ export interface AppState {
 
   foundry: FoundryStatus
   deployment: number
-  contextMode: ContextMode
+  /** Send every ticked file again with the next message, even if unchanged. */
+  resendAll: boolean
+  thread: ThreadState
+  /** Saved conversations for the open folder, newest first. */
+  threads: ThreadSummary[]
   messages: ChatMessage[]
   streaming: boolean
   /** Pictures waiting to be sent with the next message. */
@@ -169,7 +192,11 @@ export interface AppActions {
   importRule(file: File): void
 
   setDeployment(i: number): void
-  setContextMode(m: ContextMode): void
+  setResendAll(on: boolean): void
+  /** Starts a fresh conversation (the current one stays saved). */
+  newChat(): void
+  /** Re-opens a saved conversation. */
+  openThread(id: string): void
   send(text: string): void
   /** Adds pasted/dropped/picked pictures. Resolves to an error message, or null. */
   addAttachments(files: File[]): Promise<string | null>

@@ -27,11 +27,26 @@ export interface ApiMessage {
   content: ApiContent
 }
 
+/** Which Azure API answered: Responses (conversation stored by Azure) or chat completions (full transcript sent). */
+export type ApiKind = 'responses' | 'chat'
+
 export type ChatEvent =
   | { type: 'delta'; text: string }
-  | { type: 'usage'; inputTokens: number; outputTokens: number }
-  | { type: 'done'; finishReason: string | null }
+  | { type: 'usage'; inputTokens: number; outputTokens: number; cachedTokens: number }
+  | { type: 'done'; finishReason: string | null; responseId: string | null; api: ApiKind; chainReset: boolean }
   | { type: 'error'; message: string }
+
+/** One conversation turn sent to the local server. */
+export interface ConversationRequest {
+  /** Rules + output format, sent with every turn. */
+  system: string
+  /** Earlier turns exactly as sent/received; only used if Azure doesn't hold the conversation. */
+  history: ApiMessage[]
+  /** The new user turn. */
+  input: ApiContent
+  /** Azure's id for the last reply, so only the new turn needs uploading. */
+  previousResponseId: string | null
+}
 
 async function errorFrom(res: Response): Promise<Error> {
   try {
@@ -56,14 +71,14 @@ export async function testConnection(): Promise<{ latencyMs: number; deployment:
 
 /** Streams a chat completion, calling `onEvent` for each NDJSON event. */
 export async function streamChat(
-  messages: ApiMessage[],
+  request: ConversationRequest,
   onEvent: (e: ChatEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify(request),
     signal,
   })
   if (!res.ok || !res.body) throw await errorFrom(res)
@@ -174,3 +189,29 @@ export const applyChanges = (root: string, changes: ApplyChange[], backup: boole
 
 export const undoApply = (root: string, backupId: string) =>
   postJson<{ restored: number; removed: number }>('/api/project/undo', { root, backupId })
+
+// ------------------------------------------------------------------ saved conversations
+
+export interface ThreadSummary {
+  id: string
+  title: string
+  updatedAt: string
+  turns: number
+}
+
+export async function listThreads(root: string): Promise<ThreadSummary[]> {
+  const res = await fetch(`/api/threads?${new URLSearchParams({ root })}`)
+  if (!res.ok) throw await errorFrom(res)
+  return ((await res.json()) as { threads: ThreadSummary[] }).threads
+}
+
+export async function loadThread<T>(root: string, id: string): Promise<T> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(id)}?${new URLSearchParams({ root })}`)
+  if (!res.ok) throw await errorFrom(res)
+  return (await res.json()) as T
+}
+
+export const saveThread = (root: string, id: string, summary: { title: string; turns: number }, thread: unknown) =>
+  postJson<{ ok: true }>('/api/threads/save', { root, id, summary, thread })
+
+export const deleteThread = (root: string, id: string) => postJson<{ ok: true }>('/api/threads/delete', { root, id })

@@ -6,14 +6,14 @@ import { parseChanges } from '@/lib/changes'
 import { estimateTokens, fmtK } from '@/lib/format'
 import { parseMarkdown } from '@/lib/markdown'
 import { toAttachment, type Attachment } from '@/lib/images'
-import { buildMessages, systemPrompt, withImages, type ContextFile } from '@/lib/prompt'
+import { hashText } from '@/lib/hash'
+import { buildTurn, contentImages, contentText, systemPrompt, type ContextFile } from '@/lib/prompt'
 import { biggestFolder, checkState, findNode, nodeStats, pickableFiles, selectableFiles } from '@/lib/tree'
 import {
   AppContext,
   type AppActions,
   type AppContextValue,
   type ChatMessage,
-  type ContextMode,
   type DiffMode,
   type FoundryStatus,
   type Project,
@@ -22,6 +22,7 @@ import {
   type Screen,
   type Settings,
   type Theme,
+  type ThreadState,
   type ToastState,
   type Totals,
 } from './app-context'
@@ -146,6 +147,30 @@ const sampleProject: Project = {
 let nextId = 0
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(nextId++).toString(36)}`
 
+const freshThread = (): ThreadState => ({ id: newId('t'), responseId: null, api: null, transcript: [], fileVersions: {} })
+
+/** What is saved per conversation (in ~/.cache/contextual/threads via the local server). */
+interface SavedThread extends ThreadState {
+  version: 1
+  messages: ChatMessage[]
+}
+
+/** Vision tokens assumed per picture already in the conversation. */
+const PICTURE_TOKENS = 765
+
+function fileTokenMap(nodes: TreeNode[], out = new Map<string, number>()): Map<string, number> {
+  for (const n of nodes) {
+    if (n.kind === 'file') out.set(n.path, n.tokens ?? 0)
+    if (n.children) fileTokenMap(n.children, out)
+  }
+  return out
+}
+
+function lastChanges(messages: ChatMessage[]): Change[] {
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].changes?.length) return messages[i].changes!
+  return []
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<Screen>('welcome')
   const [settingsReturn, setSettingsReturn] = useState<Screen>('welcome')
@@ -172,7 +197,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [foundry, setFoundry] = useState<FoundryStatus>({ state: 'checking' })
   const [deployment, setDeployment] = useState(0)
-  const [contextMode, setContextMode] = useState<ContextMode>('full')
+  const [resendAll, setResendAll] = useState(false)
+  const [thread, setThread] = useState<ThreadState>(freshThread)
+  const [threads, setThreads] = useState<api.ThreadSummary[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   /** Files sent as condensed references: replies can't change them. */
@@ -268,6 +295,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRules(sample.rules)
     setRulesOn(new Set(sample.initialRulesOn))
     setMessages(sampleMessages)
+    setThread({
+      ...freshThread(),
+      transcript: [
+        { role: 'user', content: sample.userPrompt },
+        { role: 'assistant', content: sample.assistantResponse },
+      ],
+    })
+    setThreads([])
     setPreviewTabs(['src/Inventory.Domain/Orders/Order.cs'])
     setInclude(includeFor(sample.changes))
     setScreen('workspace')
@@ -286,6 +321,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const scanKey = JSON.stringify(scanOptions)
   const lastScanKey = useRef('')
 
+  /** Shows a saved conversation and re-ticks the files the model has from it. */
+  const applySaved = useCallback((saved: SavedThread, pickable?: Set<string>) => {
+    setThread({ id: saved.id, responseId: saved.responseId, api: saved.api, transcript: saved.transcript, fileVersions: saved.fileVersions })
+    setMessages(saved.messages.map((m) => ({ ...m, streaming: false })))
+    setInclude(includeFor(lastChanges(saved.messages)))
+    if (pickable) setSelected(new Set(Object.keys(saved.fileVersions).filter((p) => pickable.has(p))))
+    setCenterView('chat')
+    setActiveTab('chat')
+  }, [])
+
+  const refreshThreads = useCallback(async (root: string) => {
+    try {
+      const list = await api.listThreads(root)
+      setThreads(list)
+      return list
+    } catch {
+      return []
+    }
+  }, [])
+
   const openFolder = useCallback(
     async (path: string): Promise<string | null> => {
       try {
@@ -301,10 +356,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setRules(r.rules)
         setRulesOn(new Set(r.rules.filter((x) => x.type === 'Rule').map((x) => x.path)))
         setMessages([])
+        setThread(freshThread())
+        setThreads([])
         setPreviewTabs([])
         setInclude({})
         setFolderDialogOpen(false)
         setScreen('workspace')
+        // Pick up the latest conversation for this folder, if any.
+        void refreshThreads(r.root).then(async (list) => {
+          if (!list.length) return
+          try {
+            applySaved(await api.loadThread<SavedThread>(r.root, list[0].id), pickableFiles(r.tree))
+          } catch {
+            // A missing or unreadable conversation just means starting fresh.
+          }
+        })
         setRecents((list) => {
           const next = [{ name: r.name, path: r.root, openedAt: new Date().toISOString() }, ...list.filter((x) => x.path !== r.root)].slice(0, 8)
           writePref(RECENTS_KEY, JSON.stringify(next))
@@ -317,7 +383,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setScanning(false)
       }
     },
-    [scanOptions, resetWorkspace],
+    [scanOptions, resetWorkspace, refreshThreads, applySaved],
   )
 
   /** Re-reads the open folder: new/removed files, exclusions, and files changed since they were sent. */
@@ -460,9 +526,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const onRules = rules.filter((r) => rulesOn.has(r.path))
     const ruleTokens = onRules.reduce((a, r) => a + r.tokens, 0)
-    const history = messages.reduce((a, m) => a + (m.role === 'note' ? 0 : estimateTokens(m.text)), 0)
+    // The model re-reads the whole conversation each turn; only files it doesn't have are new.
+    const conversationTokens = thread.transcript.reduce(
+      (a, m) => a + estimateTokens(contentText(m.content)) + contentImages(m.content) * PICTURE_TOKENS,
+      0,
+    )
+    const sizes = fileTokenMap(tree)
+    let newFileTokens = 0
+    for (const p of selected) if (resendAll || !thread.fileVersions[p] || stale.has(p)) newFileTokens += sizes.get(p) ?? 0
     const pictures = attachments.reduce((a, x) => a + x.tokens, 0)
-    const raw = fileTokens + ruleTokens + pictures + estimateTokens(settings.outputPrompt) + sample.USER_MESSAGE_TOKENS + history
+    const newTokens = newFileTokens + pictures + sample.USER_MESSAGE_TOKENS
+    const raw = ruleTokens + estimateTokens(settings.outputPrompt) + conversationTokens + newTokens
     const tokens = Math.round(raw / 100) * 100
     const dep = settings.deployments[deployment] ?? settings.deployments[0]
     const share = tokens / dep.limit
@@ -475,12 +549,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       fileTokens,
       ruleTokens,
       tokens,
+      newTokens: Math.round(newTokens / 100) * 100,
+      conversationTokens,
       share,
       level,
       cost,
       hint: big ? `${big.name}: ${fmtK(big.tokens)}` : null,
     }
-  }, [tree, selected, rules, rulesOn, messages, attachments, settings.deployments, settings.outputPrompt, deployment])
+  }, [tree, selected, rules, rulesOn, thread, resendAll, stale, attachments, settings.deployments, settings.outputPrompt, deployment])
 
   const toggleSet = useCallback(
     <T,>(setter: (fn: (s: ReadonlySet<T>) => ReadonlySet<T>) => void, value: T) =>
@@ -512,88 +588,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const ctrl = new AbortController()
       abortRef.current = ctrl
       const dep = settings.deployments[deployment] ?? settings.deployments[0]
-      const full = contextMode === 'full'
       const folder = project.kind === 'folder'
+      const forceAll = resendAll
+      const base = thread
 
       void (async () => {
         // Read the selected files now, so the model sees what is on disk at this moment.
-        let files: ContextFile[] | null = null
-        if (full) {
-          const paths = [...selected].sort()
-          if (folder) {
-            try {
-              const read = await api.readFiles(project.root, paths, true)
-              for (const f of read) {
-                if (f.mtimeMs != null) sentMtimes.current.set(f.path, f.mtimeMs)
-                if (f.condensedFrom) referenceOnly.current.add(f.path)
-                else referenceOnly.current.delete(f.path)
-                // Keep only real contents as diff originals; condensed copies are references.
-                if (f.content != null && !f.condensedFrom) contents.current.set(f.path, f.content)
-              }
-              files = read.map((f) => ({ path: f.path, content: f.content, image: f.image, condensed: !!f.condensedFrom }))
-              setStale((s) => new Set([...s].filter((p) => !paths.includes(p))))
-            } catch (err) {
-              abortRef.current = null
-              addNote(`Not sent: could not read the selected files. ${errorText(err, '')}`, 'error')
-              return
-            }
-          } else files = paths.map((path) => ({ path, content: sample.fileContents[path] }))
-        }
+        const paths = [...selected].sort()
+        let read: api.FileContent[]
+        if (folder) {
+          try {
+            read = await api.readFiles(project.root, paths, true)
+          } catch (err) {
+            abortRef.current = null
+            addNote(`Not sent: could not read the selected files. ${errorText(err, '')}`, 'error')
+            return
+          }
+          for (const f of read) {
+            if (f.mtimeMs != null) sentMtimes.current.set(f.path, f.mtimeMs)
+            if (f.condensedFrom) referenceOnly.current.add(f.path)
+            else referenceOnly.current.delete(f.path)
+            // Keep only real contents as diff originals; condensed copies are references.
+            if (f.content != null && !f.condensedFrom) contents.current.set(f.path, f.content)
+          }
+          setStale((s) => new Set([...s].filter((p) => !paths.includes(p))))
+        } else read = paths.map((path) => ({ path, content: sample.fileContents[path] }))
 
-        // "Resend full context" attaches the current files and drops older copies from history;
-        // "Only send new message" keeps what earlier messages carried.
-        const history: api.ApiMessage[] = messages
-          .filter((m) => (m.role === 'user' || m.role === 'assistant') && !m.streaming)
-          .map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            content:
-              m.role === 'user' ? (!full ? (m.sent ?? m.text) : withImages(m.text, m.images ?? [])) : m.text,
-          }))
+        // Only files the model doesn't have yet (or that changed since) are attached.
+        const versions = { ...base.fileVersions }
+        const changed: ContextFile[] = []
+        const unchanged: string[] = []
+        for (const f of read) {
+          const version = hashText(f.image ?? f.content ?? `unavailable:${f.error ?? ''}`)
+          if (!forceAll && versions[f.path] === version) unchanged.push(f.path)
+          else {
+            changed.push({ path: f.path, content: f.content, image: f.image, condensed: !!f.condensedFrom })
+            versions[f.path] = version
+          }
+        }
+        const removed = Object.keys(versions).filter((p) => !selected.has(p))
+        for (const p of removed) delete versions[p]
+
         const onRules = rules.filter((r) => rulesOn.has(r.path))
         const images = attachments.map((a) => ({ name: a.name, url: a.url }))
-        const apiMessages = buildMessages({
-          system: systemPrompt(onRules, settings.outputPrompt),
-          history,
-          text,
-          files,
-          attachments: images,
-        })
-        const sent = apiMessages[apiMessages.length - 1].content
+        const input = buildTurn({ text, files: changed, unchanged, removed, attachments: images })
         setAttachments([])
+        setResendAll(false)
 
         const time = now()
         const aiId = newId('a')
+        const fileNote = paths.length
+          ? `${changed.length} of ${paths.length} ${paths.length === 1 ? 'file' : 'files'} sent${unchanged.length ? ` (${unchanged.length} unchanged)` : ''}`
+          : 'no files'
         setMessages((ms) => [
           ...ms,
-          {
-            id: newId('u'),
-            role: 'user',
-            text,
-            sent,
-            images,
-            time,
-            meta: `${totals.files} files · ${totals.rules} rules · ${full ? 'full context' : 'new message only'}`,
-          },
+          { id: newId('u'), role: 'user', text, sent: input, images, time, meta: `${fileNote} · ${onRules.length} rules` },
           { id: aiId, role: 'assistant', text: '', time, model: dep.name, streaming: true },
         ])
 
         // Collected from the stream; an object so the callbacks don't reassign locals.
         const out = {
           reply: '',
-          usage: null as { inputTokens: number; outputTokens: number } | null,
-          finish: null as string | null,
+          usage: null as { inputTokens: number; outputTokens: number; cachedTokens: number } | null,
+          done: null as Extract<api.ChatEvent, { type: 'done' }> | null,
           failure: null as string | null,
         }
         try {
           await api.streamChat(
-            apiMessages,
+            {
+              system: systemPrompt(onRules, settings.outputPrompt),
+              history: base.transcript,
+              input,
+              previousResponseId: base.responseId,
+            },
             (e) => {
               if (e.type === 'delta') {
                 out.reply += e.text
-                const text = out.reply
-                updateMessage(aiId, (m) => ({ ...m, text }))
+                const reply = out.reply
+                updateMessage(aiId, (m) => ({ ...m, text: reply }))
               } else if (e.type === 'usage') out.usage = e
-              else if (e.type === 'done') out.finish = e.finishReason
+              else if (e.type === 'done') out.done = e
               else if (e.type === 'error') out.failure = e.message
             },
             ctrl.signal,
@@ -603,8 +677,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         abortRef.current = null
 
+        const { reply, usage: u, done, failure } = out
+        // Remember the turn only if it completed; otherwise the next message resends what this one tried to.
+        if (reply && done && !failure) {
+          setThread((t) =>
+            t.id !== base.id
+              ? t
+              : {
+                  ...t,
+                  responseId: done.responseId,
+                  api: done.api,
+                  transcript: [...t.transcript, { role: 'user', content: input }, { role: 'assistant', content: reply }],
+                  fileVersions: versions,
+                },
+          )
+        }
+
         // Originals for every file the reply touches, so diffs compare against disk.
-        const { reply, usage: u, finish, failure } = out
         const touched = parseMarkdown(reply)
           .map((b) => (b.kind === 'code' ? b.path : b.kind === 'delete' ? b.path : undefined))
           .filter((p): p is string => !!p && !!findNode(tree, p))
@@ -616,7 +705,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             // Diffs for those files will show the whole file as added.
           }
         }
-        const truncated = finish === 'length'
+        const truncated = done?.finishReason === 'length'
         const proposed = truncated
           ? []
           : parseChanges(reply, {
@@ -628,7 +717,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         const priced = dep.inPrice > 0 || dep.outPrice > 0
         const meta = u
-          ? `${fmtK(u.inputTokens)} in / ${fmtK(u.outputTokens)} out` +
+          ? `${fmtK(u.inputTokens)} in${u.cachedTokens ? ` (${fmtK(u.cachedTokens)} cached)` : ''} / ${fmtK(u.outputTokens)} out` +
             (priced ? ` · $${((u.inputTokens / 1e6) * dep.inPrice + (u.outputTokens / 1e6) * dep.outPrice).toFixed(3)}` : '')
           : undefined
 
@@ -636,10 +725,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const next = ms.flatMap<ChatMessage>((m) => {
             if (m.id !== aiId) return [m]
             if (!reply) return []
-            return [{ ...m, streaming: false, meta, changes: proposed }]
+            return [{ ...m, streaming: false, meta, changes: proposed, api: done?.api }]
           })
           const note = (t: string, tone: 'warn' | 'error') => next.push({ id: newId('n'), role: 'note', text: t, time: now(), tone })
           if (failure) note(failure, failure === 'Stopped.' ? 'warn' : 'error')
+          if (done?.chainReset && done.api === 'responses')
+            note('Azure no longer had this conversation stored, so the full conversation was sent once and a new chain started.', 'warn')
+          if (done?.api === 'chat' && base.api === 'responses')
+            note('The Responses API is not available for this deployment; the full conversation is now sent with each message.', 'warn')
           if (truncated)
             note(
               'The reply hit the completion token limit and was cut off, so its file changes were not offered for apply. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.',
@@ -650,8 +743,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (proposed.length) setInclude(includeFor(proposed))
       })()
     },
-    [project, settings, deployment, contextMode, messages, attachments, selected, rules, rulesOn, totals, stale, tree, updateMessage, addNote],
+    [project, settings, deployment, resendAll, thread, attachments, selected, rules, rulesOn, stale, tree, updateMessage, addNote],
   )
+
+  // Save the conversation after each completed turn (folders only; the sample isn't saved).
+  useEffect(() => {
+    if (project?.kind !== 'folder' || streaming || !thread.transcript.length) return
+    const root = project.root
+    const t = window.setTimeout(() => {
+      const title = messages.find((m) => m.role === 'user')?.text.slice(0, 80) ?? 'Conversation'
+      const saved: SavedThread = { version: 1, ...thread, messages }
+      void api
+        .saveThread(root, thread.id, { title, turns: thread.transcript.length / 2 }, saved)
+        .then(() => refreshThreads(root))
+        .catch(() => setToast({ title: 'Could not save the conversation', detail: 'It stays open, but won’t be restored after a reload.', undoable: false, tone: 'error' }))
+    }, 500)
+    return () => window.clearTimeout(t)
+  }, [project, thread, messages, streaming, refreshThreads])
 
   // ---------------------------------------------------------------- apply
 
@@ -684,6 +792,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (c.status === 'D') contents.current.delete(c.path)
           else contents.current.set(c.path, c.new)
         }
+        // The model wrote these versions itself, so they don't need sending back next turn.
+        setThread((t) => {
+          const fileVersions = { ...t.fileVersions }
+          for (const c of picked) {
+            if (c.status === 'D') delete fileVersions[c.path]
+            else fileVersions[c.path] = hashText(c.new)
+          }
+          return { ...t, fileVersions }
+        })
         setApplyOpen(false)
         setToast({
           title,
@@ -778,7 +895,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
 
       setDeployment,
-      setContextMode,
+      setResendAll,
+      newChat: () => {
+        if (abortRef.current) return
+        referenceOnly.current.clear()
+        setThread(freshThread())
+        setMessages([])
+        setInclude({})
+        setAttachments([])
+        setCenterView('chat')
+        setActiveTab('chat')
+      },
+      openThread: (id) => {
+        if (abortRef.current || project?.kind !== 'folder') return
+        const root = project.root
+        void api
+          .loadThread<SavedThread>(root, id)
+          .then((saved) => applySaved(saved, pickableFiles(rawTree)))
+          .catch((err: unknown) => setToast({ title: 'Could not open the conversation', detail: errorText(err, ''), undoable: false, tone: 'error' }))
+      },
       send,
       addAttachments: async (files) => {
         const errors: string[] = []
@@ -826,7 +961,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       updateSettings: (patch) => setSettings((s) => ({ ...s, ...patch })),
     }),
-    [openFolder, loadSample, rescan, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply],
+    [openFolder, loadSample, rescan, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
   )
 
   const value: AppContextValue = {
@@ -847,7 +982,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     rulePreview,
     foundry,
     deployment,
-    contextMode,
+    resendAll,
+    thread,
+    threads,
     messages,
     streaming,
     attachments,
