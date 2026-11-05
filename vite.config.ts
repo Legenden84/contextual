@@ -12,4 +12,7 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, 'src/web'),
     },
   },
+  server: {
+    port: 3000
+  }
 })
