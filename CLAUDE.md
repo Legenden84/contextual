@@ -11,16 +11,30 @@ proposed changes. The model never writes to disk; applying is an explicit user a
 
 ## Layout
 - `src/web/` — the React app (browser). Path alias `@/` → `src/web/`.
-  - `components/ui/` — small, generic, reusable primitives (shadcn/ui style).
-  - `components/` — app-specific composite components built from the primitives.
-  - `lib/utils.ts` — `cn()` helper (clsx + tailwind-merge).
-- `src/server/` — Node code that runs inside the local Vite process (Vite plugin / middleware).
-  No dedicated backend server, no Next.js, no React Server Components.
+  - `components/ui/` — small, generic primitives (Button, Checkbox, Switch, Segmented, Tag, Icon…).
+  - `components/{code,diff,explorer,chat,changes,apply,shell}/` — app components built from them.
+  - `screens/` — Welcome, Workspace, Diff, Settings.
+  - `lib/` — pure logic: `syntax.ts` (highlighter), `diff.ts` (LCS diff, hunks), `markdown.ts`
+    (response parser), `tree.ts` (selection/token sums), `utils.ts` (`cn()`).
+  - `state/` — `AppProvider` holds all UI state; components read it with `useApp()`.
+  - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds the messages (rules +
+    output format as system prompt, history, context files); `lib/changes.ts` turns a reply's
+    `### FILE:` / `### DELETE:` blocks into the Changes panel.
+  - `data/sample.ts` — the Inventory.Api sample project from the design system. Replace with
+    data from `src/server` once it exists.
+  - Deep links for reviewing states: `#workspace`, `#preview` (amber context bar), `#diff`,
+    `#split`, `#apply`, `#applied`, `#settings`; add `,light` for the light theme.
+- `src/server/` — Node code that runs inside the local Vite process (`plugin.ts` mounts `/api`).
+  No dedicated backend server, no Next.js, no React Server Components. Talks to Azure AI Foundry
+  through the `openai` SDK's `AzureOpenAI` client. See `src/server/README.md` for routes.
+  Type-checked by `tsconfig.node.json`; `src/web` by `tsconfig.app.json`.
+- Config: `.env.local` (gitignored), template in `.env.example`. Server-only variables have no
+  `VITE_` prefix, so they never reach the browser. Never prefix secrets with `VITE_`.
 
 ## UI conventions
 - Dark theme is the default (`class="dark"` on `<html>`); light theme via `class="light"`.
-- Use the semantic color tokens defined in `src/web/index.css` instead of raw palette colors.
-  Those tokens must mirror `docs/design/contextual/tokens.json` (see UI design below).
+- Style only with design-token utilities (see UI design below); Tailwind's default palette,
+  font sizes and shadows are removed, so `bg-red-500` or `text-sm` produce nothing.
 - Prefer small, single-purpose components composed together; avoid boolean-prop explosions
   (see the `vercel-composition-patterns` skill). Merge classes with `cn()`.
 - shadcn/ui is configured via `components.json` (`rsc: false`, aliases under `@/`);
@@ -35,8 +49,21 @@ The UI spec is the Contextual design system, saved locally in `docs/design/conte
 
 Rules:
 - `tokens.json` is the **only** source of colors, spacing, radii, shadows and type styles.
-  Map its tokens into `src/web/index.css` (CSS variables + `@theme`) and use them through
-  Tailwind; never hard-code hex values or invent new spacing.
+  Never hard-code hex values or invent new spacing.
+- `src/web/styles/tokens.css` is a hand-written mirror of tokens.json (CSS variables per theme +
+  Tailwind `@theme`). When tokens.json changes, update tokens.css to match. Token → utility mapping:
+  - colors: `bg-surface-100`, `text-ink-muted`, `border-border-strong`, `bg-diff-add-word`,
+    `text-syn-keyword`, `text-file-csharp`, … (raw CSS vars: `var(--ink)`, `var(--accent)`)
+  - type: `text-ui-caption|ui-small|ui-body|ui-prose|ui-title|ui-display|code|code-small`
+    (size, line height, weight and tracking together), `font-sans`, `font-mono`
+  - spacing: base unit is `space-1` (4px), so `p-2` = space-2, `gap-6` = space-6; use only
+    the token steps 1, 2, 3, 4, 6, 8. Heights: `h-row` (22px), `h-control` (26px)
+  - radius: `rounded-sm|md|lg|full`; shadow: `shadow-popover|modal|window`
+  - Fixed layout widths from the README (312px, 320px, 820px) use arbitrary values.
+- shadcn's names (`bg-background`, `bg-primary`, `text-muted-foreground`, …) are aliased to
+  tokens in `src/web/index.css`. shadcn's `accent` is not: here `accent` is the blue primary,
+  so replace `bg-accent` in added shadcn components with `bg-surface-hover`, and restyle
+  their sizes to the token type styles and `h-control`.
 - `components/bundle.js` and `components/bundle.css` are **reference code** to port logic from
   (syntax tokenizer, LCS line diff + word ranges, collapsing unchanged regions). They are not
   production code: don't import, load or copy them wholesale into `src/`. Re-implement as
