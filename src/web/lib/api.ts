@@ -135,7 +135,6 @@ export interface ApplyResult {
   overwritten: number
   deleted: number
   backupId: string | null
-  backupPath: string | null
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {

@@ -14,12 +14,6 @@ const VERB = {
   D: ['delete', 'text-danger'],
 } as const
 
-function backupFolder() {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `.contextual/backups/${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}-${p(d.getMinutes())}/`
-}
-
 /** Lists what will happen to each selected file before anything is written. */
 export function ApplyDialog() {
   const { changes, include, closeApply, apply, project } = useApp()
@@ -35,7 +29,6 @@ export function ApplyDialog() {
       if (err) setError(err)
     })
   }
-  const folder = useMemo(() => backupFolder(), [])
 
   const picked = useMemo(
     () => changes.filter((c) => include[c.path]).map((c) => ({ ...c, ...computeDiff(c.old, c.new) })),
@@ -68,8 +61,14 @@ export function ApplyDialog() {
 
         <div className="flex flex-col gap-3 px-4 pb-4">
           <p className="text-ink-muted">
-            These files will be written to <span className="font-mono text-[12px]">{project?.root}</span>. Nothing else is
-            touched.
+            Saved in place in <span className="font-mono text-[12px]">{project?.root}</span>
+            {project?.branch && (
+              <>
+                {' '}
+                on <span className="font-mono text-[12px]">{project.branch}</span>
+              </>
+            )}
+            , like Save in your editor: nothing is staged or committed, and each file keeps its line endings.
           </p>
 
           <div className="overflow-hidden rounded-md border border-border">
@@ -102,13 +101,13 @@ export function ApplyDialog() {
 
           <CheckLabel onToggle={() => setBackup((b) => !b)} control={<Checkbox state={backup} onChange={() => setBackup((b) => !b)} />}>
             Create backup before overwriting
-            <span className="font-mono text-ui-small text-ink-muted">{folder}</span>
+            <span className="text-ui-small text-ink-muted">kept outside the project, for Undo</span>
           </CheckLabel>
           <CheckLabel onToggle={() => setReveal((r) => !r)} control={<Checkbox state={reveal} onChange={() => setReveal((r) => !r)} />}>
             Show in explorer after apply
           </CheckLabel>
           {!backup && (
-            <p className="text-ui-small text-warning">Without a backup, this apply cannot be undone.</p>
+            <p className="text-ui-small text-warning">Without a backup, this save cannot be undone from Contextual (git can still restore committed files).</p>
           )}
           {error && (
             <p role="alert" className="flex items-start gap-1.5 text-ui-small text-danger">
@@ -119,11 +118,11 @@ export function ApplyDialog() {
         </div>
 
         <div className="flex items-center gap-2 border-t border-border bg-surface-000 px-4 py-3">
-          <span className="text-ui-small text-ink-muted">Writes are exact file contents from the response. No merging.</span>
+          <span className="text-ui-small text-ink-muted">Saves the exact file contents from the response. No merging.</span>
           <span className="flex-1" />
           <Button onClick={closeApply}>Cancel</Button>
           <Button variant="primary" disabled={picked.length === 0 || busy} onClick={run} autoFocus>
-            {busy ? 'Writing…' : `Apply ${picked.length} ${picked.length === 1 ? 'file' : 'files'}`}
+            {busy ? 'Saving…' : `Apply ${picked.length} ${picked.length === 1 ? 'file' : 'files'}`}
           </Button>
         </div>
       </div>

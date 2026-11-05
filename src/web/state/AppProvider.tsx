@@ -611,7 +611,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!picked.length || !project) return null
       const count = (s: string) => picked.filter((c) => c.status === s).length
       const parts = [count('D') && `${count('D')} deleted`, count('A') && `${count('A')} created`, count('M') && `${count('M')} overwritten`].filter(Boolean)
-      const title = `${picked.length} ${picked.length === 1 ? 'file' : 'files'} written`
+      const title = `${picked.length} ${picked.length === 1 ? 'file' : 'files'} saved`
 
       if (project.kind === 'sample') {
         setApplyOpen(false)
@@ -637,7 +637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setApplyOpen(false)
         setToast({
           title,
-          detail: `${backup ? 'Backup saved · ' : ''}${parts.join(', ')}`,
+          detail: `${parts.join(', ')} · not committed${project.branch ? ` on ${project.branch}` : ''}`,
           undoable: !!r.backupId,
           backupId: r.backupId ?? undefined,
         })
@@ -652,7 +652,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const undoApply = useCallback(() => {
     if (project?.kind !== 'folder' || !toast?.backupId) {
-      setToast({ title: 'Changes undone', detail: 'Restored from .contextual/backups', undoable: false })
+      setToast({ title: 'Changes undone', detail: 'Restored the previous versions', undoable: false })
       return
     }
     const id = toast.backupId
@@ -660,7 +660,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .undoApply(project.root, id)
       .then((r) => {
         contents.current.clear()
-        setToast({ title: 'Changes undone', detail: `Restored ${r.restored}, removed ${r.removed} · from .contextual/backups/${id}`, undoable: false })
+        setToast({ title: 'Changes undone', detail: `Restored ${r.restored}, removed ${r.removed}`, undoable: false })
         void rescan()
       })
       .catch((err: unknown) => setToast({ title: 'Undo failed', detail: errorText(err, 'Could not restore.'), undoable: false, tone: 'error' }))

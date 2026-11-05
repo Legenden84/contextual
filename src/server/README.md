@@ -12,7 +12,7 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 | `fs/paths.ts` | Path normalising (`C:\x` → `/mnt/c/x`, `\\wsl$\Ubuntu\…` → `/…`, `~`) and keeping paths inside the project |
 | `fs/browse.ts` | Folder listing for the Open folder dialog |
 | `fs/scan.ts` | Project scan: tree, token estimates, exclusions, git branch, instruction files |
-| `fs/files.ts` | Reading files; Apply (with backup) and Undo |
+| `fs/files.ts` | Reading files; saving applied changes (editor-style) and Undo |
 
 ## Routes
 
@@ -24,11 +24,16 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 - `GET /api/fs/dirs?path=&hidden=1` → sub-folders of a path, plus Home, `/` and Windows drives.
 - `POST /api/project/scan` `{ root, options }` → tree, rules, branch. Exclusion reasons: `ignored: <dir>`,
   `lock file`, `.gitignore` (root `.gitignore` only), `binary`, `too large`, `hidden`, `secrets` (`.env*`, always).
-- `POST /api/project/read` `{ root, paths }` → contents (text only, up to 2 MB each).
-- `POST /api/project/apply` `{ root, changes, backup }` → checks every file first (a modified/deleted file must
-  still match what the model saw; a new file must not exist) and writes nothing if any check fails. With
-  `backup`, originals go to `.contextual/backups/<id>/` (git-ignored by its own `.gitignore`).
-- `POST /api/project/undo` `{ root, backupId }` → restores that backup.
+- `POST /api/project/read` `{ root, paths }` → contents (text only, up to 2 MB each), with LF line endings
+  and no BOM.
+- `POST /api/project/apply` `{ root, changes, backup }` → saves the changes in place in the working tree,
+  like Save in an editor: nothing is staged or committed. Each file keeps its line endings (CRLF/LF),
+  BOM and final-newline setting, so `git diff` shows only the real edits. Every file is checked first
+  (a modified/deleted file must still match what the model saw; a new file must not exist) and nothing
+  is saved if any check fails. With `backup`, originals go to an undo snapshot outside the project
+  (`~/.cache/contextual/undo/<project hash>/<id>/`, last 20 kept).
+- `POST /api/project/undo` `{ root, backupId }` → restores that snapshot and removes files and folders
+  the save created. Refused if any of those files was edited after the save.
 
 Requests must be `Content-Type: application/json` and same-origin, so other websites can't use
 the local server to spend tokens.
