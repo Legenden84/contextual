@@ -85,7 +85,7 @@ impl Shell {
                 .state
                 .recents
                 .first()
-                .map(|r| r.path.clone());
+                .map(|r| (r.path.clone(), r.location.clone()));
             self.folder_dialog = Some(cx.new(|cx| FolderDialog::new(app, start, window, cx)));
         } else if !dialog_open && self.folder_dialog.is_some() {
             self.folder_dialog = None;

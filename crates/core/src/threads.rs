@@ -98,8 +98,12 @@ impl ThreadStore {
         &self.dir
     }
 
-    /// Folder of one project's threads.
+    /// Folder of one project's threads. `root` is a local path, or `wsl://<distro><path>` for a
+    /// project inside WSL (hashed as-is: it is not a path on this machine).
     pub fn project_dir(&self, root: &str) -> Result<PathBuf> {
+        if root.starts_with("wsl://") {
+            return Ok(self.dir.join(project_hash(root)));
+        }
         Ok(self
             .dir
             .join(project_hash(&path_string(&normalize_input_path(Some(

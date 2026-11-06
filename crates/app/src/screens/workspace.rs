@@ -66,7 +66,7 @@ impl WorkspaceScreen {
                 this.previews.retain(|p, _| tabs.contains(p));
                 for t in tabs {
                     if !this.previews.contains_key(&t) {
-                        let host = this.app.read(cx).host();
+                        let host = this.app.update(cx, |a, _| a.host());
                         let view: AnyView = match parse_git_tab(&t) {
                             Some(g) => {
                                 let scm = this.scm.clone();
@@ -95,7 +95,7 @@ impl WorkspaceScreen {
             }),
             cx.observe(&app, |_, _, cx| cx.notify()),
         ];
-        let host = app.read(cx).host();
+        let host = app.update(cx, |a, _| a.host());
         let scm = app.read(cx).scm.clone().unwrap_or_else(|| {
             let (project, host) = (project.clone(), host.clone());
             cx.new(|cx| ScmModel::new(project, host, cx))

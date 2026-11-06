@@ -99,6 +99,22 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                             .child(item(gpui_kit::assets::IconName::GitBranch, b)),
                     )
                 })
+                .when_some(
+                    a.project
+                        .as_ref()
+                        .map(|p| p.read(cx).location.clone())
+                        .filter(|l| *l != contextual_core::location::Location::Local),
+                    |d, l| {
+                        d.child(
+                            div()
+                                .px(sp(1))
+                                .rounded(px(contextual_theme::radius::SM))
+                                .bg(hsla(c.surface_300))
+                                .text_color(hsla(c.ink))
+                                .child(SharedString::from(l.label())),
+                        )
+                    },
+                )
                 .child(foundry)
                 .child(
                     div()

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -16,8 +16,8 @@ use contextual_protocol::fs::{
 };
 use contextual_protocol::git::{GitCall, GitReply};
 use contextual_protocol::rpc::{
-    CancelParams, InitializeParams, InitializeResult, Message, Notification, PROTOCOL_VERSION,
-    Request, Response, method,
+    AllowRootParams, CancelParams, InitializeParams, InitializeResult, Message, Notification,
+    PROTOCOL_VERSION, Request, Response, method,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -39,6 +39,8 @@ pub struct RemoteHost {
     /// Kept so the process is killed when the host is dropped.
     _child: Option<Child>,
     info: InitializeResult,
+    /// Cleared when the agent's output ends (it exited or crashed).
+    alive: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for RemoteHost {
@@ -104,6 +106,8 @@ impl RemoteHost {
             }
         });
         let reader_pending = pending.clone();
+        let alive = Arc::new(AtomicBool::new(true));
+        let reader_alive = alive.clone();
         tokio::spawn(async move {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -127,6 +131,7 @@ impl RemoteHost {
                 }
             }
             // Agent gone: fail everything still waiting.
+            reader_alive.store(false, Ordering::Relaxed);
             reader_pending
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -138,6 +143,7 @@ impl RemoteHost {
             pending,
             out,
             _child: None,
+            alive,
             info: InitializeResult {
                 protocol_version: 0,
                 agent_version: String::new(),
@@ -165,6 +171,11 @@ impl RemoteHost {
         }
         host.info = info;
         Ok(host)
+    }
+
+    /// Whether the agent is still running.
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
     }
 
     pub fn info(&self) -> &InitializeResult {
@@ -220,11 +231,11 @@ impl RemoteHost {
     }
 }
 
+/// Message of the error a call gets when the agent died under it.
+pub const AGENT_STOPPED: &str = "The workspace agent stopped. Reopen the project to restart it.";
+
 fn agent_gone() -> Error {
-    Error::new(
-        ErrorCode::Io,
-        "The workspace agent stopped. Reopen the project to restart it.",
-    )
+    Error::new(ErrorCode::Io, AGENT_STOPPED)
 }
 
 struct CancelOnDrop<'a> {
@@ -247,12 +258,15 @@ impl Drop for CancelOnDrop<'_> {
 
 #[async_trait]
 impl WorkspaceHost for RemoteHost {
-    async fn allow_root(&self, _root: &str) -> Result<()> {
-        // Roots travel in `initialize`; a newly opened root needs a fresh connection, which keeps
-        // the agent's allowlist exactly what the app opened.
-        Err(Error::invalid(
-            "Allowed roots are set when the agent connects; reconnect to add one.",
-        ))
+    async fn allow_root(&self, root: &str) -> Result<()> {
+        self.request::<_, Value>(
+            method::ALLOW_ROOT,
+            AllowRootParams {
+                root: root.to_string(),
+            },
+        )
+        .await
+        .map(|_| ())
     }
     async fn list_dirs(&self, req: ListDirs) -> Result<DirListing> {
         self.request(method::LIST_DIRS, req).await
@@ -271,5 +285,188 @@ impl WorkspaceHost for RemoteHost {
     }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         self.request(method::GIT, call).await
+    }
+}
+
+/// Starts an agent (locally, or inside a WSL distro) and connects to it.
+#[async_trait]
+pub trait AgentLauncher: Send + Sync {
+    async fn launch(&self) -> Result<RemoteHost>;
+    /// "WSL: Ubuntu", for messages.
+    fn describe(&self) -> String;
+}
+
+/// Spawns an agent binary on this machine (development and tests).
+pub struct LocalAgentLauncher {
+    pub binary: std::path::PathBuf,
+    pub app_version: String,
+    pub env: Vec<(String, String)>,
+}
+
+#[async_trait]
+impl AgentLauncher for LocalAgentLauncher {
+    async fn launch(&self) -> Result<RemoteHost> {
+        let mut cmd = Command::new(&self.binary);
+        cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
+        RemoteHost::spawn(cmd, &self.app_version, Vec::new()).await
+    }
+    fn describe(&self) -> String {
+        format!("local agent {}", self.binary.display())
+    }
+}
+
+/// A [`WorkspaceHost`] backed by an agent that is started on first use and restarted (with
+/// backoff) when it dies. Allowed roots are re-sent after a restart. Read-only calls are retried
+/// once on a fresh agent; saves, undo and git mutations are not, so nothing can apply twice.
+pub struct SupervisedHost {
+    launcher: Arc<dyn AgentLauncher>,
+    current: tokio::sync::Mutex<Option<Arc<RemoteHost>>>,
+    roots: Mutex<Vec<String>>,
+    failures: Mutex<u32>,
+}
+
+impl std::fmt::Debug for SupervisedHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SupervisedHost")
+            .field("launcher", &self.launcher.describe())
+            .finish()
+    }
+}
+
+/// Delay before restart attempt `n` (0 = first start): 0, 0.5, 1, 2, 4, 8 s, then 8 s.
+fn backoff(n: u32) -> std::time::Duration {
+    if n == 0 {
+        return std::time::Duration::ZERO;
+    }
+    std::time::Duration::from_millis(250u64 << n.min(5))
+}
+
+fn is_agent_gone(e: &Error) -> bool {
+    e.code == ErrorCode::Io && e.message == AGENT_STOPPED
+}
+
+impl SupervisedHost {
+    pub fn new(launcher: Arc<dyn AgentLauncher>) -> Self {
+        Self {
+            launcher,
+            current: tokio::sync::Mutex::new(None),
+            roots: Mutex::default(),
+            failures: Mutex::new(0),
+        }
+    }
+
+    /// The running agent, starting (or restarting) it if needed.
+    pub async fn connected(&self) -> Result<Arc<RemoteHost>> {
+        let mut current = self.current.lock().await;
+        if let Some(h) = current.as_ref().filter(|h| h.is_alive()) {
+            return Ok(h.clone());
+        }
+        let attempt = *self.failures.lock().unwrap_or_else(|e| e.into_inner());
+        tokio::time::sleep(backoff(attempt)).await;
+        let host = match self.launcher.launch().await {
+            Ok(h) => h,
+            Err(e) => {
+                *self.failures.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                return Err(Error::new(
+                    e.code,
+                    format!(
+                        "Couldn't start the workspace agent ({}): {}",
+                        self.launcher.describe(),
+                        e.message
+                    ),
+                ));
+            }
+        };
+        let roots = self.roots.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        for r in roots {
+            host.allow_root(&r).await?;
+        }
+        // A restart counts as a failure until the agent has been up for a while; a clean first
+        // start resets the counter.
+        let mut failures = self.failures.lock().unwrap_or_else(|e| e.into_inner());
+        *failures = if current.is_some() { *failures + 1 } else { 0 };
+        let host = Arc::new(host);
+        *current = Some(host.clone());
+        Ok(host)
+    }
+
+    /// Runs `f` on the agent; when it died under the call and `retry` is set, once more on a
+    /// fresh agent.
+    async fn call<T, F, Fut>(&self, retry: bool, f: F) -> Result<T>
+    where
+        F: Fn(Arc<RemoteHost>) -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let host = self.connected().await?;
+        match f(host).await {
+            Err(e) if retry && is_agent_gone(&e) => f(self.connected().await?).await,
+            other => other,
+        }
+    }
+}
+
+#[async_trait]
+impl WorkspaceHost for SupervisedHost {
+    async fn allow_root(&self, root: &str) -> Result<()> {
+        {
+            let mut roots = self.roots.lock().unwrap_or_else(|e| e.into_inner());
+            if !roots.iter().any(|r| r == root) {
+                roots.push(root.to_string());
+            }
+        }
+        // Also sent on every (re)start, so a fresh agent knows it.
+        self.call(true, |h| async move { h.allow_root(root).await })
+            .await
+    }
+    async fn list_dirs(&self, req: ListDirs) -> Result<DirListing> {
+        self.call(true, |h| {
+            let req = req.clone();
+            async move { h.list_dirs(req).await }
+        })
+        .await
+    }
+    async fn scan(&self, req: Scan) -> Result<ScanResult> {
+        self.call(true, |h| {
+            let req = req.clone();
+            async move { h.scan(req).await }
+        })
+        .await
+    }
+    async fn read(&self, req: ReadFiles) -> Result<ReadFilesResult> {
+        self.call(true, |h| {
+            let req = req.clone();
+            async move { h.read(req).await }
+        })
+        .await
+    }
+    async fn apply(&self, req: Apply) -> Result<ApplyResult> {
+        self.call(false, |h| {
+            let req = req.clone();
+            async move { h.apply(req).await }
+        })
+        .await
+    }
+    async fn undo(&self, req: Undo) -> Result<UndoResult> {
+        self.call(false, |h| {
+            let req = req.clone();
+            async move { h.undo(req).await }
+        })
+        .await
+    }
+    async fn git(&self, call: GitCall) -> Result<GitReply> {
+        let read_only = matches!(
+            call,
+            GitCall::Status(_)
+                | GitCall::Diff(_)
+                | GitCall::CommitDiff(_)
+                | GitCall::Branches(_)
+                | GitCall::Compare(_)
+                | GitCall::PrDiff(_)
+        );
+        self.call(read_only, |h| {
+            let call = call.clone();
+            async move { h.git(call).await }
+        })
+        .await
     }
 }

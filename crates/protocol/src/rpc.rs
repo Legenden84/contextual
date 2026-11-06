@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// Bumped whenever a method, a parameter or a result changes shape. The app redeploys the agent
 /// when the agent reports a different version.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 pub const JSONRPC: &str = "2.0";
 
@@ -17,6 +17,8 @@ pub const JSONRPC: &str = "2.0";
 pub mod method {
     pub const INITIALIZE: &str = "initialize";
     pub const SHUTDOWN: &str = "shutdown";
+    /// Adds a project root the user opened (`AllowRootParams`); later calls may use it.
+    pub const ALLOW_ROOT: &str = "workspace/allowRoot";
     pub const LIST_DIRS: &str = "workspace/listDirs";
     pub const SCAN: &str = "workspace/scan";
     pub const READ: &str = "workspace/read";
@@ -152,6 +154,11 @@ pub struct InitializeResult {
     pub agent_version: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AllowRootParams {
+    pub root: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

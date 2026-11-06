@@ -22,7 +22,15 @@ use tokio::task::{AbortHandle, JoinSet};
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Capabilities reported by `initialize`; the app checks these before using a method.
-pub const CAPABILITIES: &[&str] = &["listDirs", "scan", "read", "apply", "undo", "git"];
+pub const CAPABILITIES: &[&str] = &[
+    "allowRoot",
+    "listDirs",
+    "scan",
+    "read",
+    "apply",
+    "undo",
+    "git",
+];
 
 /// Reads requests from `reader` until EOF or `shutdown`, writing responses to `writer`.
 pub async fn serve<R, W>(reader: R, writer: W, host: Arc<dyn WorkspaceHost>) -> std::io::Result<()>
@@ -113,6 +121,15 @@ async fn dispatch(host: &dyn WorkspaceHost, req: Request) -> Response {
     let id = req.id;
     let result = match req.method.as_str() {
         method::INITIALIZE => initialize(host, req.params).await,
+        method::ALLOW_ROOT => {
+            call(
+                req.params,
+                |p: contextual_protocol::rpc::AllowRootParams| async move {
+                    host.allow_root(&p.root).await
+                },
+            )
+            .await
+        }
         method::LIST_DIRS => call(req.params, |p| host.list_dirs(p)).await,
         method::SCAN => call(req.params, |p| host.scan(p)).await,
         method::READ => call(req.params, |p| host.read(p)).await,

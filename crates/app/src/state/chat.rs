@@ -157,6 +157,11 @@ impl ChatModel {
             .collect()
     }
 
+    /// Saved chats are kept per project location (`Project::key`).
+    fn thread_key(&self, cx: &Context<Self>) -> String {
+        self.project.read(cx).key()
+    }
+
     fn root(&self, cx: &Context<Self>) -> String {
         self.project.read(cx).root.clone()
     }
@@ -522,7 +527,7 @@ impl ChatModel {
                 .collect(),
         );
         let (root, id, title, turns) = (
-            self.root(cx),
+            self.thread_key(cx),
             self.thread.id.clone(),
             saved.title(),
             saved.turns() as u64,
@@ -555,7 +560,7 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        let root = self.root(cx);
+        let root = self.thread_key(cx);
         let job = runtime::spawn(cx, async move { store.list(&root).await });
         cx.spawn(async move |this, cx| {
             let list = job.await.unwrap_or_default();
@@ -579,7 +584,7 @@ impl ChatModel {
         if self.streaming() {
             return;
         }
-        let root = self.root(cx);
+        let root = self.thread_key(cx);
         let job = runtime::spawn(cx, async move { store.load(&root, &id).await });
         cx.spawn(async move |this, cx| {
             let Ok(value) = job.await else { return };
@@ -623,7 +628,7 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        let root = self.root(cx);
+        let root = self.thread_key(cx);
         if id == self.thread.id {
             self.thread.title = Some(title.clone());
         }
@@ -640,7 +645,7 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        let root = self.root(cx);
+        let root = self.thread_key(cx);
         if id == self.thread.id {
             self.start_fresh(cx);
         }
@@ -657,7 +662,7 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        let root = self.root(cx);
+        let root = self.thread_key(cx);
         self.start_fresh(cx);
         let job = runtime::spawn(cx, async move { store.delete_all(&root).await });
         cx.spawn(async move |this, cx| {

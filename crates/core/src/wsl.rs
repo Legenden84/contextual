@@ -97,6 +97,167 @@ mod registry {
     }
 }
 
+// ---------------------------------------------------------------- agent deployment (plan §6.6)
+
+/// Where an agent version lives inside the distro.
+pub fn agent_dir(version: &str) -> String {
+    format!("$HOME/.cache/contextual/agent/{version}")
+}
+
+/// Version folder name: the app version plus a hash of the agent binary, so every new build is
+/// redeployed and old ones are pruned.
+pub fn agent_version(app_version: &str, binary: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = hex::encode(Sha256::digest(binary));
+    format!("{app_version}-{}", &hash[..12])
+}
+
+/// Prints the CPU architecture, then `installed` when this version is already there.
+pub fn probe_script(version: &str) -> String {
+    let dir = agent_dir(version);
+    format!("uname -m; test -x \"{dir}/contextual-agent\" && echo installed; true")
+}
+
+/// Writes stdin to the agent path (atomically), makes it executable and prunes other versions.
+pub fn install_script(version: &str) -> String {
+    let dir = agent_dir(version);
+    format!(
+        "set -e; mkdir -p \"{dir}\"; cat > \"{dir}/contextual-agent.tmp\"; chmod +x \"{dir}/contextual-agent.tmp\"; \
+         mv \"{dir}/contextual-agent.tmp\" \"{dir}/contextual-agent\"; \
+         for d in \"$HOME/.cache/contextual/agent\"/*; do [ \"$d\" = \"{dir}\" ] || rm -rf \"$d\"; done"
+    )
+}
+
+/// Runs the agent through a login shell, so it sees the user's PATH (git, gh) — `wsl.exe -e`
+/// alone starts a bare, non-interactive environment.
+pub fn launch_script(version: &str) -> String {
+    format!("exec \"{}/contextual-agent\"", agent_dir(version))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probe {
+    pub arch: String,
+    pub installed: bool,
+}
+
+pub fn parse_probe(output: &str) -> Probe {
+    let mut lines = output.lines().map(str::trim).filter(|l| !l.is_empty());
+    let arch = lines.next().unwrap_or("").to_string();
+    Probe {
+        installed: lines.any(|l| l == "installed"),
+        arch,
+    }
+}
+
+/// Starts `contextual-agent` inside a WSL distro, deploying it first when needed.
+pub struct WslLauncher {
+    pub distro: String,
+    pub app_version: String,
+    /// `wsl.exe` (configurable for tests).
+    pub wsl: std::path::PathBuf,
+    /// The bundled Linux agents, by architecture (`x86_64`, `aarch64`).
+    pub binaries: Vec<(String, std::path::PathBuf)>,
+    /// Extra environment for `wsl.exe` (tests).
+    pub env: Vec<(String, String)>,
+}
+
+impl WslLauncher {
+    fn command(&self, script: &str, login: bool) -> tokio::process::Command {
+        let mut cmd = tokio::process::Command::new(&self.wsl);
+        cmd.args([
+            "-d",
+            &self.distro,
+            "-e",
+            "sh",
+            if login { "-lc" } else { "-c" },
+            script,
+        ]);
+        cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        cmd
+    }
+
+    async fn run(&self, script: &str, stdin: Option<&[u8]>) -> crate::Result<String> {
+        use tokio::io::AsyncWriteExt;
+        let mut cmd = self.command(script, false);
+        cmd.stdin(if stdin.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| crate::Error::tool(format!("Couldn't run wsl.exe: {e}")))?;
+        if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
+            pipe.write_all(data).await?;
+            drop(pipe);
+        }
+        let out = child.wait_with_output().await?;
+        if !out.status.success() {
+            let err = decode_wsl_output(&out.stderr);
+            let msg = if err.trim().is_empty() {
+                decode_wsl_output(&out.stdout)
+            } else {
+                err
+            };
+            return Err(crate::Error::tool(format!(
+                "WSL ({}): {}",
+                self.distro,
+                msg.trim()
+            )));
+        }
+        Ok(decode_wsl_output(&out.stdout))
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::remote::AgentLauncher for WslLauncher {
+    async fn launch(&self) -> crate::Result<crate::remote::RemoteHost> {
+        // Which architecture, and is a matching agent there already?
+        let first = self
+            .binaries
+            .first()
+            .ok_or_else(|| crate::Error::tool("No Linux agent is bundled with this build."))?;
+        let probe_version = agent_version(&self.app_version, &std::fs::read(&first.1)?);
+        let probe = parse_probe(&self.run(&probe_script(&probe_version), None).await?);
+        let (_, path) = self
+            .binaries
+            .iter()
+            .find(|(arch, _)| *arch == probe.arch)
+            .ok_or_else(|| {
+                crate::Error::tool(format!(
+                    "No agent for {} ({}) is bundled with this build.",
+                    self.distro, probe.arch
+                ))
+            })?;
+        let binary = std::fs::read(path)?;
+        let version = agent_version(&self.app_version, &binary);
+        let installed = if version == probe_version {
+            probe.installed
+        } else {
+            parse_probe(&self.run(&probe_script(&version), None).await?).installed
+        };
+        if !installed {
+            tracing::info!("deploying contextual-agent {version} to {}", self.distro);
+            self.run(&install_script(&version), Some(&binary)).await?;
+        }
+        crate::remote::RemoteHost::spawn(
+            self.command(&launch_script(&version), true),
+            &self.app_version,
+            Vec::new(),
+        )
+        .await
+    }
+
+    fn describe(&self) -> String {
+        format!("WSL: {}", self.distro)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +293,28 @@ mod tests {
         assert_eq!(parse_list_quiet(&utf16(text, false)), expected);
         assert_eq!(parse_list_quiet(text.as_bytes()), expected);
         assert!(parse_list_quiet(b"").is_empty());
+    }
+
+    #[test]
+    fn deployment_scripts() {
+        let v = agent_version("0.1.0", b"binary");
+        assert!(v.starts_with("0.1.0-") && v.len() == "0.1.0-".len() + 12);
+        assert_ne!(v, agent_version("0.1.0", b"other"));
+        assert!(probe_script(&v).contains(&format!("agent/{v}/contextual-agent")));
+        assert!(install_script(&v).contains("chmod +x"));
+        assert_eq!(
+            parse_probe("x86_64\ninstalled\n"),
+            Probe {
+                arch: "x86_64".into(),
+                installed: true
+            }
+        );
+        assert_eq!(
+            parse_probe("aarch64\n"),
+            Probe {
+                arch: "aarch64".into(),
+                installed: false
+            }
+        );
     }
 }

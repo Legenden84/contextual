@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use contextual_core::location::{Location, ProjectRoot};
 use contextual_core::logic::tree::{
     NodeStats, Selection, check_state, filter_tree, is_overridable, node_stats, pickable_files,
     selectable_files,
@@ -28,6 +29,8 @@ pub enum Tab {
 
 pub struct Project {
     pub root: String,
+    /// Where the project lives (local, or a WSL distro).
+    pub location: Location,
     pub name: String,
     pub branch: Option<String>,
     /// The scan stopped at the entry cap.
@@ -82,12 +85,13 @@ fn build_index(nodes: &[TreeNode], trail: &mut Vec<usize>, out: &mut HashMap<Str
 }
 
 impl Project {
-    pub fn from_scan(scan: ScanResult) -> Self {
+    pub fn from_scan(scan: ScanResult, location: Location) -> Self {
         let tree = sorted(convert(&scan.tree));
         let rules: Vec<Rule> = convert(&scan.rules);
         let mut index = HashMap::new();
         build_index(&tree, &mut Vec::new(), &mut index);
         let mut this = Self {
+            location,
             root: scan.root,
             name: scan.name,
             branch: scan.branch,
@@ -118,7 +122,7 @@ impl Project {
 
     /// Replaces the tree after a rescan, keeping what still exists of the selection and tabs.
     pub fn apply_rescan(&mut self, scan: ScanResult) {
-        let fresh = Self::from_scan(scan);
+        let fresh = Self::from_scan(scan, self.location.clone());
         let pickable = pickable_files(&fresh.tree);
         let rules_on = self
             .rules_on
@@ -141,6 +145,15 @@ impl Project {
             self.active = Tab::Chat;
         }
         self.recompute();
+    }
+
+    /// Key for per-project app data (saved chats): see `ProjectRoot::key`.
+    pub fn key(&self) -> String {
+        ProjectRoot {
+            location: self.location.clone(),
+            path: self.root.clone(),
+        }
+        .key()
     }
 
     pub fn tree(&self) -> &[TreeNode] {
@@ -358,7 +371,7 @@ mod tests {
 
     #[test]
     fn selection_filter_and_tabs() {
-        let p = &mut Project::from_scan(fixture());
+        let p = &mut Project::from_scan(fixture(), Location::Local);
         // Folders first, then files, at the top level.
         let kinds: Vec<_> = p.tree().iter().map(|n| n.kind).collect();
         let first_file = kinds

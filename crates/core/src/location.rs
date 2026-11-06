@@ -26,6 +26,17 @@ impl Location {
     }
 }
 
+impl ProjectRoot {
+    /// Key for per-project app data (saved chats): the path for local projects,
+    /// `wsl://<distro><path>` for WSL ones.
+    pub fn key(&self) -> String {
+        match &self.location {
+            Location::Local => self.path.clone(),
+            Location::Wsl { distro } => format!("wsl://{distro}{}", self.path),
+        }
+    }
+}
+
 /// A project root on a host: the host's location and the path in that host's own syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

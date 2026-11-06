@@ -124,6 +124,7 @@ impl Render for WelcomeScreen {
             .enumerate()
             .map(|(i, r)| {
                 let path = r.path.clone();
+                let location = r.location.clone();
                 let app = app.clone();
                 div()
                     .id(("recent", i))
@@ -136,7 +137,9 @@ impl Render for WelcomeScreen {
                     .cursor_pointer()
                     .hover(|s| s.bg(hsla(c.surface_hover)))
                     .on_click(move |_, _, cx| {
-                        app.update(cx, |a, cx| a.open_folder(path.clone(), cx))
+                        app.update(cx, |a, cx| {
+                            a.open_folder(path.clone(), Some(location.clone()), cx)
+                        })
                     })
                     .child(folder_glyph(false, cx))
                     .child(

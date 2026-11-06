@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use contextual_core::error::ErrorCode;
 use contextual_core::host::{LocalHost, WorkspaceHost};
-use contextual_core::remote::RemoteHost;
+use contextual_core::remote::{LocalAgentLauncher, RemoteHost, SupervisedHost};
 use contextual_protocol::fs::{
     Apply, ApplyChange, ChangeStatus, ListDirs, ReadFiles, Scan, ScanOptions, Undo,
 };
@@ -80,6 +80,24 @@ async fn remote(f: &Fixture) -> Arc<dyn WorkspaceHost> {
     )
 }
 
+fn launcher(f: &Fixture) -> LocalAgentLauncher {
+    LocalAgentLauncher {
+        binary: env!("CARGO_BIN_EXE_contextual-agent").into(),
+        app_version: "test".into(),
+        env: vec![(
+            "XDG_CACHE_HOME".into(),
+            f.undo.path().to_string_lossy().into_owned(),
+        )],
+    }
+}
+
+/// The agent behind the supervisor (started lazily, restarted when it dies).
+async fn supervised(f: &Fixture) -> Arc<dyn WorkspaceHost> {
+    let host = SupervisedHost::new(Arc::new(launcher(f)));
+    host.allow_root(&f.root()).await.unwrap();
+    Arc::new(host)
+}
+
 macro_rules! contract {
     ($($name:ident),* $(,)?) => {
         mod local_host {
@@ -87,6 +105,9 @@ macro_rules! contract {
         }
         mod remote_host {
             $(#[tokio::test] async fn $name() { super::$name(super::remote).await })*
+        }
+        mod supervised_host {
+            $(#[tokio::test] async fn $name() { super::$name(super::supervised).await })*
         }
     };
 }
@@ -287,4 +308,52 @@ async fn remote_handshake_and_shutdown() {
         .await
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::Io);
+}
+
+#[tokio::test]
+async fn supervisor_restarts_a_dead_agent_and_keeps_roots() {
+    let f = Fixture::new();
+    let host = SupervisedHost::new(Arc::new(launcher(&f)));
+    host.allow_root(&f.root()).await.unwrap();
+    let first = host.connected().await.unwrap();
+    assert!(
+        host.scan(Scan {
+            root: f.root(),
+            options: ScanOptions::default()
+        })
+        .await
+        .is_ok()
+    );
+
+    // The agent goes away (crash, distro shut down…).
+    first.shutdown().await.unwrap();
+    for _ in 0..50 {
+        if !first.is_alive() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(!first.is_alive());
+
+    // The next call starts a new agent, which already knows the project root.
+    let scan = host
+        .scan(Scan {
+            root: f.root(),
+            options: ScanOptions::default(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(scan.files, 3);
+    let second = host.connected().await.unwrap();
+    assert!(!Arc::ptr_eq(&first, &second));
+    // Roots stay enforced on the new agent.
+    let other = tempfile::tempdir().unwrap();
+    let err = host
+        .scan(Scan {
+            root: other.path().to_string_lossy().into(),
+            options: ScanOptions::default(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
 }

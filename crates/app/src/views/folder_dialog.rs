@@ -1,6 +1,7 @@
 //! Open folder: a browser over the workspace host's `list_dirs`, so it browses the machine the
 //! project lives on (needed for WSL; on Linux it is also the picker). Accepts typed paths.
 
+use contextual_core::location::Location;
 use contextual_protocol::fs::{DirListing, ListDirs};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _};
@@ -31,13 +32,15 @@ pub struct FolderDialog {
     focus: FocusHandle,
     /// A path to put in the input on the next render (setting it needs the window).
     pending_input: Option<String>,
+    /// Where the listed folders live; clicks stay here, typed paths may move elsewhere.
+    location: Location,
     _sub: Subscription,
 }
 
 impl FolderDialog {
     pub fn new(
         app: Entity<AppModel>,
-        start: Option<String>,
+        start: Option<(String, Location)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -47,7 +50,7 @@ impl FolderDialog {
         let sub = cx.subscribe(&input, |this: &mut Self, input, e: &InputEvent, cx| {
             if let InputEvent::PressEnter { .. } = e {
                 let path = input.read(cx).value().to_string();
-                this.go(Some(path), cx);
+                this.go_typed(path, cx);
             }
         });
         let focus = cx.focus_handle();
@@ -62,14 +65,41 @@ impl FolderDialog {
             error: None,
             focus,
             pending_input: None,
+            location: start
+                .as_ref()
+                .map(|(_, l)| l.clone())
+                .unwrap_or(Location::Local),
             _sub: sub,
         };
-        this.go(start, cx);
+        this.go(start.map(|(p, _)| p), cx);
         this
     }
 
+    /// A path the user typed: it may point into WSL (`\\wsl.localhost\…`) or back to Windows.
+    fn go_typed(&mut self, text: String, cx: &mut Context<Self>) {
+        let detected = self.app.read(cx).detect_location(&text);
+        match detected {
+            Ok(root) => {
+                self.location = root.location;
+                self.go(Some(root.path), cx);
+            }
+            Err(e) => {
+                self.error = Some(e);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Browses another location from its home folder.
+    fn go_to(&mut self, location: Location, cx: &mut Context<Self>) {
+        self.location = location;
+        self.go(None, cx);
+    }
+
+    /// Lists `path` (home when `None`) in the current location.
     fn go(&mut self, path: Option<String>, cx: &mut Context<Self>) {
-        let host = self.app.read(cx).host();
+        let location = self.location.clone();
+        let host = self.app.update(cx, |a, _| a.host_for(&location));
         let req = ListDirs {
             path,
             hidden: self.hidden,
@@ -104,7 +134,9 @@ impl FolderDialog {
             .clone()
             .or_else(|| self.listing.as_ref().map(|l| l.path.clone()));
         if let Some(path) = target {
-            self.app.update(cx, |a, cx| a.open_folder(path, cx));
+            let location = self.location.clone();
+            self.app
+                .update(cx, |a, cx| a.open_folder(path, Some(location), cx));
         }
     }
 
@@ -153,6 +185,46 @@ impl Render for FolderDialog {
                 .on_click(cx.listener(move |t, _, _, cx| t.go(Some(path.clone()), cx)))
                 .child(SharedString::from(p.label))
         });
+        // Other locations: each WSL distro, and back to this machine when browsing inside WSL.
+        let mut others: Vec<(String, Location)> = self
+            .app
+            .read(cx)
+            .distros()
+            .iter()
+            .map(|d| {
+                (
+                    format!("WSL: {}", d.name),
+                    Location::Wsl {
+                        distro: d.name.clone(),
+                    },
+                )
+            })
+            .filter(|(_, l)| *l != self.location)
+            .collect();
+        if self.location != Location::Local
+            && !self.app.read(cx).distros().iter().any(|d| d.name == "dev")
+        {
+            others.insert(0, ("This PC".into(), Location::Local));
+        }
+        let location_buttons: Vec<_> = others
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, loc))| {
+                div()
+                    .id(("location", i))
+                    .flex()
+                    .items_center()
+                    .h(row_height())
+                    .px(sp(2))
+                    .rounded(px(contextual_theme::radius::SM))
+                    .cursor_pointer()
+                    .text_color(hsla(c.ink_muted))
+                    .hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
+                    .on_click(cx.listener(move |t, _, _, cx| t.go_to(loc.clone(), cx)))
+                    .child(SharedString::from(label))
+            })
+            .collect();
+        let location_label = (self.location != Location::Local).then(|| self.location.label());
         let rows = dirs.into_iter().enumerate().map(|(i, d)| {
             let selected = self.selected.as_deref() == Some(d.path.as_str());
             let (pick, enter) = (d.path.clone(), d.path.clone());
@@ -250,7 +322,7 @@ impl Render for FolderDialog {
                             )
                             .child(Button::new("go", "Go").on_click(cx.listener(|t, _, _, cx| {
                                 let v = t.input.read(cx).value().to_string();
-                                t.go(Some(v), cx)
+                                t.go_typed(v, cx)
                             }))),
                     )
                     .child(
@@ -261,7 +333,16 @@ impl Render for FolderDialog {
                             .px(sp(4))
                             .pt(sp(2))
                             .type_style(contextual_theme::type_style::UI_SMALL)
+                            .when_some(location_label, |d, l| {
+                                d.child(
+                                    div()
+                                        .px(sp(1))
+                                        .text_color(hsla(c.accent_ink))
+                                        .child(SharedString::from(l)),
+                                )
+                            })
                             .children(place_buttons)
+                            .children(location_buttons)
                             .child(div().flex_1())
                             .child(Switch::new("hidden", self.hidden).on_toggle(cx.listener(
                                 |t, _, _, cx| {

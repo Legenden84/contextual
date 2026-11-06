@@ -77,7 +77,7 @@ impl PrDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let host = app.read(cx).host();
+        let host = app.update(cx, |a, _| a.host());
         let base_select = cx.new(|cx| {
             SelectState::new(
                 SearchableVec::new(Vec::<SharedString>::new()),

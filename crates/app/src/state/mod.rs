@@ -2,15 +2,16 @@
 //! the screen, settings, recents, the Foundry connection and the workspace host.
 
 pub mod chat;
+pub mod hosts;
 pub mod project;
 pub mod scm;
 
 use std::sync::Arc;
 
-use contextual_core::host::{LocalHost, WorkspaceHost};
+use contextual_core::host::WorkspaceHost;
 use contextual_core::llm::FoundryClient;
 use contextual_core::llm::config::{ConfigProblems, FoundryConfig};
-use contextual_core::location::Location;
+use contextual_core::location::{Location, ProjectRoot};
 use contextual_core::logic::foundry_status::{FoundryStatus, ReadyHealth};
 use contextual_core::logic::types::Deployment;
 use contextual_core::recents::{AppState, RecentProject, StateStore};
@@ -53,7 +54,9 @@ pub struct AppModel {
     pub foundry: FoundryStatus,
     pub config: Option<FoundryConfig>,
     pub connection_test: ConnectionTest,
-    host: Arc<dyn WorkspaceHost>,
+    hosts: hosts::Hosts,
+    /// Host of the open project (local, or the agent in its WSL distro).
+    project_host: Option<Arc<dyn WorkspaceHost>>,
     pub project: Option<Entity<Project>>,
     /// Source Control of the open project.
     pub scm: Option<Entity<scm::ScmModel>>,
@@ -90,7 +93,8 @@ impl AppModel {
             foundry: FoundryStatus::Checking,
             config: None,
             connection_test: ConnectionTest::Idle,
-            host: Arc::new(LocalHost::new()),
+            hosts: hosts::Hosts::new(),
+            project_host: None,
             project: None,
             scm: None,
             scanning: false,
@@ -101,8 +105,26 @@ impl AppModel {
         this
     }
 
-    pub fn host(&self) -> Arc<dyn WorkspaceHost> {
-        self.host.clone()
+    /// Host of the open project, or the local one.
+    pub fn host(&mut self) -> Arc<dyn WorkspaceHost> {
+        match &self.project_host {
+            Some(h) => h.clone(),
+            None => self.hosts.get(&Location::Local),
+        }
+    }
+
+    /// Host for a location (the folder dialog browses where the user points it).
+    pub fn host_for(&mut self, location: &Location) -> Arc<dyn WorkspaceHost> {
+        self.hosts.get(location)
+    }
+
+    pub fn detect_location(&self, input: &str) -> Result<ProjectRoot, String> {
+        self.hosts.detect(input)
+    }
+
+    /// WSL distros to offer under Places (Windows; the dev distro in dev-remote mode).
+    pub fn distros(&self) -> &[contextual_core::wsl::Distro] {
+        &self.hosts.distros
     }
 
     /// Re-resolves the Foundry config from settings, env vars and the keychain.
@@ -193,6 +215,7 @@ impl AppModel {
     pub fn close_project(&mut self, cx: &mut Context<Self>) {
         self.project = None;
         self.scm = None;
+        self.project_host = None;
         self.screen = Screen::Welcome;
         self.state.last_open = None;
         self.save_state();
@@ -205,14 +228,34 @@ impl AppModel {
         cx.notify();
     }
 
-    /// Scans `path` and opens it as the project.
-    pub fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
-        let host = self.host.clone();
+    /// Scans `path` and opens it as the project. Without a location, it's detected from the path
+    /// (`\\wsl.localhost\Ubuntu\…` → WSL, `C:\…` → local…).
+    pub fn open_folder(
+        &mut self,
+        path: String,
+        location: Option<Location>,
+        cx: &mut Context<Self>,
+    ) {
+        let root = match location {
+            Some(location) => ProjectRoot { location, path },
+            None => match self.hosts.detect(&path) {
+                Ok(r) => r,
+                Err(e) => {
+                    self.error = Some(e);
+                    cx.notify();
+                    return;
+                }
+            },
+        };
+        let host = self.hosts.get(&root.location);
+        let path = root.path.clone();
+        let location = root.location.clone();
         let options = self.settings.workspace.scan_options();
         self.scanning = true;
         self.error = None;
         self.folder_dialog_open = false;
         cx.notify();
+        let project_host = host.clone();
         let job = runtime::spawn(cx, async move {
             host.allow_root(&path).await?;
             host.scan(Scan {
@@ -230,12 +273,13 @@ impl AppModel {
                         this.state.opened(RecentProject {
                             name: scan.name.clone(),
                             path: scan.root.clone(),
-                            location: Location::Local,
+                            location: location.clone(),
                             opened_at: now_rfc3339(),
                         });
                         this.save_state();
-                        let project = cx.new(|_| Project::from_scan(scan));
-                        let host = this.host.clone();
+                        let project = cx.new(|_| Project::from_scan(scan, location));
+                        this.project_host = Some(project_host.clone());
+                        let host = project_host;
                         let scm = cx.new(|cx| scm::ScmModel::new(project.clone(), host, cx));
                         // The status bar shows the branch: re-render when it changes.
                         cx.observe(&scm, |_, _, cx| cx.notify()).detach();
@@ -258,7 +302,7 @@ impl AppModel {
             return;
         };
         let root = project.read(cx).root.clone();
-        let host = self.host.clone();
+        let host = self.host();
         let options = self.settings.workspace.scan_options();
         self.scanning = true;
         cx.notify();
@@ -328,10 +372,11 @@ impl AppModel {
             .last_open
             .as_ref()
             .filter(|_| !no_restore)
-            .map(|r| r.path.clone());
-        let path = cli_path.or(last);
-        if let Some(path) = path {
-            self.open_folder(path, cx);
+            .map(|r| (r.path.clone(), Some(r.location.clone())));
+        // A CLI path is detected like a typed one; the last project knows its location.
+        let target = cli_path.map(|p| (p, None)).or(last);
+        if let Some((path, location)) = target {
+            self.open_folder(path, location, cx);
         }
     }
 }

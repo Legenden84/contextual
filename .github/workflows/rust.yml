@@ -38,6 +38,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
+    needs: agent-musl
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -45,27 +46,44 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Release builds precompile the DirectX shaders with fxc.exe, so Windows releases build here.
       - run: cargo build -p contextual --release --locked
+      # The Windows app deploys these into WSL distros; it looks for them next to contextual.exe.
+      - if: runner.os == 'Windows'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: contextual-agent-*-linux
+          merge-multiple: true
+          path: target/release
       - uses: actions/upload-artifact@v4
         with:
           name: contextual-${{ runner.os }}
           path: |
             target/release/contextual.exe
+            target/release/contextual-agent-*-linux
             target/release/contextual
 
   agent-musl:
-    name: contextual-agent (x86_64-unknown-linux-musl)
-    runs-on: ubuntu-latest
+    name: contextual-agent (${{ matrix.arch }}-unknown-linux-musl)
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.arch }}-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p contextual-agent --release --locked --target x86_64-unknown-linux-musl
+      # Static and pure Rust (no HTTP/TLS in the agent), so no musl C toolchain is needed.
+      - run: cargo build -p contextual-agent --release --locked --target ${{ matrix.arch }}-unknown-linux-musl
+      - run: cp target/${{ matrix.arch }}-unknown-linux-musl/release/contextual-agent contextual-agent-${{ matrix.arch }}-linux
       - uses: actions/upload-artifact@v4
         with:
-          name: contextual-agent-x86_64-linux-musl
-          path: target/x86_64-unknown-linux-musl/release/contextual-agent
+          name: contextual-agent-${{ matrix.arch }}-linux
+          path: contextual-agent-${{ matrix.arch }}-linux
 
   no-hardcoded-styles:
     name: theme rule (no literal colours in the app)

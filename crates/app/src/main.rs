@@ -60,6 +60,7 @@ fn args() -> Args {
 
 fn main() {
     runtime::init_local_offset();
+    state::hosts::kill_children_with_app();
     let args = args();
     gpui_kit::application()
         .with_assets(assets::AppAssets)
