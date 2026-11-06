@@ -1,0 +1,692 @@
+{
+  "tracked": [
+    "src/crlf.cs",
+    "src/bom.txt",
+    "src/no-newline.txt",
+    "src/mixed.txt",
+    "src/lower.ts",
+    "src/main.ts",
+    "new/dir/deep/file.txt",
+    "top.txt",
+    "nob.txt"
+  ],
+  "trackedDirs": [
+    "new",
+    "new/dir",
+    "new/dir/deep"
+  ],
+  "sha1": {
+    "": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+    "abc": "a9993e364706816aba3e25717850c26c9cd0d89d",
+    "/home/me/proj": "bcb8507c92f3befda1cac72b998cb51ab82fbb84",
+    "C:\\Users\\Me": "779c136771da15ed5ad66b4658a1e79c46411cc5",
+    "héllo — 😀": "58f3360101e353221b73e61b951d045b12d611a3",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "291e9a6c66994949b57ba5e650361e98fc36b1ba"
+  },
+  "steps": [
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "src/main.ts",
+          "status": "A",
+          "content": "x"
+        },
+        {
+          "path": "gone.txt",
+          "status": "M",
+          "content": "x"
+        },
+        {
+          "path": "src/crlf.cs",
+          "status": "M",
+          "content": "x",
+          "expected": "stale"
+        },
+        {
+          "path": "src/bom.txt",
+          "status": "M"
+        },
+        {
+          "path": "missing.txt",
+          "status": "D"
+        },
+        {
+          "path": "top.txt",
+          "status": "A",
+          "content": "fine"
+        }
+      ],
+      "error": {
+        "status": 409,
+        "message": "Nothing was saved. src/main.ts already exists; gone.txt no longer exists; src/crlf.cs changed on disk since it was sent; src/bom.txt has no content; missing.txt no longer exists."
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "../x.txt",
+          "status": "A",
+          "content": "x"
+        }
+      ],
+      "error": {
+        "status": 400,
+        "message": "Path escapes the project: ../x.txt"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "escape/secret.txt",
+          "status": "M",
+          "content": "x"
+        }
+      ],
+      "error": {
+        "status": 400,
+        "message": "Path leaves the project through a symlink: escape/secret.txt"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "escape/new.txt",
+          "status": "A",
+          "content": "x"
+        }
+      ],
+      "error": {
+        "status": 400,
+        "message": "Path leaves the project through a symlink: escape/new.txt"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "/abs.txt",
+          "status": "A",
+          "content": "x"
+        }
+      ],
+      "error": {
+        "status": 400,
+        "message": "Invalid project path: /abs.txt"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [],
+      "error": {
+        "status": 400,
+        "message": "No changes to apply."
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "src/crlf.cs",
+          "status": "M",
+          "content": "namespace Y;\n\npublic class B\n{\n}\n",
+          "expected": "namespace X;\r\n\r\npublic class A\r\n{\r\n}\r\n"
+        },
+        {
+          "path": "src/bom.txt",
+          "status": "M",
+          "content": "BOM line 1\nchanged\n",
+          "expected": "BOM line 1\nline 2\n"
+        },
+        {
+          "path": "src/no-newline.txt",
+          "status": "M",
+          "content": "new last line\n"
+        },
+        {
+          "path": "src/mixed.txt",
+          "status": "M",
+          "content": "1\n2\n3"
+        },
+        {
+          "path": "new/dir/deep/file.txt",
+          "status": "A",
+          "content": "deep new"
+        },
+        {
+          "path": "top.txt",
+          "status": "A",
+          "content": "top\r\nwin"
+        },
+        {
+          "path": "src/lower.ts",
+          "status": "D",
+          "expected": "export {}\n"
+        },
+        {
+          "path": "link-to-src/main.ts",
+          "status": "M",
+          "content": "via link\n"
+        }
+      ],
+      "result": {
+        "created": 2,
+        "overwritten": 5,
+        "deleted": 1,
+        "backupId": "<backupId>"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFk7DQoNCnB1YmxpYyBjbGFzcyBCDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KY2hhbmdlZA0K",
+          "src/no-newline.txt": "bmV3IGxhc3QgbGluZQ==",
+          "src/mixed.txt": "MQ0KMg0KMw==",
+          "src/lower.ts": null,
+          "src/main.ts": "dmlhIGxpbmsK",
+          "new/dir/deep/file.txt": "ZGVlcCBuZXcK",
+          "top.txt": "dG9wCndpbgo=",
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": true,
+          "new/dir": true,
+          "new/dir/deep": true
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [
+              "new/dir/deep/file.txt",
+              "top.txt"
+            ],
+            "replaced": [
+              "src/crlf.cs",
+              "src/bom.txt",
+              "src/no-newline.txt",
+              "src/mixed.txt",
+              "src/lower.ts",
+              "link-to-src/main.ts"
+            ],
+            "createdDirs": [
+              "new/dir/deep",
+              "new/dir",
+              "new"
+            ],
+            "written": {
+              "src/crlf.cs": "63affda1df5f1075ded0a705d7997dc963b4a7f5",
+              "src/bom.txt": "1ada66448436feec49ac82d2824a3c9e9e5f0db1",
+              "src/no-newline.txt": "2c04fb05beea621440d706a9b96b6bf4b834d8eb",
+              "src/mixed.txt": "3fa6b918ad3fb6ac645cdd3caa17cb6d1492c99b",
+              "new/dir/deep/file.txt": "b5d7005322252643e8ec0b2139d8d255f7530bea",
+              "top.txt": "a7b7b2f53f6e2bceb90bdaf775bddc0cce6e4dcd",
+              "src/lower.ts": null,
+              "link-to-src/main.ts": "730d175f04f508e6901a8f5f6213656d8d77f4be"
+            }
+          },
+          "files": {
+            "link-to-src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+            "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+            "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+            "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+            "src/mixed.txt": "YQ0KYgpjDQpk",
+            "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l"
+          }
+        }
+      ]
+    },
+    {
+      "op": "undo",
+      "backupId": "$last",
+      "result": {
+        "restored": 6,
+        "removed": 2
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "undo",
+      "backupId": "$last",
+      "error": {
+        "status": 404,
+        "message": "Nothing to undo: the snapshot is gone."
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "undo",
+      "backupId": "bad id!",
+      "error": {
+        "status": 400,
+        "message": "Invalid undo id."
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": []
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "src/main.ts",
+          "status": "M",
+          "content": "edited by save\n"
+        }
+      ],
+      "result": {
+        "created": 0,
+        "overwritten": 1,
+        "deleted": 0,
+        "backupId": "<backupId>"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZWRpdGVkIGJ5IHNhdmUK",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [],
+            "replaced": [
+              "src/main.ts"
+            ],
+            "createdDirs": [],
+            "written": {
+              "src/main.ts": "3c5cbe952384924d7489544274958a4a640e9721"
+            }
+          },
+          "files": {
+            "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg=="
+          }
+        }
+      ]
+    },
+    {
+      "op": "write",
+      "path": "src/main.ts",
+      "content": "edited later\n",
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZWRpdGVkIGxhdGVyCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [],
+            "replaced": [
+              "src/main.ts"
+            ],
+            "createdDirs": [],
+            "written": {
+              "src/main.ts": "3c5cbe952384924d7489544274958a4a640e9721"
+            }
+          },
+          "files": {
+            "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg=="
+          }
+        }
+      ]
+    },
+    {
+      "op": "undo",
+      "backupId": "$last",
+      "error": {
+        "status": 409,
+        "message": "Not undone: edited since the save: src/main.ts."
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZWRpdGVkIGxhdGVyCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": null
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [],
+            "replaced": [
+              "src/main.ts"
+            ],
+            "createdDirs": [],
+            "written": {
+              "src/main.ts": "3c5cbe952384924d7489544274958a4a640e9721"
+            }
+          },
+          "files": {
+            "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg=="
+          }
+        }
+      ]
+    },
+    {
+      "op": "apply",
+      "backup": false,
+      "changes": [
+        {
+          "path": "nob.txt",
+          "status": "A",
+          "content": "no backup"
+        }
+      ],
+      "result": {
+        "created": 1,
+        "overwritten": 0,
+        "deleted": 0,
+        "backupId": null
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZWRpdGVkIGxhdGVyCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": "bm8gYmFja3VwCg=="
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [],
+            "replaced": [
+              "src/main.ts"
+            ],
+            "createdDirs": [],
+            "written": {
+              "src/main.ts": "3c5cbe952384924d7489544274958a4a640e9721"
+            }
+          },
+          "files": {
+            "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg=="
+          }
+        }
+      ]
+    },
+    {
+      "op": "apply",
+      "backup": true,
+      "changes": [
+        {
+          "path": "src",
+          "status": "A",
+          "content": "folder"
+        }
+      ],
+      "error": {
+        "status": 500,
+        "message": "EISDIR: illegal operation on a directory, open '<TMP>/basic/src'"
+      },
+      "after": {
+        "files": {
+          "src/crlf.cs": "bmFtZXNwYWNlIFg7DQoNCnB1YmxpYyBjbGFzcyBBDQp7DQp9DQo=",
+          "src/bom.txt": "77u/Qk9NIGxpbmUgMQ0KbGluZSAyDQo=",
+          "src/no-newline.txt": "bGFzdCBsaW5lIGhhcyBubyBuZXdsaW5l",
+          "src/mixed.txt": "YQ0KYgpjDQpk",
+          "src/lower.ts": "ZXhwb3J0IHt9Cg==",
+          "src/main.ts": "ZWRpdGVkIGxhdGVyCg==",
+          "new/dir/deep/file.txt": null,
+          "top.txt": null,
+          "nob.txt": "bm8gYmFja3VwCg=="
+        },
+        "dirs": {
+          "new": false,
+          "new/dir": false,
+          "new/dir/deep": false
+        }
+      },
+      "snapshots": [
+        {
+          "hashMatches": true,
+          "manifest": {
+            "created": [],
+            "replaced": [
+              "src/main.ts"
+            ],
+            "createdDirs": [],
+            "written": {
+              "src/main.ts": "3c5cbe952384924d7489544274958a4a640e9721"
+            }
+          },
+          "files": {
+            "src/main.ts": "ZXhwb3J0IGNvbnN0IG1haW4gPSAoKSA9PiAxCg=="
+          }
+        },
+        {
+          "hashMatches": true,
+          "manifest": null,
+          "files": {}
+        }
+      ]
+    }
+  ]
+}
