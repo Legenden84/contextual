@@ -1,0 +1,212 @@
+[
+  {
+    "input": "<TMP>/basic",
+    "hidden": false,
+    "result": {
+      "path": "<TMP>/basic",
+      "parent": "<TMP>",
+      "dirs": [
+        {
+          "name": "assets",
+          "path": "<TMP>/basic/assets",
+          "project": false
+        },
+        {
+          "name": "bin",
+          "path": "<TMP>/basic/bin",
+          "project": false
+        },
+        {
+          "name": "dist",
+          "path": "<TMP>/basic/dist",
+          "project": false
+        },
+        {
+          "name": "empty-skill-parent",
+          "path": "<TMP>/basic/empty-skill-parent",
+          "project": false
+        },
+        {
+          "name": "ignored-dir",
+          "path": "<TMP>/basic/ignored-dir",
+          "project": false
+        },
+        {
+          "name": "node_modules",
+          "path": "<TMP>/basic/node_modules",
+          "project": false
+        },
+        {
+          "name": "obj",
+          "path": "<TMP>/basic/obj",
+          "project": false
+        },
+        {
+          "name": "src",
+          "path": "<TMP>/basic/src",
+          "project": false
+        },
+        {
+          "name": "tools",
+          "path": "<TMP>/basic/tools",
+          "project": true
+        },
+        {
+          "name": "web",
+          "path": "<TMP>/basic/web",
+          "project": true
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/basic",
+    "hidden": true,
+    "result": {
+      "path": "<TMP>/basic",
+      "parent": "<TMP>",
+      "dirs": [
+        {
+          "name": ".claude",
+          "path": "<TMP>/basic/.claude",
+          "project": false
+        },
+        {
+          "name": ".contextual",
+          "path": "<TMP>/basic/.contextual",
+          "project": false
+        },
+        {
+          "name": ".cursor",
+          "path": "<TMP>/basic/.cursor",
+          "project": false
+        },
+        {
+          "name": ".git",
+          "path": "<TMP>/basic/.git",
+          "project": false
+        },
+        {
+          "name": ".github",
+          "path": "<TMP>/basic/.github",
+          "project": false
+        },
+        {
+          "name": ".hiddendir",
+          "path": "<TMP>/basic/.hiddendir",
+          "project": false
+        },
+        {
+          "name": "assets",
+          "path": "<TMP>/basic/assets",
+          "project": false
+        },
+        {
+          "name": "bin",
+          "path": "<TMP>/basic/bin",
+          "project": false
+        },
+        {
+          "name": "dist",
+          "path": "<TMP>/basic/dist",
+          "project": false
+        },
+        {
+          "name": "empty-skill-parent",
+          "path": "<TMP>/basic/empty-skill-parent",
+          "project": false
+        },
+        {
+          "name": "ignored-dir",
+          "path": "<TMP>/basic/ignored-dir",
+          "project": false
+        },
+        {
+          "name": "node_modules",
+          "path": "<TMP>/basic/node_modules",
+          "project": false
+        },
+        {
+          "name": "obj",
+          "path": "<TMP>/basic/obj",
+          "project": false
+        },
+        {
+          "name": "src",
+          "path": "<TMP>/basic/src",
+          "project": false
+        },
+        {
+          "name": "tools",
+          "path": "<TMP>/basic/tools",
+          "project": true
+        },
+        {
+          "name": "web",
+          "path": "<TMP>/basic/web",
+          "project": true
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/basic/src",
+    "hidden": false,
+    "result": {
+      "path": "<TMP>/basic/src",
+      "parent": "<TMP>/basic",
+      "dirs": [
+        {
+          "name": "nested",
+          "path": "<TMP>/basic/src/nested",
+          "project": false
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "input": "  \"<TMP>/basic/web/\" ",
+    "hidden": false,
+    "result": {
+      "path": "<TMP>/basic/web",
+      "parent": "<TMP>/basic",
+      "dirs": [],
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/basic/src/../tools",
+    "hidden": false,
+    "result": {
+      "path": "<TMP>/basic/tools",
+      "parent": "<TMP>/basic",
+      "dirs": [
+        {
+          "name": "skills",
+          "path": "<TMP>/basic/tools/skills",
+          "project": false
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/missing",
+    "hidden": false,
+    "error": {
+      "status": 404,
+      "message": "Folder not found: <TMP>/missing"
+    }
+  },
+  {
+    "input": "<TMP>/basic/AGENTS.md",
+    "hidden": false,
+    "error": {
+      "status": 400,
+      "message": "Not a folder: <TMP>/basic/AGENTS.md"
+    }
+  }
+]

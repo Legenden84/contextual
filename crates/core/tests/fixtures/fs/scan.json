@@ -1,0 +1,2023 @@
+[
+  {
+    "input": "<TMP>/basic",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "packages.lock.json",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 256,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "result": {
+      "name": "basic",
+      "root": "<TMP>/basic",
+      "branch": "feature/parity",
+      "tree": [
+        {
+          "name": ".claude",
+          "path": ".claude",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "settings.json",
+              "path": ".claude/settings.json",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".cursor",
+          "path": ".cursor",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "rules",
+              "path": ".cursor/rules",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "ignore.txt",
+                  "path": ".cursor/rules/ignore.txt",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "notes.md",
+                  "path": ".cursor/rules/notes.md",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "style.mdc",
+                  "path": ".cursor/rules/style.mdc",
+                  "kind": "file",
+                  "tokens": 9,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "Zeta.MD",
+                  "path": ".cursor/rules/Zeta.MD",
+                  "kind": "file",
+                  "tokens": 1,
+                  "mtimeMs": "<mtime>"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": ".github",
+          "path": ".github",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "copilot-instructions.md",
+              "path": ".github/copilot-instructions.md",
+              "kind": "file",
+              "tokens": 5,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".hiddendir",
+          "path": ".hiddendir",
+          "kind": "dir",
+          "excluded": "hidden",
+          "children": []
+        },
+        {
+          "name": "assets",
+          "path": "assets",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "data.bin",
+              "path": "assets/data.bin",
+              "kind": "file",
+              "tokens": 2,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "font.woff2",
+              "path": "assets/font.woff2",
+              "kind": "file",
+              "tokens": 4,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "logo.png",
+              "path": "assets/logo.png",
+              "kind": "file",
+              "tokens": 765,
+              "mtimeMs": "<mtime>",
+              "image": true
+            },
+            {
+              "name": "nul.txt",
+              "path": "assets/nul.txt",
+              "kind": "file",
+              "tokens": 3,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "photo.JPG",
+              "path": "assets/photo.JPG",
+              "kind": "file",
+              "tokens": 765,
+              "mtimeMs": "<mtime>",
+              "image": true
+            }
+          ]
+        },
+        {
+          "name": "bin",
+          "path": "bin",
+          "kind": "dir",
+          "excluded": "ignored: bin",
+          "children": []
+        },
+        {
+          "name": "dist",
+          "path": "dist",
+          "kind": "dir",
+          "excluded": "ignored: dist",
+          "children": []
+        },
+        {
+          "name": "ignored-dir",
+          "path": "ignored-dir",
+          "kind": "dir",
+          "excluded": ".gitignore",
+          "children": []
+        },
+        {
+          "name": "node_modules",
+          "path": "node_modules",
+          "kind": "dir",
+          "excluded": "ignored: node_modules",
+          "children": []
+        },
+        {
+          "name": "obj",
+          "path": "obj",
+          "kind": "dir",
+          "excluded": "ignored: obj",
+          "children": []
+        },
+        {
+          "name": "src",
+          "path": "src",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "nested",
+              "path": "src/nested",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "deep",
+                  "path": "src/nested/deep",
+                  "kind": "dir",
+                  "children": [
+                    {
+                      "name": "file.py",
+                      "path": "src/nested/deep/file.py",
+                      "kind": "file",
+                      "tokens": 4,
+                      "mtimeMs": "<mtime>"
+                    },
+                    {
+                      "name": "ignored.py",
+                      "path": "src/nested/deep/ignored.py",
+                      "kind": "file",
+                      "tokens": 1,
+                      "excluded": ".gitignore",
+                      "mtimeMs": "<mtime>"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "_under.ts",
+              "path": "src/_under.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "-dash.ts",
+              "path": "src/-dash.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": ".env.production",
+              "path": "src/.env.production",
+              "kind": "file",
+              "tokens": 1,
+              "excluded": "secrets",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "10.ts",
+              "path": "src/10.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "2.ts",
+              "path": "src/2.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "bom.txt",
+              "path": "src/bom.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "composer.lock",
+              "path": "src/composer.lock",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "crlf.cs",
+              "path": "src/crlf.cs",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "invalid-utf8.txt",
+              "path": "src/invalid-utf8.txt",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "link.ts",
+              "path": "src/link.ts",
+              "kind": "file",
+              "excluded": "symlink"
+            },
+            {
+              "name": "lower.ts",
+              "path": "src/lower.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "main.ts",
+              "path": "src/main.ts",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "mixed.txt",
+              "path": "src/mixed.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "no-newline.txt",
+              "path": "src/no-newline.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "unicode-é.txt",
+              "path": "src/unicode-é.txt",
+              "kind": "file",
+              "tokens": 4,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "Upper.ts",
+              "path": "src/Upper.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "tools",
+          "path": "tools",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "go.mod",
+              "path": "tools/go.mod",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "other.txt",
+              "path": "tools/other.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "web",
+          "path": "web",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "App.csproj",
+              "path": "web/App.csproj",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "huge.html",
+              "path": "web/huge.html",
+              "kind": "file",
+              "tokens": 565762,
+              "excluded": "too large (2210 KB)",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "icon.svg",
+              "path": "web/icon.svg",
+              "kind": "file",
+              "tokens": 1759,
+              "mtimeMs": "<mtime>",
+              "condensedFrom": 10405
+            },
+            {
+              "name": "page.html",
+              "path": "web/page.html",
+              "kind": "file",
+              "tokens": 5022,
+              "mtimeMs": "<mtime>",
+              "condensedFrom": 12424
+            },
+            {
+              "name": "small.html",
+              "path": "web/small.html",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".env",
+          "path": ".env",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.example",
+          "path": ".env.example",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "hidden",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.local",
+          "path": ".env.local",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".gitignore",
+          "path": ".gitignore",
+          "kind": "file",
+          "tokens": 22,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".hidden-file",
+          "path": ".hidden-file",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": "hidden",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "AGENTS.md",
+          "path": "AGENTS.md",
+          "kind": "file",
+          "tokens": 5,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "big.txt",
+          "path": "big.txt",
+          "kind": "file",
+          "tokens": 76800,
+          "excluded": "too large (300 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "cache.tmp",
+          "path": "cache.tmp",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "Cargo.lock",
+          "path": "Cargo.lock",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "lock file",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "CLAUDE.md",
+          "path": "CLAUDE.md",
+          "kind": "file",
+          "tokens": 10,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "debug.log",
+          "path": "debug.log",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "escape",
+          "path": "escape",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "generated.txt",
+          "path": "generated.txt",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "huge.txt",
+          "path": "huge.txt",
+          "kind": "file",
+          "tokens": 640000,
+          "excluded": "too large (2500 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "keep.log",
+          "path": "keep.log",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "link-to-src",
+          "path": "link-to-src",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "package-lock.json",
+          "path": "package-lock.json",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": "lock file",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "yarn.lock",
+          "path": "yarn.lock",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "lock file",
+          "mtimeMs": "<mtime>"
+        }
+      ],
+      "rules": [
+        {
+          "path": "AGENTS.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Agents\n\nRun tests.\n"
+        },
+        {
+          "path": "CLAUDE.md",
+          "type": "Rule",
+          "tokens": 10,
+          "content": "﻿# Claude\r\nRules with BOM and CRLF.\r\n"
+        },
+        {
+          "path": ".github/copilot-instructions.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Copilot\nBe brief.\n"
+        },
+        {
+          "path": ".cursor/rules/Zeta.MD",
+          "type": "Rule",
+          "tokens": 1,
+          "content": "zeta\n"
+        },
+        {
+          "path": ".cursor/rules/notes.md",
+          "type": "Rule",
+          "tokens": 3,
+          "content": "Notes rule\n"
+        },
+        {
+          "path": ".cursor/rules/style.mdc",
+          "type": "Rule",
+          "tokens": 9,
+          "content": "---\ndescription: style\n---\nUse tabs.\n"
+        },
+        {
+          "path": ".claude/skills/review/SKILL.md",
+          "type": "Skill",
+          "tokens": 9,
+          "content": "---\nname: review\n---\nReview code.\n"
+        },
+        {
+          "path": "empty-skill-parent/inner/SKILL.md",
+          "type": "Skill",
+          "tokens": 2,
+          "content": "# inner\n"
+        },
+        {
+          "path": "tools/skills/deploy/skill.md",
+          "type": "Skill",
+          "tokens": 7,
+          "content": "# deploy (lowercase marker)\n"
+        }
+      ],
+      "files": 33,
+      "truncated": false
+    }
+  },
+  {
+    "input": "\"<TMP>/basic/\"",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "  ",
+        "*.MD",
+        "src/nested/**",
+        "web/*.svg",
+        "**/*.{png,woff2}",
+        "!**/*",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 1,
+      "respectGitignore": false,
+      "skipBinary": false,
+      "includeHidden": true
+    },
+    "result": {
+      "name": "basic",
+      "root": "<TMP>/basic",
+      "branch": "feature/parity",
+      "tree": [
+        {
+          "name": ".claude",
+          "path": ".claude",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "settings.json",
+              "path": ".claude/settings.json",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".cursor",
+          "path": ".cursor",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "rules",
+              "path": ".cursor/rules",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "ignore.txt",
+                  "path": ".cursor/rules/ignore.txt",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "notes.md",
+                  "path": ".cursor/rules/notes.md",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "style.mdc",
+                  "path": ".cursor/rules/style.mdc",
+                  "kind": "file",
+                  "tokens": 9,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "Zeta.MD",
+                  "path": ".cursor/rules/Zeta.MD",
+                  "kind": "file",
+                  "tokens": 1,
+                  "excluded": "ignored: *.MD",
+                  "mtimeMs": "<mtime>"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": ".github",
+          "path": ".github",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "copilot-instructions.md",
+              "path": ".github/copilot-instructions.md",
+              "kind": "file",
+              "tokens": 5,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".hiddendir",
+          "path": ".hiddendir",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "x.txt",
+              "path": ".hiddendir/x.txt",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "assets",
+          "path": "assets",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "data.bin",
+              "path": "assets/data.bin",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "font.woff2",
+              "path": "assets/font.woff2",
+              "kind": "file",
+              "tokens": 4,
+              "excluded": "ignored: **/*.{png,woff2}",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "logo.png",
+              "path": "assets/logo.png",
+              "kind": "file",
+              "tokens": 765,
+              "excluded": "ignored: **/*.{png,woff2}",
+              "mtimeMs": "<mtime>",
+              "image": true
+            },
+            {
+              "name": "nul.txt",
+              "path": "assets/nul.txt",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "photo.JPG",
+              "path": "assets/photo.JPG",
+              "kind": "file",
+              "tokens": 765,
+              "mtimeMs": "<mtime>",
+              "image": true
+            }
+          ]
+        },
+        {
+          "name": "bin",
+          "path": "bin",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "tool.sh",
+              "path": "bin/tool.sh",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "dist",
+          "path": "dist",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "out.js",
+              "path": "dist/out.js",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "ignored-dir",
+          "path": "ignored-dir",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "a.txt",
+              "path": "ignored-dir/a.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "node_modules",
+          "path": "node_modules",
+          "kind": "dir",
+          "excluded": "ignored: node_modules",
+          "children": []
+        },
+        {
+          "name": "obj",
+          "path": "obj",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "x.txt",
+              "path": "obj/x.txt",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "src",
+          "path": "src",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "nested",
+              "path": "src/nested",
+              "kind": "dir",
+              "excluded": "ignored: nested",
+              "children": []
+            },
+            {
+              "name": "_under.ts",
+              "path": "src/_under.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "-dash.ts",
+              "path": "src/-dash.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": ".env.production",
+              "path": "src/.env.production",
+              "kind": "file",
+              "tokens": 1,
+              "excluded": "secrets",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "10.ts",
+              "path": "src/10.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "2.ts",
+              "path": "src/2.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "bom.txt",
+              "path": "src/bom.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "composer.lock",
+              "path": "src/composer.lock",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "crlf.cs",
+              "path": "src/crlf.cs",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "invalid-utf8.txt",
+              "path": "src/invalid-utf8.txt",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "link.ts",
+              "path": "src/link.ts",
+              "kind": "file",
+              "excluded": "symlink"
+            },
+            {
+              "name": "lower.ts",
+              "path": "src/lower.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "main.ts",
+              "path": "src/main.ts",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "mixed.txt",
+              "path": "src/mixed.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "no-newline.txt",
+              "path": "src/no-newline.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "unicode-é.txt",
+              "path": "src/unicode-é.txt",
+              "kind": "file",
+              "tokens": 4,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "Upper.ts",
+              "path": "src/Upper.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "tools",
+          "path": "tools",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "go.mod",
+              "path": "tools/go.mod",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "other.txt",
+              "path": "tools/other.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "web",
+          "path": "web",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "App.csproj",
+              "path": "web/App.csproj",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "huge.html",
+              "path": "web/huge.html",
+              "kind": "file",
+              "tokens": 565762,
+              "excluded": "too large (2210 KB)",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "icon.svg",
+              "path": "web/icon.svg",
+              "kind": "file",
+              "tokens": 10405,
+              "excluded": "ignored: web/*.svg",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "page.html",
+              "path": "web/page.html",
+              "kind": "file",
+              "tokens": 5022,
+              "excluded": "too large (49 KB)",
+              "mtimeMs": "<mtime>",
+              "condensedFrom": 12424
+            },
+            {
+              "name": "small.html",
+              "path": "web/small.html",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".env",
+          "path": ".env",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.example",
+          "path": ".env.example",
+          "kind": "file",
+          "tokens": 2,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.local",
+          "path": ".env.local",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".gitignore",
+          "path": ".gitignore",
+          "kind": "file",
+          "tokens": 22,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".hidden-file",
+          "path": ".hidden-file",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "AGENTS.md",
+          "path": "AGENTS.md",
+          "kind": "file",
+          "tokens": 5,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "big.txt",
+          "path": "big.txt",
+          "kind": "file",
+          "tokens": 76800,
+          "excluded": "too large (300 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "cache.tmp",
+          "path": "cache.tmp",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "Cargo.lock",
+          "path": "Cargo.lock",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "lock file",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "CLAUDE.md",
+          "path": "CLAUDE.md",
+          "kind": "file",
+          "tokens": 10,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "debug.log",
+          "path": "debug.log",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "escape",
+          "path": "escape",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "generated.txt",
+          "path": "generated.txt",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "huge.txt",
+          "path": "huge.txt",
+          "kind": "file",
+          "tokens": 640000,
+          "excluded": "too large (2500 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "keep.log",
+          "path": "keep.log",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "link-to-src",
+          "path": "link-to-src",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "package-lock.json",
+          "path": "package-lock.json",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "yarn.lock",
+          "path": "yarn.lock",
+          "kind": "file",
+          "tokens": 2,
+          "mtimeMs": "<mtime>"
+        }
+      ],
+      "rules": [
+        {
+          "path": "AGENTS.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Agents\n\nRun tests.\n"
+        },
+        {
+          "path": "CLAUDE.md",
+          "type": "Rule",
+          "tokens": 10,
+          "content": "﻿# Claude\r\nRules with BOM and CRLF.\r\n"
+        },
+        {
+          "path": ".github/copilot-instructions.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Copilot\nBe brief.\n"
+        },
+        {
+          "path": ".cursor/rules/Zeta.MD",
+          "type": "Rule",
+          "tokens": 1,
+          "content": "zeta\n"
+        },
+        {
+          "path": ".cursor/rules/notes.md",
+          "type": "Rule",
+          "tokens": 3,
+          "content": "Notes rule\n"
+        },
+        {
+          "path": ".cursor/rules/style.mdc",
+          "type": "Rule",
+          "tokens": 9,
+          "content": "---\ndescription: style\n---\nUse tabs.\n"
+        },
+        {
+          "path": ".claude/skills/review/SKILL.md",
+          "type": "Skill",
+          "tokens": 9,
+          "content": "---\nname: review\n---\nReview code.\n"
+        },
+        {
+          "path": "empty-skill-parent/inner/SKILL.md",
+          "type": "Skill",
+          "tokens": 2,
+          "content": "# inner\n"
+        },
+        {
+          "path": "ignored-dir/s/SKILL.md",
+          "type": "Skill",
+          "tokens": 4,
+          "content": "# Ignored skill\n"
+        },
+        {
+          "path": "tools/skills/deploy/skill.md",
+          "type": "Skill",
+          "tokens": 7,
+          "content": "# deploy (lowercase marker)\n"
+        }
+      ],
+      "files": 42,
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/basic",
+    "options": {
+      "exclusions": [],
+      "maxFileSizeKb": 12,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "result": {
+      "name": "basic",
+      "root": "<TMP>/basic",
+      "branch": "feature/parity",
+      "tree": [
+        {
+          "name": ".claude",
+          "path": ".claude",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "settings.json",
+              "path": ".claude/settings.json",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".cursor",
+          "path": ".cursor",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "rules",
+              "path": ".cursor/rules",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "ignore.txt",
+                  "path": ".cursor/rules/ignore.txt",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "notes.md",
+                  "path": ".cursor/rules/notes.md",
+                  "kind": "file",
+                  "tokens": 3,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "style.mdc",
+                  "path": ".cursor/rules/style.mdc",
+                  "kind": "file",
+                  "tokens": 9,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "Zeta.MD",
+                  "path": ".cursor/rules/Zeta.MD",
+                  "kind": "file",
+                  "tokens": 1,
+                  "mtimeMs": "<mtime>"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": ".github",
+          "path": ".github",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "copilot-instructions.md",
+              "path": ".github/copilot-instructions.md",
+              "kind": "file",
+              "tokens": 5,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".hiddendir",
+          "path": ".hiddendir",
+          "kind": "dir",
+          "excluded": "hidden",
+          "children": []
+        },
+        {
+          "name": "assets",
+          "path": "assets",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "data.bin",
+              "path": "assets/data.bin",
+              "kind": "file",
+              "tokens": 2,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "font.woff2",
+              "path": "assets/font.woff2",
+              "kind": "file",
+              "tokens": 4,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "logo.png",
+              "path": "assets/logo.png",
+              "kind": "file",
+              "tokens": 765,
+              "mtimeMs": "<mtime>",
+              "image": true
+            },
+            {
+              "name": "nul.txt",
+              "path": "assets/nul.txt",
+              "kind": "file",
+              "tokens": 3,
+              "excluded": "binary",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "photo.JPG",
+              "path": "assets/photo.JPG",
+              "kind": "file",
+              "tokens": 765,
+              "mtimeMs": "<mtime>",
+              "image": true
+            }
+          ]
+        },
+        {
+          "name": "bin",
+          "path": "bin",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "tool.sh",
+              "path": "bin/tool.sh",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "dist",
+          "path": "dist",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "out.js",
+              "path": "dist/out.js",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "ignored-dir",
+          "path": "ignored-dir",
+          "kind": "dir",
+          "excluded": ".gitignore",
+          "children": []
+        },
+        {
+          "name": "node_modules",
+          "path": "node_modules",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "pkg",
+              "path": "node_modules/pkg",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "index.js",
+                  "path": "node_modules/pkg/index.js",
+                  "kind": "file",
+                  "tokens": 5,
+                  "mtimeMs": "<mtime>"
+                },
+                {
+                  "name": "package.json",
+                  "path": "node_modules/pkg/package.json",
+                  "kind": "file",
+                  "tokens": 1,
+                  "mtimeMs": "<mtime>"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "obj",
+          "path": "obj",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "x.txt",
+              "path": "obj/x.txt",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "src",
+          "path": "src",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "nested",
+              "path": "src/nested",
+              "kind": "dir",
+              "children": [
+                {
+                  "name": "deep",
+                  "path": "src/nested/deep",
+                  "kind": "dir",
+                  "children": [
+                    {
+                      "name": "file.py",
+                      "path": "src/nested/deep/file.py",
+                      "kind": "file",
+                      "tokens": 4,
+                      "mtimeMs": "<mtime>"
+                    },
+                    {
+                      "name": "ignored.py",
+                      "path": "src/nested/deep/ignored.py",
+                      "kind": "file",
+                      "tokens": 1,
+                      "excluded": ".gitignore",
+                      "mtimeMs": "<mtime>"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "_under.ts",
+              "path": "src/_under.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "-dash.ts",
+              "path": "src/-dash.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": ".env.production",
+              "path": "src/.env.production",
+              "kind": "file",
+              "tokens": 1,
+              "excluded": "secrets",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "10.ts",
+              "path": "src/10.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "2.ts",
+              "path": "src/2.ts",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "bom.txt",
+              "path": "src/bom.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "composer.lock",
+              "path": "src/composer.lock",
+              "kind": "file",
+              "tokens": 1,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "crlf.cs",
+              "path": "src/crlf.cs",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "invalid-utf8.txt",
+              "path": "src/invalid-utf8.txt",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "link.ts",
+              "path": "src/link.ts",
+              "kind": "file",
+              "excluded": "symlink"
+            },
+            {
+              "name": "lower.ts",
+              "path": "src/lower.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "main.ts",
+              "path": "src/main.ts",
+              "kind": "file",
+              "tokens": 7,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "mixed.txt",
+              "path": "src/mixed.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "no-newline.txt",
+              "path": "src/no-newline.txt",
+              "kind": "file",
+              "tokens": 6,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "unicode-é.txt",
+              "path": "src/unicode-é.txt",
+              "kind": "file",
+              "tokens": 4,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "Upper.ts",
+              "path": "src/Upper.ts",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "tools",
+          "path": "tools",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "go.mod",
+              "path": "tools/go.mod",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "other.txt",
+              "path": "tools/other.txt",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "web",
+          "path": "web",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "App.csproj",
+              "path": "web/App.csproj",
+              "kind": "file",
+              "tokens": 3,
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "huge.html",
+              "path": "web/huge.html",
+              "kind": "file",
+              "tokens": 565762,
+              "excluded": "too large (2210 KB)",
+              "mtimeMs": "<mtime>"
+            },
+            {
+              "name": "icon.svg",
+              "path": "web/icon.svg",
+              "kind": "file",
+              "tokens": 1759,
+              "mtimeMs": "<mtime>",
+              "condensedFrom": 10405
+            },
+            {
+              "name": "page.html",
+              "path": "web/page.html",
+              "kind": "file",
+              "tokens": 5022,
+              "excluded": "too large (49 KB)",
+              "mtimeMs": "<mtime>",
+              "condensedFrom": 12424
+            },
+            {
+              "name": "small.html",
+              "path": "web/small.html",
+              "kind": "file",
+              "tokens": 10,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": ".env",
+          "path": ".env",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.example",
+          "path": ".env.example",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "hidden",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".env.local",
+          "path": ".env.local",
+          "kind": "file",
+          "tokens": 2,
+          "excluded": "secrets",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".gitignore",
+          "path": ".gitignore",
+          "kind": "file",
+          "tokens": 22,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": ".hidden-file",
+          "path": ".hidden-file",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": "hidden",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "AGENTS.md",
+          "path": "AGENTS.md",
+          "kind": "file",
+          "tokens": 5,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "big.txt",
+          "path": "big.txt",
+          "kind": "file",
+          "tokens": 76800,
+          "excluded": "too large (300 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "cache.tmp",
+          "path": "cache.tmp",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "Cargo.lock",
+          "path": "Cargo.lock",
+          "kind": "file",
+          "tokens": 2,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "CLAUDE.md",
+          "path": "CLAUDE.md",
+          "kind": "file",
+          "tokens": 10,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "debug.log",
+          "path": "debug.log",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "escape",
+          "path": "escape",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "generated.txt",
+          "path": "generated.txt",
+          "kind": "file",
+          "tokens": 1,
+          "excluded": ".gitignore",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "huge.txt",
+          "path": "huge.txt",
+          "kind": "file",
+          "tokens": 640000,
+          "excluded": "too large (2500 KB)",
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "keep.log",
+          "path": "keep.log",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "link-to-src",
+          "path": "link-to-src",
+          "kind": "file",
+          "excluded": "symlink"
+        },
+        {
+          "name": "package-lock.json",
+          "path": "package-lock.json",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "yarn.lock",
+          "path": "yarn.lock",
+          "kind": "file",
+          "tokens": 2,
+          "mtimeMs": "<mtime>"
+        }
+      ],
+      "rules": [
+        {
+          "path": "AGENTS.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Agents\n\nRun tests.\n"
+        },
+        {
+          "path": "CLAUDE.md",
+          "type": "Rule",
+          "tokens": 10,
+          "content": "﻿# Claude\r\nRules with BOM and CRLF.\r\n"
+        },
+        {
+          "path": ".github/copilot-instructions.md",
+          "type": "Rule",
+          "tokens": 5,
+          "content": "# Copilot\nBe brief.\n"
+        },
+        {
+          "path": ".cursor/rules/Zeta.MD",
+          "type": "Rule",
+          "tokens": 1,
+          "content": "zeta\n"
+        },
+        {
+          "path": ".cursor/rules/notes.md",
+          "type": "Rule",
+          "tokens": 3,
+          "content": "Notes rule\n"
+        },
+        {
+          "path": ".cursor/rules/style.mdc",
+          "type": "Rule",
+          "tokens": 9,
+          "content": "---\ndescription: style\n---\nUse tabs.\n"
+        },
+        {
+          "path": ".claude/skills/review/SKILL.md",
+          "type": "Skill",
+          "tokens": 9,
+          "content": "---\nname: review\n---\nReview code.\n"
+        },
+        {
+          "path": "empty-skill-parent/inner/SKILL.md",
+          "type": "Skill",
+          "tokens": 2,
+          "content": "# inner\n"
+        },
+        {
+          "path": "node_modules/pkg/skills/x/SKILL.md",
+          "type": "Skill",
+          "tokens": 4,
+          "content": "# not discovered\n"
+        },
+        {
+          "path": "tools/skills/deploy/skill.md",
+          "type": "Skill",
+          "tokens": 7,
+          "content": "# deploy (lowercase marker)\n"
+        }
+      ],
+      "files": 40,
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/skill-root",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "packages.lock.json",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 256,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "result": {
+      "name": "skill-root",
+      "root": "<TMP>/skill-root",
+      "branch": null,
+      "tree": [
+        {
+          "name": "scripts",
+          "path": "scripts",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "a.sh",
+              "path": "scripts/a.sh",
+              "kind": "file",
+              "tokens": 2,
+              "mtimeMs": "<mtime>"
+            }
+          ]
+        },
+        {
+          "name": "README.md",
+          "path": "README.md",
+          "kind": "file",
+          "tokens": 3,
+          "mtimeMs": "<mtime>"
+        },
+        {
+          "name": "SKILL.md",
+          "path": "SKILL.md",
+          "kind": "file",
+          "tokens": 12,
+          "mtimeMs": "<mtime>"
+        }
+      ],
+      "rules": [
+        {
+          "path": "SKILL.md",
+          "type": "Skill",
+          "tokens": 12,
+          "content": "---\nname: root-skill\n---\nThe project is a skill.\n"
+        },
+        {
+          "path": "nested/SKILL.md",
+          "type": "Skill",
+          "tokens": 4,
+          "content": "# nested skill\n"
+        }
+      ],
+      "files": 3,
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/worktree",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "packages.lock.json",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 256,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "result": {
+      "name": "worktree",
+      "root": "<TMP>/worktree",
+      "branch": "0123456",
+      "tree": [
+        {
+          "name": "a.txt",
+          "path": "a.txt",
+          "kind": "file",
+          "tokens": 1,
+          "mtimeMs": "<mtime>"
+        }
+      ],
+      "rules": [],
+      "files": 1,
+      "truncated": false
+    }
+  },
+  {
+    "input": "<TMP>/missing",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "packages.lock.json",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 256,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "error": {
+      "status": 404,
+      "message": "Folder not found: <TMP>/missing"
+    }
+  },
+  {
+    "input": "<TMP>/basic/AGENTS.md",
+    "options": {
+      "exclusions": [
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/venv/**",
+        "**/__pycache__/**",
+        "**/bin/**",
+        "**/obj/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.git/**",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "Pipfile.lock",
+        "packages.lock.json",
+        "Cargo.lock"
+      ],
+      "maxFileSizeKb": 256,
+      "respectGitignore": true,
+      "skipBinary": true,
+      "includeHidden": false
+    },
+    "error": {
+      "status": 404,
+      "message": "Folder not found: <TMP>/basic/AGENTS.md"
+    }
+  }
+]

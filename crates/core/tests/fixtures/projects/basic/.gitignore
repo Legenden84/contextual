@@ -1,0 +1,7 @@
+# comment
+ignored-dir/
+*.log
+!keep.log
+/generated.txt
+*.TMP
+src/nested/deep/ignored.py

@@ -1,0 +1,2 @@
+# Fixture bytes must stay exact (CRLF, BOM, binaries).
+* -text
