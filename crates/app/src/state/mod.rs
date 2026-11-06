@@ -3,6 +3,7 @@
 
 pub mod chat;
 pub mod project;
+pub mod scm;
 
 use std::sync::Arc;
 
@@ -54,6 +55,8 @@ pub struct AppModel {
     pub connection_test: ConnectionTest,
     host: Arc<dyn WorkspaceHost>,
     pub project: Option<Entity<Project>>,
+    /// Source Control of the open project.
+    pub scm: Option<Entity<scm::ScmModel>>,
     pub scanning: bool,
     /// Last error to show (opening a folder, saving settings…).
     pub error: Option<String>,
@@ -89,6 +92,7 @@ impl AppModel {
             connection_test: ConnectionTest::Idle,
             host: Arc::new(LocalHost::new()),
             project: None,
+            scm: None,
             scanning: false,
             error,
             folder_dialog_open: false,
@@ -188,6 +192,7 @@ impl AppModel {
 
     pub fn close_project(&mut self, cx: &mut Context<Self>) {
         self.project = None;
+        self.scm = None;
         self.screen = Screen::Welcome;
         self.state.last_open = None;
         self.save_state();
@@ -229,7 +234,13 @@ impl AppModel {
                             opened_at: now_rfc3339(),
                         });
                         this.save_state();
-                        this.project = Some(cx.new(|_| Project::from_scan(scan)));
+                        let project = cx.new(|_| Project::from_scan(scan));
+                        let host = this.host.clone();
+                        let scm = cx.new(|cx| scm::ScmModel::new(project.clone(), host, cx));
+                        // The status bar shows the branch: re-render when it changes.
+                        cx.observe(&scm, |_, _, cx| cx.notify()).detach();
+                        this.project = Some(project);
+                        this.scm = Some(scm);
                         this.screen = Screen::Workspace;
                     }
                     Err(e) => this.error = Some(e.message),

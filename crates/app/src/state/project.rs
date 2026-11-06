@@ -39,6 +39,8 @@ pub struct Project {
     pub expanded: HashSet<String>,
     pub filter: String,
     pub rules: Vec<Rule>,
+    /// Bumped by every rescan, so other models can refresh (Source Control).
+    pub rescans: u64,
     pub rules_on: HashSet<String>,
     pub rule_preview: Option<String>,
     pub tabs: Vec<String>,
@@ -102,6 +104,7 @@ impl Project {
                 .map(|r| r.path.clone())
                 .collect(),
             rules,
+            rescans: 0,
             rule_preview: None,
             tabs: Vec::new(),
             active: Tab::Chat,
@@ -130,6 +133,7 @@ impl Project {
         self.rules = fresh.rules;
         self.rules_on = rules_on;
         self.selected.retain(|p| pickable.contains(p));
+        self.rescans += 1;
         self.tabs.retain(|t| self.index.contains_key(t));
         if let Tab::Preview(p) = &self.active
             && !self.index.contains_key(p)

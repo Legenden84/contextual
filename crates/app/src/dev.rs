@@ -1,7 +1,8 @@
 //! Debug-build automation, so a full flow can be checked without clicking (compiled out of
 //! release builds). `CONTEXTUAL_DEV_SEND="text"` selects every file once the project opens and
 //! sends `text`; `CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats` then takes one action after the
-//! reply.
+//! reply. `CONTEXTUAL_DEV_OPEN=scm|branches|pr|gitdiff:<path>|commit:<message>|switch:<branch>`
+//! opens that view, or runs that Source Control action, at startup.
 
 use contextual_core::chat::Role;
 use gpui_kit::{App, Entity, Window};
@@ -91,4 +92,58 @@ pub fn install(
         });
     })
     .detach();
+}
+
+/// Opens a view at startup (`CONTEXTUAL_DEV_OPEN`), debug builds only.
+pub fn open(
+    sidebar: &Entity<crate::views::sidebar::Sidebar>,
+    project: &Entity<Project>,
+    scm: &Entity<crate::state::scm::ScmModel>,
+    chat: &Entity<ChatModel>,
+    cx: &mut App,
+) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let Ok(what) = std::env::var("CONTEXTUAL_DEV_OPEN") else {
+        return;
+    };
+    match what.as_str() {
+        "scm" => sidebar.update(cx, |s, cx| s.show_scm(cx)),
+        "branches" => scm.update(cx, |s, cx| s.open_branch_picker(cx)),
+        "pr" => chat.update(cx, |c, cx| {
+            c.pr_open = true;
+            cx.notify();
+        }),
+        other => {
+            if let Some(message) = other.strip_prefix("commit:") {
+                let message = message.to_string();
+                sidebar.update(cx, |s, cx| s.show_scm(cx));
+                // Wait for the first status, then commit through the same path as the button.
+                let scm = scm.clone();
+                cx.spawn(async move |cx| {
+                    for _ in 0..50 {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(100))
+                            .await;
+                        if scm.read_with(cx, |s, _| s.status.is_some()) {
+                            break;
+                        }
+                    }
+                    scm.update(cx, |s, cx| s.commit(message, cx));
+                })
+                .detach();
+            } else if let Some(branch) = other.strip_prefix("switch:") {
+                let branch = branch.to_string();
+                scm.update(cx, |s, cx| s.switch_branch(branch, |_| {}, cx));
+            } else if let Some(path) = other.strip_prefix("gitdiff:") {
+                sidebar.update(cx, |s, cx| s.show_scm(cx));
+                let tab = contextual_core::logic::git_tabs::git_tab_id(path, false);
+                project.update(cx, |p, cx| {
+                    p.open_preview(&tab);
+                    cx.notify()
+                });
+            }
+        }
+    }
 }

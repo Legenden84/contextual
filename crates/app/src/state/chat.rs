@@ -73,6 +73,7 @@ pub struct ChatModel {
     pub center: CenterView,
     pub diff_mode: DiffMode,
     pub save_dialog_open: bool,
+    pub pr_open: bool,
     pub saving: bool,
     pub save_error: Option<String>,
     pub toast: Option<Toast>,
@@ -129,6 +130,7 @@ impl ChatModel {
             center: CenterView::Chat,
             diff_mode: DiffMode::Unified,
             save_dialog_open: false,
+            pr_open: false,
             saving: false,
             save_error: None,
             toast: None,
@@ -782,6 +784,23 @@ impl ChatModel {
             .ok();
         })
         .detach();
+    }
+
+    /// Notes a created (or updated) pull request in the chat and the thread.
+    pub fn record_pr(
+        &mut self,
+        pr: contextual_protocol::git::PrResult,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.thread.pull_requests.push(chat::PullRequestRef {
+            url: pr.url,
+            number: pr.number,
+            branch: pr.branch,
+        });
+        self.note(text, Tone::Ok);
+        self.save_thread(cx);
+        cx.notify();
     }
 
     pub fn dismiss_toast(&mut self, cx: &mut Context<Self>) {

@@ -1,5 +1,4 @@
-//! Left column (312px): Files (explorer + Skills & Rules) or Rules on its own.
-//! Source Control joins as a third tab in Phase 5.
+//! Left column (312px): Files (explorer + Skills & Rules), Rules on its own, or Source Control.
 
 use contextual_theme::layout;
 use gpui_kit::component::{Icon, IconName};
@@ -9,11 +8,13 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
+use crate::state::scm::ScmModel;
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::count;
 use crate::views::explorer::Explorer;
 use crate::views::rules::RulesPanel;
+use crate::views::source_control::SourceControl;
 
 /// Sidebar tab bar: 30px tabs with a 2px underline.
 const TAB_H: f32 = 30.0;
@@ -22,6 +23,7 @@ const TAB_H: f32 = 30.0;
 enum SideTab {
     Files,
     Rules,
+    Scm,
 }
 
 pub struct Sidebar {
@@ -30,24 +32,40 @@ pub struct Sidebar {
     explorer: Entity<Explorer>,
     rules_below: Entity<RulesPanel>,
     rules_full: Entity<RulesPanel>,
-    _sub: Subscription,
+    scm: Entity<ScmModel>,
+    source_control: Entity<SourceControl>,
+    _subs: Vec<Subscription>,
 }
 
 impl Sidebar {
     pub fn new(
         app: Entity<AppModel>,
         project: Entity<Project>,
+        scm: Entity<ScmModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
+            source_control: cx.new(|cx| {
+                SourceControl::new(app.clone(), project.clone(), scm.clone(), window, cx)
+            }),
+            _subs: vec![
+                cx.observe(&project, |_, _, cx| cx.notify()),
+                cx.observe(&scm, |_, _, cx| cx.notify()),
+            ],
+            scm,
             explorer: cx.new(|cx| Explorer::new(app, project.clone(), window, cx)),
             rules_below: cx.new(|cx| RulesPanel::new(project.clone(), false, cx)),
             rules_full: cx.new(|cx| RulesPanel::new(project.clone(), true, cx)),
-            _sub: cx.observe(&project, |_, _, cx| cx.notify()),
             project,
             tab: SideTab::Files,
         }
+    }
+
+    /// Shows the Source Control tab (debug automation, see `dev.rs`).
+    pub fn show_scm(&mut self, cx: &mut Context<Self>) {
+        self.tab = SideTab::Scm;
+        cx.notify();
     }
 
     fn tab_button(
@@ -91,6 +109,7 @@ impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &cx.tokens().colors;
         let rules_on = self.project.read(cx).rules_on.len();
+        let changes = self.scm.read(cx).change_count();
         let tabs = div()
             .flex()
             .flex_none()
@@ -114,6 +133,14 @@ impl Render for Sidebar {
                 "Rules",
                 Some(rules_on),
                 cx,
+            ))
+            .child(self.tab_button(
+                "tab-scm",
+                SideTab::Scm,
+                IconName::Github,
+                "Source control",
+                (changes > 0).then_some(changes),
+                cx,
             ));
         div()
             .flex()
@@ -131,6 +158,7 @@ impl Render for Sidebar {
                     .child(self.explorer.clone())
                     .child(self.rules_below.clone()),
                 SideTab::Rules => d.child(self.rules_full.clone()),
+                SideTab::Scm => d.child(self.source_control.clone()),
             })
     }
 }

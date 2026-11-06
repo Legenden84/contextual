@@ -48,10 +48,26 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                 .child(Icon::new(IconName::Globe).size(px(ICON))),
         )
         .child(SharedString::from(foundry_text));
-    let branch = a
-        .project
-        .as_ref()
-        .map(|p| p.read(cx).branch.clone().unwrap_or_else(|| "no git".into()));
+    // From git status when known (it follows switches); else the scan's branch.
+    let scm = a.scm.clone();
+    let status = scm.as_ref().and_then(|s| s.read(cx).status.clone());
+    let branch = a.project.as_ref().map(|p| {
+        let name = status
+            .as_ref()
+            .map(|st| st.branch.clone().unwrap_or_else(|| "detached".into()));
+        let mut label = name
+            .or_else(|| p.read(cx).branch.clone())
+            .unwrap_or_else(|| "no git".into());
+        if let Some(st) = status.as_ref().filter(|st| st.upstream.is_some()) {
+            if st.behind > 0 {
+                label.push_str(&format!(" {}↓", st.behind));
+            }
+            if st.ahead > 0 {
+                label.push_str(&format!(" {}↑", st.ahead));
+            }
+        }
+        label
+    });
     let app_for_settings = app.clone();
 
     div()
@@ -70,7 +86,18 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
             Screen::Welcome => d.child(foundry).child(div().flex_1()).child("No project"),
             _ => d
                 .when_some(branch, |d, b| {
-                    d.child(item(gpui_kit::assets::IconName::GitBranch, b))
+                    d.child(
+                        div()
+                            .id("status-branch")
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(hsla(c.ink)))
+                            .when_some(scm.clone(), |d, scm| {
+                                d.on_click(move |_, _, cx| {
+                                    scm.update(cx, |s, cx| s.open_branch_picker(cx))
+                                })
+                            })
+                            .child(item(gpui_kit::assets::IconName::GitBranch, b)),
+                    )
                 })
                 .child(foundry)
                 .child(

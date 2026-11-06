@@ -18,6 +18,7 @@ pub mod images;
 mod js;
 pub mod lang;
 pub mod markdown;
+pub mod pr;
 pub mod prompt;
 pub mod tree;
 pub mod types;
