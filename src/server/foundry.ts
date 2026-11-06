@@ -226,7 +226,7 @@ export function describeError(err: unknown): { status: number; message: string }
 export async function draftPullRequest(
   client: AzureOpenAI,
   cfg: FoundryConfig,
-  input: { notes: string; diff: string; branch: string },
+  input: { notes: string; diff: string; branch: string; commits: string },
   signal: AbortSignal,
 ): Promise<{ title: string; body: string }> {
   const res = await client.chat.completions.create(
@@ -246,7 +246,7 @@ export async function draftPullRequest(
         },
         {
           role: 'user',
-          content: `Branch: ${input.branch}\n\n# What was asked and explained in the chat\n\n${input.notes}\n\n# Diff\n\n\`\`\`diff\n${input.diff}\n\`\`\``,
+          content: `Branch: ${input.branch}\n\n# Commits\n\n${input.commits || '(none)'}\n\n# What was asked and explained in the chat\n\n${input.notes || '(no chat notes)'}\n\n# Diff\n\n\`\`\`diff\n${input.diff}\n\`\`\``,
         },
       ],
     },
@@ -257,4 +257,24 @@ export async function draftPullRequest(
   if (m) return { title: m[1].trim().slice(0, 120), body: m[2].trim() }
   const [first, ...rest] = text.trim().split('\n')
   return { title: (first ?? '').replace(/^#+\s*|^TITLE:\s*/i, '').trim().slice(0, 120), body: rest.join('\n').trim() }
+}
+
+/** Writes a commit message for a diff, in the usual git style. One small request, not part of any conversation. */
+export async function draftCommitMessage(client: AzureOpenAI, cfg: FoundryConfig, diff: string, signal: AbortSignal): Promise<string> {
+  const res = await client.chat.completions.create(
+    {
+      model: cfg.deployment,
+      max_completion_tokens: 1000,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write git commit messages. Reply with the message only: an imperative subject line of at most 72 characters without a trailing period, then (only if useful) a blank line and a few short "- " bullet lines on the notable changes. No code fences, no quotes.',
+        },
+        { role: 'user', content: `\`\`\`diff\n${diff}\n\`\`\`` },
+      ],
+    },
+    { signal },
+  )
+  return (res.choices[0]?.message?.content ?? '').replace(/^```\w*\n?|```$/g, '').trim()
 }

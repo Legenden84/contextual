@@ -194,7 +194,7 @@ export function ChatThread() {
             {totals.files
               ? `${totals.files} ${totals.files === 1 ? 'file is' : 'files are'} ticked and will be sent with your message.`
               : 'Tick the files the model should see in the explorer, then describe the change below.'}{' '}
-            The model only proposes edits; nothing is written until you apply.
+            The model only proposes edits; nothing is written until you save.
           </p>
         </div>
       </div>

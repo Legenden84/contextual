@@ -53,7 +53,7 @@ export function ApplyDialog() {
       >
         <div className="flex items-center pt-3 pr-3 pb-2 pl-4">
           <h2 id="apply-title" className="text-ui-title text-ink-strong">
-            Apply changes
+            Save changes
           </h2>
           <span className="flex-1" />
           <IconButton icon="close" label="Close" onClick={closeApply} />
@@ -122,7 +122,7 @@ export function ApplyDialog() {
           <span className="flex-1" />
           <Button onClick={closeApply}>Cancel</Button>
           <Button variant="primary" disabled={picked.length === 0 || busy} onClick={run} autoFocus>
-            {busy ? 'Saving…' : `Apply ${picked.length} ${picked.length === 1 ? 'file' : 'files'}`}
+            {busy ? 'Saving…' : `Save ${picked.length} ${picked.length === 1 ? 'file' : 'files'}`}
           </Button>
         </div>
       </div>

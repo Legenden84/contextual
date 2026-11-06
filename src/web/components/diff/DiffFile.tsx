@@ -14,8 +14,9 @@ import { DiffTable } from './DiffTable'
 
 export interface DiffFileProps {
   change: Change
-  include: boolean
-  onToggleInclude: () => void
+  /** "Include when saving" checkbox; leave out for read-only diffs (e.g. a pull request). */
+  include?: boolean
+  onToggleInclude?: () => void
   mode: 'unified' | 'split'
   defaultCollapsed?: boolean
   expandAll?: boolean
@@ -72,13 +73,15 @@ export function DiffFile({ change, include, onToggleInclude, mode, defaultCollap
         <Button variant="ghost" size="xs" icon="copy" onClick={() => copyDiff(unifiedPatch(change.path, diff, change.status))}>
           {copiedDiff ? 'Copied' : 'Copy diff'}
         </Button>
-        <CheckLabel
-          className="text-ui-body"
-          onToggle={onToggleInclude}
-          control={<Checkbox state={include} onChange={onToggleInclude} label="Include in apply" />}
-        >
-          Include in apply
-        </CheckLabel>
+        {onToggleInclude && (
+          <CheckLabel
+            className="text-ui-body"
+            onToggle={onToggleInclude}
+            control={<Checkbox state={!!include} onChange={onToggleInclude} label="Include when saving" />}
+          >
+            Include when saving
+          </CheckLabel>
+        )}
       </header>
       {change.conflict && !collapsed && (
         <div className="flex items-center gap-2 border-b border-warning-border bg-warning-bg px-3 py-1.5 text-ui-small text-ink">

@@ -1,5 +1,7 @@
 import { ApplyDialog } from '@/components/apply/ApplyDialog'
 import { PullRequestDialog } from '@/components/pr/PullRequestDialog'
+import { GitDiffTab } from '@/components/scm/GitDiffTab'
+import { parseGitTab } from '@/lib/git-tabs'
 import { Toast } from '@/components/apply/Toast'
 import { ChangesPanel } from '@/components/changes/ChangesPanel'
 import { ChatThread } from '@/components/chat/ChatThread'
@@ -23,7 +25,13 @@ export function WorkspaceScreen() {
         <>
           <main className="flex min-w-0 flex-1 flex-col bg-surface-100">
             <Tabs />
-            {activeTab === 'chat' ? <ChatThread /> : <CodePreview key={activeTab} path={activeTab} />}
+            {activeTab === 'chat' ? (
+              <ChatThread />
+            ) : parseGitTab(activeTab) ? (
+              <GitDiffTab key={activeTab} {...parseGitTab(activeTab)!} />
+            ) : (
+              <CodePreview key={activeTab} path={activeTab} />
+            )}
             <Composer />
           </main>
           {changes.length > 0 && <ChangesPanel />}

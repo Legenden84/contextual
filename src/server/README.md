@@ -9,7 +9,7 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 | `config.ts` | Reads and validates the Azure AI Foundry variables |
 | `foundry.ts` | Conversation turns: Responses API (`previous_response_id`) with fallback to chat completions; connection test |
 | `threads.ts` | Saved conversations per project (`~/.cache/contextual/threads/`) |
-| `git.ts` | Pull requests: repo info, diff of the applied files, commit only those files, push, `gh pr create` |
+| `git.ts` | Source Control (status, stage, diff, commit, push) and pull requests (compare, `gh pr create`) |
 | `api.ts` | Routes, body parsing, same-origin check |
 | `fs/paths.ts` | Path normalising (`C:\x` → `/mnt/c/x`, `\\wsl$\Ubuntu\…` → `/…`, `~`) and keeping paths inside the project |
 | `fs/browse.ts` | Folder listing for the Open folder dialog |
@@ -52,15 +52,18 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 - `POST /api/project/undo` `{ root, backupId }` → restores that snapshot and removes files and folders
   the save created. Refused if any of those files was edited after the save.
 
-- `POST /api/git/info` `{ root, paths }` → branch, default branch, `origin`, whether `gh` can reach the repo,
-  each path's status vs HEAD, and an open PR for the current branch.
-- `POST /api/pr/draft` `{ root, paths, notes }` → `{ title, body }` written by the model from the chat notes and
-  `git diff HEAD` of the paths (one non-streaming request, not part of the conversation).
-- `POST /api/pr/create` `{ root, paths, title, body, base, draft, newBranch? }` → stages and commits **only** `paths`
-  (`git commit --only`; other staged/unstaged changes are untouched) on the current branch, or on `newBranch`
-  (required when on the default branch; switched back and deleted if the commit fails), pushes with
-  `git push -u origin HEAD`, then `gh pr create` (or just pushes if the branch already has an open PR).
-  Needs the GitHub CLI logged in (`gh auth login`); git never prompts for credentials.
+- **Source Control** (`git.ts`): `POST /api/git/status { root }` (branch, upstream, ahead/behind, staged / changes /
+  conflicts, VS Code letters M A D R U C) · `/api/git/stage` and `/api/git/unstage { root, paths }` · `/api/git/diff
+  { root, path, staged }` (staged: HEAD→index, else index→working tree) · `/api/git/commit { root, message, all }`
+  (all: `git add -A` first, like VS Code's smart commit) · `/api/git/push { root }` (publishes the branch with `-u`
+  when it has no upstream) · `/api/git/draft-commit { root }` (model-written message for the staged, or all, changes).
+- **Pull requests**: `POST /api/pr/compare { root, base? }` → like GitHub's compare view: commits and file diffs of
+  `merge-base(origin/base, HEAD)..HEAD` (base fetched quietly first), uncommitted and unpushed counts, an open PR for
+  the branch. `/api/pr/draft { root, base, notes }` → model-written `{ title, body }` from the commits, the diff and
+  the chat notes. `/api/pr/create { root, title, body, base, draft, newBranch? }` → pushes and runs `gh pr create`
+  (or only pushes if the branch already has an open PR). On the default branch, `newBranch` is created at HEAD and the
+  default branch is moved back to `origin/<default>` when that loses nothing. PRs never commit; commits come from
+  Source Control. Needs the GitHub CLI logged in (`gh auth login`); git never prompts for credentials.
 
 Requests must be `Content-Type: application/json` and same-origin, so other websites can't use
 the local server to spend tokens.

@@ -37,7 +37,7 @@ export function StatusBar() {
           </span>
           <Item className="[&_svg]:text-success">
             <Icon name="check" />
-            Read-only: nothing is written until you apply
+            Read-only: nothing is written until you save
           </Item>
           <span className="flex-1" />
           {scanning && (

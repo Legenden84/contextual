@@ -216,22 +216,45 @@ export const saveThread = (root: string, id: string, summary: { title: string; t
 
 export const deleteThread = (root: string, id: string) => postJson<{ ok: true }>('/api/threads/delete', { root, id })
 
-// ------------------------------------------------------------------ git and pull requests
+// ------------------------------------------------------------------ git (Source Control) and pull requests
 
-export interface GitFileState {
+/** VS Code-style letters: M modified, A added, D deleted, R renamed, U untracked, C conflict. */
+export type ChangeLetter = 'M' | 'A' | 'D' | 'R' | 'U' | 'C'
+
+export interface StatusEntry {
   path: string
-  /** M modified, A new, D deleted, '' unchanged vs HEAD. */
-  status: 'M' | 'A' | 'D' | ''
+  from?: string
+  letter: ChangeLetter
 }
 
-export interface GitInfo {
-  isRepo: boolean
+export interface GitStatus {
+  branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  staged: StatusEntry[]
+  changes: StatusEntry[]
+  conflicts: StatusEntry[]
+}
+
+export interface FileDiff {
+  path: string
+  old: string
+  new: string
+  skipped?: string
+}
+
+export interface Comparison {
   branch: string | null
   defaultBranch: string | null
+  base: string
   remote: string | null
   github: boolean
   problem: string | null
-  files: GitFileState[]
+  commits: { sha: string; subject: string; author: string; when: string }[]
+  files: (FileDiff & { letter: ChangeLetter })[]
+  uncommitted: number
+  unpushed: number
   existingPr: { url: string; number: number } | null
 }
 
@@ -239,16 +262,20 @@ export interface PrResult {
   url: string
   number: number | null
   branch: string
-  commit: string
   updatedExisting: boolean
 }
 
-export const gitInfo = (root: string, paths: string[]) => postJson<GitInfo>('/api/git/info', { root, paths })
+export const gitStatus = (root: string) => postJson<GitStatus>('/api/git/status', { root })
+export const gitStage = (root: string, paths: string[]) => postJson<GitStatus>('/api/git/stage', { root, paths })
+export const gitUnstage = (root: string, paths: string[]) => postJson<GitStatus>('/api/git/unstage', { root, paths })
+export const gitDiff = (root: string, path: string, staged: boolean) => postJson<FileDiff>('/api/git/diff', { root, path, staged })
+export const gitCommit = (root: string, message: string, all: boolean) =>
+  postJson<{ commit: string; files: number }>('/api/git/commit', { root, message, all })
+export const gitPush = (root: string) => postJson<{ branch: string; upstream: string }>('/api/git/push', { root })
+export const draftCommit = (root: string) => postJson<{ message: string }>('/api/git/draft-commit', { root })
 
-export const draftPr = (root: string, paths: string[], notes: string) =>
-  postJson<{ title: string; body: string }>('/api/pr/draft', { root, paths, notes })
-
-export const createPr = (
-  root: string,
-  req: { paths: string[]; title: string; body: string; base: string; draft: boolean; newBranch?: string },
-) => postJson<PrResult>('/api/pr/create', { root, ...req })
+export const comparePr = (root: string, base?: string) => postJson<Comparison>('/api/pr/compare', { root, base })
+export const draftPr = (root: string, base: string, notes: string) =>
+  postJson<{ title: string; body: string }>('/api/pr/draft', { root, base, notes })
+export const createPr = (root: string, req: { title: string; body: string; base: string; draft: boolean; newBranch?: string }) =>
+  postJson<PrResult>('/api/pr/create', { root, ...req })

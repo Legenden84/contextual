@@ -54,9 +54,9 @@ export function ChangesPanel() {
 
       <div className="flex-1 overflow-auto py-1">
         <div className="flex h-control items-center gap-2 px-3 text-ui-small text-ink-muted">
-          <Checkbox state={allState} label="Select all for apply" onChange={() => setIncludeAll(allState !== 'on')} />
+          <Checkbox state={allState} label="Select all to save" onChange={() => setIncludeAll(allState !== 'on')} />
           <span>
-            {selected} of {rows.length} selected for apply
+            {selected} of {rows.length} selected to save
           </span>
         </div>
         {rows.map((r) => {
@@ -72,7 +72,7 @@ export function ChangesPanel() {
                 centerView === 'diff' && diffFocus === r.path && 'bg-surface-selected hover:bg-surface-selected',
               )}
             >
-              <Checkbox state={on} label={`Include ${name} in apply`} onChange={() => toggleInclude(r.path)} />
+              <Checkbox state={on} label={`Include ${name} when saving`} onChange={() => toggleInclude(r.path)} />
               <StatusLetter status={r.status} />
               <span className="flex min-w-0 flex-1 flex-col leading-4">
                 <span className={cn('inline-flex items-center gap-1 truncate text-ui-body leading-4', on ? 'text-ink' : 'text-ink-muted')}>
@@ -97,7 +97,7 @@ export function ChangesPanel() {
         <WarningBanner key={c.path} className="mx-3 mb-3 items-start rounded-md">
           <span>
             <b className="font-semibold">{splitPath(c.path).name}</b> changed on disk after it was sent. Excluded from
-            apply until you review it.
+            saving until you review it.
           </span>
         </WarningBanner>
       ))}
@@ -107,7 +107,7 @@ export function ChangesPanel() {
           Open diff
         </Button>
         <Button variant="primary" className="flex-1" disabled={selected === 0} onClick={openApply}>
-          Apply {selected} {selected === 1 ? 'file' : 'files'}…
+          Save {selected} {selected === 1 ? 'file' : 'files'}…
         </Button>
       </div>
     </aside>

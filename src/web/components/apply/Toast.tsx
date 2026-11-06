@@ -2,9 +2,9 @@ import { Button, IconButton } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { useApp } from '@/state/app-context'
 
-/** Confirmation after an apply. Stays until dismissed or the next apply. */
+/** Confirmation after saving. Stays until dismissed or the next save. */
 export function Toast() {
-  const { toast, undoApply, dismissToast, openPr } = useApp()
+  const { toast, undoApply, dismissToast, setSidebarTab } = useApp()
   if (!toast) return null
   return (
     <div
@@ -21,9 +21,16 @@ export function Toast() {
         <div className="text-ui-small text-ink-muted">{toast.detail}</div>
       </div>
       <span className="flex-1" />
-      {toast.offerPr && (
-        <Button size="xs" icon="branch" onClick={openPr}>
-          Pull request…
+      {toast.offerCommit && (
+        <Button
+          size="xs"
+          icon="branch"
+          onClick={() => {
+            setSidebarTab('scm')
+            dismissToast()
+          }}
+        >
+          Commit…
         </Button>
       )}
       {toast.undoable && (

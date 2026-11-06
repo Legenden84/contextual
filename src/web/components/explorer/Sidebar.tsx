@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { SourceControl } from '@/components/scm/SourceControl'
 import { Icon } from '@/components/ui/Icon'
 import { Count } from '@/components/ui/Tag'
 import { cn } from '@/lib/utils'
@@ -6,15 +6,15 @@ import { useApp } from '@/state/app-context'
 import { FileTree } from './FileTree'
 import { RulesPanel } from './RulesPanel'
 
-/** Left column: Files (explorer + Skills & Rules) or the Skills & Rules tab on its own. */
+/** Left column: Files (explorer + Skills & Rules), Skills & Rules on its own, or Source Control. */
 export function Sidebar() {
-  const { rules, rulesOn } = useApp()
-  const [tab, setTab] = useState<'files' | 'rules'>('files')
+  const { rules, rulesOn, sidebarTab: tab, setSidebarTab: setTab, git } = useApp()
   const onCount = rules.filter((r) => rulesOn.has(r.path)).length
+  const changeCount = git ? new Set([...git.staged, ...git.changes, ...git.conflicts].map((e) => e.path)).size : 0
 
   const tabClass = (active: boolean) =>
     cn(
-      'inline-flex h-[30px] cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-2.5 text-ui-small text-ink-muted',
+      'inline-flex h-[30px] cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-2 text-ui-small whitespace-nowrap text-ink-muted',
       active && 'border-accent text-ink-strong',
     )
 
@@ -27,8 +27,13 @@ export function Sidebar() {
         </button>
         <button type="button" role="tab" aria-selected={tab === 'rules'} className={tabClass(tab === 'rules')} onClick={() => setTab('rules')}>
           <Icon name="book" />
-          Skills &amp; Rules
+          Rules
           <Count>{onCount}</Count>
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'scm'} className={tabClass(tab === 'scm')} onClick={() => setTab('scm')}>
+          <Icon name="branch" />
+          Source control
+          {changeCount > 0 && <Count>{changeCount}</Count>}
         </button>
       </div>
       {tab === 'files' ? (
@@ -36,8 +41,10 @@ export function Sidebar() {
           <FileTree />
           <RulesPanel />
         </>
-      ) : (
+      ) : tab === 'rules' ? (
         <RulesPanel fill />
+      ) : (
+        <SourceControl />
       )}
     </aside>
   )

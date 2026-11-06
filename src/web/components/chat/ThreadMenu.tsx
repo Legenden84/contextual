@@ -32,17 +32,16 @@ export function ThreadMenu() {
 
   return (
     <div ref={root} className="relative flex items-center gap-1 pr-2">
-      {project && thread.applied.length > 0 && (
+      {project && (
         <Button
           variant="ghost"
           size="xs"
           icon="branch"
           disabled={streaming}
           onClick={openPr}
-          title={`Commit the ${thread.applied.length} ${thread.applied.length === 1 ? 'file' : 'files'} applied in this chat and open a pull request`}
+          title="Compare this branch with its base and open a pull request"
         >
           Pull request
-          <span className="ml-0.5 rounded-full bg-surface-300 px-1.5 text-[11px] text-ink-muted">{thread.applied.length}</span>
         </Button>
       )}
       <Button variant="ghost" size="xs" icon="plus" disabled={streaming || !messages.length} onClick={newChat}>

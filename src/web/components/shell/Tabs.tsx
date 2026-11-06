@@ -2,6 +2,7 @@ import { FileGlyph } from '@/components/ui/FileGlyph'
 import { Icon } from '@/components/ui/Icon'
 import { Tag } from '@/components/ui/Tag'
 import { splitPath } from '@/lib/format'
+import { parseGitTab } from '@/lib/git-tabs'
 import { cn } from '@/lib/utils'
 import { ThreadMenu } from '@/components/chat/ThreadMenu'
 import { useApp } from '@/state/app-context'
@@ -20,13 +21,14 @@ export function Tabs() {
         <span>Chat</span>
       </div>
       {previewTabs.map((path) => {
-        const name = splitPath(path).name
+        const git = parseGitTab(path)
+        const name = splitPath(git ? git.path : path).name
         const active = activeTab === path
         return (
           <div key={path} role="tab" aria-selected={active} title={path} onClick={() => setActiveTab(path)} className={cn(TAB, active && ACTIVE)}>
             <FileGlyph name={name} />
             <span>{name}</span>
-            <Tag>read-only</Tag>
+            <Tag>{git ? (git.staged ? 'staged' : 'changes') : 'read-only'}</Tag>
             <button
               type="button"
               aria-label={`Close ${name}`}

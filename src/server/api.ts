@@ -12,15 +12,22 @@
 //   GET  /api/threads/<id>   ?root= → one saved conversation.
 //   POST /api/threads/save   { root, id, summary, thread } → saves a conversation.
 //   POST /api/threads/delete { root, id } → deletes one.
-//   POST /api/git/info       { root, paths } → branch, default branch, GitHub access, file states, open PR.
-//   POST /api/pr/draft       { root, paths, notes } → model-written { title, body }.
-//   POST /api/pr/create      { root, paths, title, body, base, draft, newBranch? } → commits, pushes, opens the PR.
+//   POST /api/git/status     { root } → branch, upstream, ahead/behind, staged / changes / conflicts.
+//   POST /api/git/stage      { root, paths } · /api/git/unstage { root, paths }
+//   POST /api/git/diff       { root, path, staged } → { old, new } (HEAD→index or index→working tree).
+//   POST /api/git/commit     { root, message, all } → commits staged changes (all: stage everything first).
+//   POST /api/git/push       { root } → pushes, publishing the branch if it has no upstream.
+//   POST /api/git/draft-commit { root } → model-written commit message for the staged (or all) changes.
+//   POST /api/pr/compare     { root, base? } → commits and file diffs of base...HEAD, like GitHub's compare.
+//   POST /api/pr/draft       { root, base, notes } → model-written { title, body }.
+//   POST /api/pr/create      { root, title, body, base, draft, newBranch? } → pushes and opens the PR.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFoundryConfig, type ConfigResult, type FoundryConfig } from './config.ts'
 import {
   createFoundryClients,
   describeError,
+  draftCommitMessage,
   draftPullRequest,
   streamConversation,
   testConnection,
@@ -33,7 +40,7 @@ import { listDirs } from './fs/browse.ts'
 import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
 import { PathError } from './fs/paths.ts'
 import { scanProject, type ScanOptions } from './fs/scan.ts'
-import { createPullRequest, diffFor, gitInfo } from './git.ts'
+import { commit, commitDiff, compare, createPullRequest, fileDiff, gitStatus, prDiff, push, stage, unstage } from './git.ts'
 import { deleteThread, listThreads, loadThread, saveThread } from './threads.ts'
 
 type Env = Record<string, string | undefined>
@@ -284,41 +291,51 @@ export function createApi(getEnv: () => Env) {
         return sendJson(res, 200, { ok: true })
       }
 
-      if (route === 'POST /api/git/info') {
-        const body = await readObject(req)
-        return sendJson(res, 200, await gitInfo(str(body, 'root'), strList(body, 'paths', 2000)))
-      }
-
-      if (route === 'POST /api/pr/draft') {
-        const cfg = requireConfig()
+      if (route.startsWith('POST /api/git/') || route.startsWith('POST /api/pr/')) {
         const body = await readObject(req)
         const root = str(body, 'root')
-        const paths = strList(body, 'paths', 2000)
-        const info = await gitInfo(root, paths)
-        const notes = typeof body.notes === 'string' ? body.notes.slice(0, 20_000) : ''
-        const draft = await draftPullRequest(
-          clientsFor(cfg).chat,
-          cfg,
-          { notes, diff: await diffFor(root, paths), branch: info.branch ?? '' },
-          abort.signal,
-        )
-        return sendJson(res, 200, draft)
-      }
-
-      if (route === 'POST /api/pr/create') {
-        const body = await readObject(req)
-        return sendJson(
-          res,
-          200,
-          await createPullRequest(str(body, 'root'), {
-            paths: strList(body, 'paths', 2000),
-            title: str(body, 'title'),
-            body: typeof body.body === 'string' ? body.body : '',
-            base: str(body, 'base'),
-            draft: body.draft === true,
-            newBranch: typeof body.newBranch === 'string' && body.newBranch.trim() ? body.newBranch.trim() : undefined,
-          }),
-        )
+        switch (url.pathname) {
+          case '/api/git/status':
+            return sendJson(res, 200, await gitStatus(root))
+          case '/api/git/stage':
+            await stage(root, strList(body, 'paths', 5000))
+            return sendJson(res, 200, await gitStatus(root))
+          case '/api/git/unstage':
+            await unstage(root, strList(body, 'paths', 5000))
+            return sendJson(res, 200, await gitStatus(root))
+          case '/api/git/diff':
+            return sendJson(res, 200, await fileDiff(root, str(body, 'path'), body.staged === true))
+          case '/api/git/commit':
+            return sendJson(res, 200, await commit(root, str(body, 'message'), body.all === true))
+          case '/api/git/push':
+            return sendJson(res, 200, await push(root))
+          case '/api/git/draft-commit': {
+            const cfg = requireConfig()
+            const diff = await commitDiff(root)
+            if (!diff.trim()) throw new HttpError(409, 'There are no changes to describe.')
+            return sendJson(res, 200, { message: await draftCommitMessage(clientsFor(cfg).chat, cfg, diff, abort.signal) })
+          }
+          case '/api/pr/compare':
+            return sendJson(res, 200, await compare(root, typeof body.base === 'string' ? body.base : undefined))
+          case '/api/pr/draft': {
+            const cfg = requireConfig()
+            const d = await prDiff(root, str(body, 'base'))
+            const notes = typeof body.notes === 'string' ? body.notes.slice(0, 20_000) : ''
+            return sendJson(res, 200, await draftPullRequest(clientsFor(cfg).chat, cfg, { ...d, notes }, abort.signal))
+          }
+          case '/api/pr/create':
+            return sendJson(
+              res,
+              200,
+              await createPullRequest(root, {
+                title: str(body, 'title'),
+                body: typeof body.body === 'string' ? body.body : '',
+                base: str(body, 'base'),
+                draft: body.draft === true,
+                newBranch: typeof body.newBranch === 'string' && body.newBranch.trim() ? body.newBranch.trim() : undefined,
+              }),
+            )
+        }
       }
 
       if (route === 'POST /api/threads/delete') {

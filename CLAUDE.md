@@ -22,8 +22,11 @@ proposed changes. The model never writes to disk; applying is an explicit user a
     `ThreadState.fileVersions`); conversations continue via the Responses API's `previous_response_id`
     and are saved per project through `/api/threads`; `lib/changes.ts` turns a reply's
     `### FILE:` / `### DELETE:` blocks into the Changes panel; `lib/images.ts` reads pasted/dropped
-    pictures (scaled to 2048px, vision token estimate). Files saved by Apply are tracked per chat
-    (`ThreadState.applied`) for "Pull request" (`components/pr/`, server `src/server/git.ts` via `gh`). Settings are saved in localStorage.
+    pictures (scaled to 2048px, vision token estimate). Saving proposed changes is "Save" in the UI
+    (code still calls it apply). `components/scm/` is a VS Code-style Source Control tab (stage, commit,
+    push); `components/pr/` opens pull requests as a GitHub-style compare of the branch with its base;
+    both use `src/server/git.ts` (git + `gh`). The open folder is kept in sessionStorage so a reload
+    (e.g. Vite reloading after saving into its own repo) reopens it. Settings are saved in localStorage.
   - `data/types.ts` — shared types; `data/defaults.ts` — output-format prompt, default exclusions,
     token estimates. Project files come from `src/server/fs` via `/api/project/*`.
   - `#open=<path>` opens a folder directly (bookmarkable).

@@ -65,7 +65,7 @@ export function DiffScreen() {
           {expandAll ? 'Collapse unchanged' : 'Expand all'}
         </Button>
         <Button variant="primary" disabled={selected === 0} onClick={openApply}>
-          Apply {selected} {selected === 1 ? 'file' : 'files'}…
+          Save {selected} {selected === 1 ? 'file' : 'files'}…
         </Button>
       </div>
 

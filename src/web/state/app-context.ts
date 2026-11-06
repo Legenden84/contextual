@@ -1,12 +1,13 @@
 import { createContext, useContext } from 'react'
 import type { Change, Deployment, Rule, TreeNode } from '@/data/types'
-import type { ApiContent, ApiKind, ApiMessage, FileContent, Health, ThreadSummary } from '@/lib/api'
+import type { ApiContent, ApiKind, ApiMessage, FileContent, GitStatus, Health, ThreadSummary } from '@/lib/api'
 import type { Attachment } from '@/lib/images'
 
 export type Screen = 'welcome' | 'workspace' | 'settings'
 export type Theme = 'dark' | 'light'
 export type DiffMode = 'unified' | 'split'
 export type CenterView = 'chat' | 'diff'
+export type SidebarTab = 'files' | 'rules' | 'scm'
 
 export interface ChatMessage {
   id: string
@@ -56,8 +57,8 @@ export interface ToastState {
   tone?: 'error'
   /** Backup to restore on Undo (real folders). */
   backupId?: string
-  /** Offer "Create pull request" next to Undo. */
-  offerPr?: boolean
+  /** Offer "Commit…" (opens Source Control) next to Undo. */
+  offerCommit?: boolean
 }
 
 /** The opened project: a folder on this machine. */
@@ -99,7 +100,7 @@ export interface ThreadState {
   transcript: ApiMessage[]
   /** Version (hash) of each file the model has, by path. */
   fileVersions: Record<string, string>
-  /** Files saved by Apply in this chat and not yet in a pull request. */
+  /** Files saved from this chat's replies and not yet in a pull request. */
   applied: string[]
   /** Pull requests created from this chat. */
   pullRequests: { url: string; number: number | null; branch: string }[]
@@ -177,6 +178,12 @@ export interface AppState {
   include: Readonly<Record<string, boolean>>
   applyOpen: boolean
   prOpen: boolean
+  /** Left column tab. */
+  sidebarTab: SidebarTab
+  /** Bumped when git state may have changed (save, commit, rescan); Source Control refreshes on it. */
+  gitTick: number
+  /** Git status of the open folder; null when it isn't a repository (or not loaded yet). */
+  git: GitStatus | null
   toast: ToastState | null
 
   settings: Settings
@@ -234,8 +241,13 @@ export interface AppActions {
   openApply(): void
   openPr(): void
   closePr(): void
-  /** Records a created PR: the files are committed, so they leave `thread.applied`. */
-  recordPr(pr: { url: string; number: number | null; branch: string; updatedExisting: boolean }, paths: string[]): void
+  /** Records a created or updated PR in the chat. */
+  recordPr(pr: { url: string; number: number | null; branch: string; updatedExisting: boolean }): void
+  setSidebarTab(tab: SidebarTab): void
+  /** Opens a diff tab for a changed file (staged: HEAD→index, else index→working tree). */
+  openGitDiff(path: string, staged: boolean): void
+  /** Tell views that git state changed (after a commit, push, stage…). */
+  gitChanged(): void
   closeApply(): void
   /** Writes the selected changes. Resolves to an error message, or null on success. */
   apply(backup: boolean): Promise<string | null>

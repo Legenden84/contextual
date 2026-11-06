@@ -6,6 +6,7 @@ import { parseChanges } from '@/lib/changes'
 import { estimateTokens, fmtK } from '@/lib/format'
 import { parseMarkdown } from '@/lib/markdown'
 import { toAttachment, type Attachment } from '@/lib/images'
+import { gitTabId } from '@/lib/git-tabs'
 import { hashText } from '@/lib/hash'
 import { buildTurn, contentImages, contentText, systemPrompt, type ContextFile } from '@/lib/prompt'
 import { biggestFolder, checkState, findNode, nodeStats, pickableFiles, selectableFiles } from '@/lib/tree'
@@ -21,6 +22,7 @@ import {
   type ResponseInfo,
   type Screen,
   type Settings,
+  type SidebarTab,
   type Theme,
   type ThreadState,
   type ToastState,
@@ -31,6 +33,17 @@ const DIFF_MODE_KEY = 'contextual.diffMode'
 const THEME_KEY = 'contextual.theme'
 const RECENTS_KEY = 'contextual.recentProjects'
 const SETTINGS_KEY = 'contextual.settings'
+/** The open folder, per browser tab, so a page reload (e.g. Vite reloading after a save) reopens it. */
+const OPEN_PROJECT_KEY = 'contextual.openProject'
+
+function rememberOpen(root: string | null) {
+  try {
+    if (root) sessionStorage.setItem(OPEN_PROJECT_KEY, root)
+    else sessionStorage.removeItem(OPEN_PROJECT_KEY)
+  } catch {
+    // Without session storage a reload just returns to the Welcome screen.
+  }
+}
 /** Used for the context bar until AZURE_OPENAI_CONTEXT_LIMIT is set. */
 export const FALLBACK_CONTEXT_LIMIT = 128000
 /** Don't rescan on window focus more often than this. */
@@ -193,6 +206,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [include, setInclude] = useState<Record<string, boolean>>({})
   const [applyOpen, setApplyOpen] = useState(false)
   const [prOpen, setPrOpen] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
+  const [gitTick, setGitTick] = useState(0)
+  const [git, setGit] = useState<api.GitStatus | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const [settings, setSettings] = useState<Settings>(readSettings)
@@ -338,6 +354,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             // A missing or unreadable conversation just means starting fresh.
           }
         })
+        rememberOpen(r.root)
         setRecents((list) => {
           const next = [{ name: r.name, path: r.root, openedAt: new Date().toISOString() }, ...list.filter((x) => x.path !== r.root)].slice(0, 8)
           writePref(RECENTS_KEY, JSON.stringify(next))
@@ -370,6 +387,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const pickable = pickableFiles(r.tree)
       setSelected((s) => new Set([...s].filter((p) => pickable.has(p))))
       setStale(changed)
+      setGitTick((t) => t + 1)
       setRules((old) => {
         const content = new Map(old.map((x) => [x.path, x.content]))
         setRulesOn((on) => new Set([...on].filter((p) => r.rules.some((x) => x.path === p))))
@@ -418,14 +436,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [project],
   )
 
-  // #open=/path/to/project opens that folder directly (bookmarkable).
-  const openedFromHash = useRef(false)
+  // #open=/path/to/project opens that folder directly (bookmarkable). Otherwise, after a reload,
+  // reopen the folder this tab had open (its latest chat is restored with it).
+  const openedOnLoad = useRef(false)
   useEffect(() => {
+    if (openedOnLoad.current) return
+    openedOnLoad.current = true
     const m = /^#open=(.+)$/.exec(window.location.hash)
-    if (!m || openedFromHash.current) return
-    openedFromHash.current = true
-    void openFolder(decodeURIComponent(m[1])).then((err) => {
-      if (err) setToast({ title: 'Could not open the folder', detail: err, undoable: false, tone: 'error' })
+    let path: string | null = m ? decodeURIComponent(m[1]) : null
+    if (!path) {
+      try {
+        path = sessionStorage.getItem(OPEN_PROJECT_KEY)
+      } catch {
+        path = null
+      }
+    }
+    if (!path) return
+    void openFolder(path).then((err) => {
+      if (!err) return
+      rememberOpen(null)
+      setToast({ title: 'Could not open the folder', detail: err, undoable: false, tone: 'error' })
     })
   }, [openFolder])
 
@@ -687,7 +717,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             note('The Responses API is not available for this deployment; the full conversation is now sent with each message.', 'warn')
           if (truncated)
             note(
-              'The reply hit the completion token limit and was cut off, so its file changes were not offered for apply. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.',
+              'The reply hit the completion token limit and was cut off, so its file changes were not offered for saving. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.',
               'warn',
             )
           return next
@@ -697,6 +727,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [project, settings, deployment, resendAll, thread, attachments, selected, rules, rulesOn, stale, tree, updateMessage, addNote],
   )
+
+  // Git status of the open folder, refreshed whenever git may have changed.
+  useEffect(() => {
+    if (!project) return
+    let live = true
+    api
+      .gitStatus(project.root)
+      .then((s) => live && setGit(s))
+      .catch(() => live && setGit(null))
+    return () => {
+      live = false
+    }
+  }, [project, gitTick])
 
   // Save the conversation after each completed turn.
   useEffect(() => {
@@ -756,7 +799,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           detail: `${parts.join(', ')} · not committed${project.branch ? ` on ${project.branch}` : ''}`,
           undoable: !!r.backupId,
           backupId: r.backupId ?? undefined,
-          offerPr: true,
+          offerCommit: true,
         })
         void rescan()
         return null
@@ -793,7 +836,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       rescan: () => void rescan(),
       loadFile,
-      closeProject: () => setScreen('welcome'),
+      closeProject: () => {
+        rememberOpen(null)
+        setScreen('welcome')
+      },
       openSettings: () => {
         if (screen !== 'settings') setSettingsReturn(screen)
         setScreen('settings')
@@ -905,10 +951,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPrOpen(true)
       },
       closePr: () => setPrOpen(false),
-      recordPr: (pr, paths) => {
+      recordPr: (pr) => {
         setThread((t) => ({
           ...t,
-          applied: t.applied.filter((p) => !paths.includes(p)),
           pullRequests: [...t.pullRequests, { url: pr.url, number: pr.number, branch: pr.branch }],
         }))
         const label = pr.number ? `#${pr.number}` : ''
@@ -920,13 +965,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
             tone: 'ok',
             time: now(),
             text: pr.updatedExisting
-              ? `Pushed ${paths.length} ${paths.length === 1 ? 'file' : 'files'} to ${pr.branch}; pull request ${label} updated: ${pr.url}`
-              : `Pull request ${label} opened from ${pr.branch} (${paths.length} ${paths.length === 1 ? 'file' : 'files'}): ${pr.url}`,
+              ? `Pushed ${pr.branch}; pull request ${label} is up to date: ${pr.url}`
+              : `Pull request ${label} opened from ${pr.branch}: ${pr.url}`,
           },
         ])
         setPrOpen(false)
         void rescan()
       },
+      setSidebarTab,
+      openGitDiff: (path, staged) => {
+        const tab = gitTabId(path, staged)
+        setPreviewTabs((tabs) => (tabs.includes(tab) ? tabs : [...tabs, tab]))
+        setActiveTab(tab)
+        setCenterView('chat')
+      },
+      gitChanged: () => setGitTick((t) => t + 1),
       closeApply: () => setApplyOpen(false),
       apply,
       undoApply,
@@ -971,6 +1024,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     include,
     applyOpen,
     prOpen,
+    sidebarTab,
+    gitTick,
+    git,
     toast,
     settings,
     totals,

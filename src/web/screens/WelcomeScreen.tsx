@@ -10,7 +10,7 @@ const STEPS = [
   'Tick the files the model should see',
   'Ask for a change in chat',
   'Review the diff, file by file',
-  'Apply what you want. The model never writes to disk.',
+  'Save what you want. The model never writes to disk.',
 ]
 
 function ago(iso: string): string {
@@ -51,7 +51,7 @@ export function WelcomeScreen() {
           <Logo size={40} />
           <div>
             <h1 className="text-ui-display text-ink-strong">Contextual</h1>
-            <p className="mt-0.5 text-ui-prose text-ink-muted">Pick files, chat, review diffs, apply what you want.</p>
+            <p className="mt-0.5 text-ui-prose text-ink-muted">Pick files, chat, review diffs, save what you want.</p>
           </div>
         </div>
 
