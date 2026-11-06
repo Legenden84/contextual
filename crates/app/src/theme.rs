@@ -1,0 +1,245 @@
+//! Bridges `contextual-theme` (generated from tokens.json) into GPUI.
+//!
+//! - Views read colours, spacing and type styles through [`ActiveTheme::tokens`] and the
+//!   helpers here; nothing in `crates/app` writes a literal colour (CI checks this).
+//! - `gpui-component`'s own theme is set from the same tokens, so its widgets (inputs, dialogs,
+//!   selects, notifications, markdown) match the design system.
+
+use std::sync::Arc;
+
+use contextual_theme::{Appearance, FontFamily, Rgba, Theme as Tokens, TypeStyle, radius, space};
+use gpui_kit::component::highlighter::HighlightTheme;
+use gpui_kit::component::theme::{Theme as ComponentTheme, ThemeMode};
+use gpui_kit::{App, FontFeatures, FontWeight, Global, Hsla, Pixels, Styled, Window, px};
+use serde_json::json;
+
+/// Bundled font families (see `assets.rs`).
+pub const SANS: &str = "Inter";
+pub const MONO: &str = "JetBrains Mono";
+
+pub fn hsla(c: Rgba) -> Hsla {
+    gpui_kit::Rgba {
+        r: c.r,
+        g: c.g,
+        b: c.b,
+        a: c.a,
+    }
+    .into()
+}
+
+fn hex(c: Rgba) -> String {
+    format!("#{:08x}", c.to_u32())
+}
+
+/// The tokens of the active theme.
+pub struct ThemeState {
+    pub tokens: &'static Tokens,
+}
+
+impl Global for ThemeState {}
+
+pub trait ActiveTheme {
+    fn tokens(&self) -> &'static Tokens;
+}
+
+impl ActiveTheme for App {
+    fn tokens(&self) -> &'static Tokens {
+        self.try_global::<ThemeState>()
+            .map(|s| s.tokens)
+            .unwrap_or(&Tokens::DARK)
+    }
+}
+
+/// Switches the whole app to `appearance`: our tokens, then gpui-component's theme.
+pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) {
+    let tokens = Tokens::get(appearance);
+    cx.set_global(ThemeState { tokens });
+    let mode = match appearance {
+        Appearance::Dark => ThemeMode::Dark,
+        Appearance::Light => ThemeMode::Light,
+    };
+    // `change` reloads the component theme's colours, so edit them in a second update.
+    ComponentTheme::change(mode, window, cx);
+    ComponentTheme::update(cx, |t| configure_components(t, tokens));
+    cx.refresh_windows();
+}
+
+fn configure_components(t: &mut ComponentTheme, tokens: &Tokens) {
+    let c = &tokens.colors;
+    let h = |v: Rgba| hsla(v);
+    let k = &mut t.colors;
+
+    k.background = h(c.surface_100);
+    k.foreground = h(c.ink);
+    k.border = h(c.border_strong);
+    k.input = h(c.border_strong);
+    k.ring = h(c.focus_ring);
+    k.caret = h(c.ink_strong);
+    k.selection = h(c.editor_selection);
+    k.muted = h(c.surface_300);
+    k.muted_foreground = h(c.ink_muted);
+    k.accent = h(c.surface_hover); // gpui-component's "accent" is a hover fill
+    k.accent_foreground = h(c.ink);
+    k.primary = h(c.accent);
+    k.primary_hover = h(c.accent_hover);
+    k.primary_active = h(c.accent_hover);
+    k.primary_foreground = h(c.on_accent);
+    k.secondary = h(c.surface_300);
+    k.secondary_hover = h(c.surface_hover);
+    k.secondary_active = h(c.surface_hover);
+    k.secondary_foreground = h(c.ink);
+    k.button_primary = h(c.accent);
+    k.button_primary_hover = h(c.accent_hover);
+    k.button_primary_active = h(c.accent_hover);
+    k.button_primary_foreground = h(c.on_accent);
+    k.button_secondary = h(c.surface_300);
+    k.button_secondary_hover = h(c.surface_hover);
+    k.button_secondary_active = h(c.surface_hover);
+    k.button_secondary_foreground = h(c.ink);
+    k.danger = h(c.danger);
+    k.danger_foreground = h(c.on_accent);
+    k.success = h(c.success);
+    k.success_foreground = h(c.on_accent);
+    k.warning = h(c.warning);
+    k.warning_foreground = h(c.ink_strong);
+    k.info = h(c.accent);
+    k.info_foreground = h(c.on_accent);
+    k.link = h(c.accent_ink);
+    k.link_hover = h(c.accent_ink);
+    k.link_active = h(c.accent_ink);
+    k.popover = h(c.surface_200);
+    k.popover_foreground = h(c.ink);
+    k.overlay = h(c.surface_scrim);
+    k.list = h(c.surface_100);
+    k.list_hover = h(c.surface_hover);
+    k.list_active = h(c.surface_selected);
+    k.list_active_border = h(c.focus_ring);
+    k.scrollbar = h(Rgba {
+        a: 0.0,
+        ..c.surface_100
+    });
+    k.scrollbar_thumb = h(Rgba {
+        a: 0.4,
+        ..c.ink_faint
+    });
+    k.scrollbar_thumb_hover = h(Rgba {
+        a: 0.6,
+        ..c.ink_faint
+    });
+    k.sidebar = h(c.surface_000);
+    k.sidebar_foreground = h(c.ink);
+    k.sidebar_border = h(c.border);
+    k.title_bar = h(c.surface_000);
+    k.title_bar_border = h(c.border);
+    k.status_bar = h(c.surface_000);
+    k.status_bar_border = h(c.border);
+    k.tab_bar = h(c.surface_000);
+    k.tab = h(c.surface_000);
+    k.tab_active = h(c.surface_100);
+    k.tab_foreground = h(c.ink_muted);
+    k.tab_active_foreground = h(c.ink_strong);
+    k.switch = h(c.surface_300);
+    k.window_border = h(c.border);
+
+    t.font_family = SANS.into();
+    t.font_size = px(contextual_theme::type_style::UI_BODY.size);
+    t.mono_font_family = MONO.into();
+    t.mono_font_size = px(contextual_theme::type_style::CODE.size);
+    t.radius = px(radius::MD);
+    t.radius_lg = px(radius::LG);
+    t.shadow = true;
+    t.highlight_theme = Arc::new(highlight_theme(tokens));
+}
+
+/// Tree-sitter capture → `syn-*` token (the design README's code-rendering rules).
+fn highlight_theme(tokens: &Tokens) -> HighlightTheme {
+    let c = &tokens.colors;
+    let s = |v: Rgba| json!({ "color": hex(v) });
+    let syntax = json!({
+        "attribute": s(c.syn_variable),
+        "boolean": s(c.syn_keyword),
+        "comment": s(c.syn_comment),
+        "comment.doc": s(c.syn_comment),
+        "constant": s(c.syn_number),
+        "constructor": s(c.syn_type),
+        "enum": s(c.syn_type),
+        "function": s(c.syn_function),
+        "keyword": s(c.syn_keyword),
+        "label": s(c.syn_variable),
+        "number": s(c.syn_number),
+        "operator": s(c.syn_plain),
+        "preproc": s(c.syn_control),
+        "property": s(c.syn_variable),
+        "punctuation": s(c.syn_plain),
+        "punctuation.bracket": s(c.syn_plain),
+        "punctuation.delimiter": s(c.syn_plain),
+        "punctuation.special": s(c.syn_control),
+        "string": s(c.syn_string),
+        "string.escape": s(c.syn_control),
+        "string.regex": s(c.syn_string),
+        "string.special": s(c.syn_string),
+        "tag": s(c.syn_tag),
+        "title": s(c.syn_heading),
+        "type": s(c.syn_type),
+        "variable": s(c.syn_variable),
+        "variable.special": s(c.syn_keyword),
+        "variant": s(c.syn_type),
+        "text.literal": s(c.syn_string),
+        "link_uri": s(c.accent_ink),
+        "link_text": s(c.accent_ink),
+    });
+    let value = json!({
+        "name": "Contextual",
+        "appearance": if tokens.appearance == Appearance::Dark { "dark" } else { "light" },
+        "style": {
+            "editor.background": hex(c.surface_100),
+            "editor.foreground": hex(c.syn_plain),
+            "editor.active_line.background": hex(c.editor_line_current),
+            "editor.line_number": hex(c.editor_gutter_ink),
+            "editor.active_line_number": hex(c.editor_gutter_active),
+            "editor.invisible": hex(c.editor_indent_guide),
+            "editor.gutter.background": hex(c.surface_100),
+            "syntax": syntax,
+        }
+    });
+    serde_json::from_value(value).expect("highlight theme JSON matches gpui-component's schema")
+}
+
+/// Applies a token type style (size, line height, weight, tracking, family) to an element.
+pub trait TypeExt: Styled + Sized {
+    fn type_style(self, s: TypeStyle) -> Self {
+        let (family, features) = match s.family {
+            FontFamily::Sans => (SANS, FontFeatures::default()),
+            // Code ligatures off (design README: code rendering rules).
+            FontFamily::Mono => (MONO, FontFeatures::disable_ligatures()),
+        };
+        self.font_family(family)
+            .font_features(features)
+            .text_size(px(s.size))
+            .line_height(px(s.line_height))
+            .font_weight(FontWeight(s.weight as f32))
+    }
+}
+
+impl<T: Styled> TypeExt for T {}
+
+/// Token spacing step in px: only 1, 2, 3, 4, 6 and 8 exist.
+pub fn sp(step: u8) -> Pixels {
+    px(match step {
+        1 => space::S1,
+        2 => space::S2,
+        3 => space::S3,
+        4 => space::S4,
+        6 => space::S6,
+        8 => space::S8,
+        _ => panic!("space-{step} is not a token"),
+    })
+}
+
+pub fn row_height() -> Pixels {
+    px(space::ROW_HEIGHT)
+}
+
+pub fn control_height() -> Pixels {
+    px(space::CONTROL_HEIGHT)
+}

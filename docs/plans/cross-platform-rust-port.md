@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Status** | In progress — Phase 2 (core) landed; Phase 6 agent/RemoteHost started; Phase 1 (GPUI spike) needs the Windows machine |
+| **Status** | In progress — Phase 2 (core) landed; Phase 1 spike built, gate pending Windows/macOS runs; Phase 6 started |
 | **Owner** | Tobias Legenden |
 | **Date** | 2026-11-06 |
 | **Scope** | Replace the whole app — React UI (`src/web/`) and the Node "backend" mounted inside Vite (`src/server/`) — with a native Rust desktop app built on **GPUI**, for **Windows and macOS**. The Windows app can also open projects that live inside WSL. |
@@ -87,7 +87,8 @@ independent.
 
 ## 4. Non-goals
 
-- A Linux desktop build, including running the app inside WSL through WSLg.
+- Shipping a Linux desktop build. (The app does build and run on Linux: that is the development
+  loop, shown through WSLg. It is not a supported target.)
 - Keeping React/TypeScript in any form (no Tauri, no Dioxus/Leptos webview).
 - Remote hosts other than WSL (SSH, dev containers). The design must *allow* them.
 - Auto-update, code signing / notarization and installers for distribution. Unsigned local builds
@@ -296,15 +297,17 @@ target (byte-level logic, so a test requirement, not a platform branch).
 
 ## 8. Development environment
 
-- **WSL (Ubuntu, already set up):** `crates/core`, `protocol`, `agent`, `theme` build and test
-  here. `crates/app` is excluded from the workspace's default members on Linux, so no GUI
-  libraries are needed in WSL. Add `rustup target add x86_64-unknown-linux-musl` and
-  `musl-tools` for the agent (Phase 6).
-- **Windows (to set up):** Visual Studio Build Tools ("Desktop development with C++"), rustup
-  (MSVC toolchain), Git for Windows and `gh`. Use a **separate clone on the Windows drive**
-  (e.g. `C:\dev\contextual`) — building over `\\wsl.localhost` is slow. Node is not needed for
-  the new app. The app is run and debugged here; it can also be driven from a WSL shell via
-  `powershell.exe`.
+All development happens on Linux (WSL, Ubuntu); no Windows toolchain is needed.
+
+- **Build, test and run in WSL.** Every crate, including the GPUI app, builds natively; the app
+  window opens through WSLg. One-time setup:
+  `sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev clang mingw-w64`,
+  plus `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu`.
+- **Windows `.exe` from Linux:** `cargo build -p contextual --target x86_64-pc-windows-gnu`
+  (mingw-w64) for quick checks on Windows. Debug builds compile the DirectX shaders at runtime;
+  release builds precompile them with `fxc.exe`, so release `.exe`s come from CI
+  (`windows-latest`). A Windows PC with Smart App Control on blocks unsigned local builds;
+  test on a machine without it, or sign release builds later.
 - **macOS:** CI (`macos-latest`) builds and tests every change; manual testing on a friend's Mac
   at the Phase 1 gate and before cutover.
 - **The current app** keeps running inside WSL with `npm run dev` throughout, for daily use and
@@ -493,6 +496,8 @@ WSL). The current app stays in use until Phase 7.
 | 2026-11-06 | Keep shelling out to `git` and `gh`; no libgit2/gix. |
 | 2026-11-06 | Desktop targets are Windows and macOS only; no Linux desktop build. WSL projects are a Windows-app feature. |
 | 2026-11-06 | **Build a native GPUI app instead of Tauri + React.** Tauri remains the fallback if the Phase 1 gate fails. |
+| 2026-11-06 | Develop entirely on Linux: the GPUI app runs in WSL through WSLg; Windows `.exe`s are cross-compiled (mingw) for checks, and release builds come from CI. No Windows toolchain on the dev machine. |
+| 2026-11-06 | GPUI pinned through `gpui-kit = "=0.9.0"` (crates.io), which pins `gpui-pre =0.3.11` and the matching `gpui-component`. |
 | 2026-11-06 | `tokens.json` stays the only design source; the Rust theme is generated from it at build time. |
 | 2026-11-06 | The current app stays in use until the native app reaches parity, including WSL projects. |
 | 2026-11-06 | `core::llm` and `settings` sit behind the default `llm` feature. The agent builds without it: no HTTP/TLS stack (pure-Rust static musl binary), and Windows/macOS type-checks run from WSL without a C cross-compiler. |
@@ -504,7 +509,7 @@ WSL). The current app stays in use until Phase 7.
 | Phase | State |
 | --- | --- |
 | 0 — Capture behaviour | Logic, fs, git and LLM fixtures recorded from the TS code by scripts under `crates/core/tests/fixtures/` (re-runnable with Node 24). UI screenshots and per-screen checklist: not done. |
-| 1 — GPUI spike | Workspace and `contextual-theme` (generated from `tokens.json`) done. The GPUI app itself can't be built in WSL (no GUI libs); next step on Windows. |
+| 1 — GPUI spike | Spike built (`crates/app`, run with `cargo run -p contextual`; `CONTEXTUAL_SPIKE=tree\|code\|diff\|composer\|stream\|controls`, `CONTEXTUAL_THEME=light`). All six prototypes render from the tokens in both themes in WSL (WSLg, software Vulkan); bundled fonts, ligatures off. Windows `.exe` cross-compiles (mingw). **Gate still open:** smoothness on real GPU, IME and text on Windows and macOS, clean-checkout builds there (CI `app-release` job). Known gaps: no emoji font in WSL; long diff lines are clipped (no horizontal scroll yet). |
 | 2 — Core | Done: `core::logic`, `core::workspace` (paths, browse, scan, condense, read, apply/undo, git, PR), `core::llm`, `threads`, `settings`, `process`, `WorkspaceHost` + `LocalHost` + root allowlist. Parity tests pass on Linux; core type-checks (clippy) for Windows and macOS. Windows/macOS CI not run yet. |
 | 6 — WSL host | Started: `contextual-agent` (JSON-RPC over stdio), `RemoteHost`, `core::location`, `core::wsl` (registry/`wsl.exe` discovery). The host contract suite passes against both hosts. Static musl build works. Deployment into a distro, restart/backoff and the job object are not done. |
 

@@ -47,8 +47,12 @@ proposed changes. The model never writes to disk; applying is an explicit user a
 Native GPUI rewrite per `docs/plans/cross-platform-rust-port.md` (see §15 Progress), built alongside
 the current app. Cargo workspace in `crates/`: `core` (headless logic, workspace host, Foundry client),
 `protocol` (wire types, JSON-RPC), `theme` (generated from `tokens.json` by `build.rs`), `agent`
-(WSL JSON-RPC server). Rust is in `~/.cargo/bin`.
+(WSL JSON-RPC server), `app` (GPUI desktop app; Phase 1 spike for now). Rust is in `~/.cargo/bin`.
+Development is Linux-only (plan §8): `cargo run -p contextual` opens the app through WSLg; a
+Windows `.exe` cross-compiles with `--target x86_64-pc-windows-gnu`. Plain `cargo build`/`test`
+skip `crates/app` (default members); use `--workspace` to include it.
 - `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- App views use only `contextual-theme` values via `crates/app/src/theme.rs` (`hsla(token)`, `TypeExt::type_style`, `sp(n)`); CI rejects literal colours in `crates/app/src`.
 - Windows/macOS type-check from WSL: `cargo clippy -p contextual-core --no-default-features --target x86_64-pc-windows-msvc --target-dir target/xcheck`
   (the `llm` feature needs a C cross-compiler for `ring`).
 - Parity fixtures under `crates/core/tests/fixtures/` are recorded from the TS code with Node; when TS

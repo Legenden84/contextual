@@ -25,9 +25,32 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: GUI libraries for the GPUI app (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libvulkan-dev libasound2-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
+
+  app-release:
+    name: contextual app release (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Release builds precompile the DirectX shaders with fxc.exe, so Windows releases build here.
+      - run: cargo build -p contextual --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contextual-${{ runner.os }}
+          path: |
+            target/release/contextual.exe
+            target/release/contextual
 
   agent-musl:
     name: contextual-agent (x86_64-unknown-linux-musl)
@@ -51,6 +74,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reject literal colours outside crates/theme
         run: |
-          if [ -d crates/app ] && grep -rnE '\b(rgb|rgba|hsla)\(|#[0-9a-fA-F]{6}\b' crates/app/src; then
+          if [ -d crates/app ] && grep -rnE '\b(rgba?|hsla)\(\s*(0x|[0-9.])|#[0-9a-fA-F]{6}\b' crates/app/src; then
             echo "Use contextual-theme tokens instead of literal colours."; exit 1
           fi

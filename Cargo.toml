@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/protocol", "crates/theme", "crates/agent"]
-# crates/app (GPUI) is added in Phase 1 and built only on Windows and macOS.
+members = ["crates/core", "crates/protocol", "crates/theme", "crates/agent", "crates/app"]
+# crates/app (GPUI) needs GUI dev libraries on Linux (plan §8), so plain `cargo build`/`test`
+# skip it; build it with `-p contextual` or `--workspace`.
 default-members = ["crates/core", "crates/protocol", "crates/theme", "crates/agent"]
 
 [workspace.package]
