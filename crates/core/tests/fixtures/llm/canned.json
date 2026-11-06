@@ -1,0 +1,100 @@
+{
+  "previousNotFound": {
+    "error": {
+      "message": "Previous response with id 'resp_gone' not found.",
+      "type": "invalid_request_error",
+      "param": "previous_response_id",
+      "code": "previous_response_not_found"
+    }
+  },
+  "notFound": { "error": { "code": "404", "message": "Resource not found" } },
+  "unauthorized": {
+    "error": {
+      "code": "401",
+      "message": "Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."
+    }
+  },
+  "ping": {
+    "choices": [
+      {
+        "content_filter_results": {},
+        "finish_reason": "length",
+        "index": 0,
+        "logprobs": null,
+        "message": { "annotations": [], "content": "", "refusal": null, "role": "assistant" }
+      }
+    ],
+    "created": 1761000000,
+    "id": "chatcmpl-Ping1",
+    "model": "gpt-5-2025-08-07",
+    "object": "chat.completion",
+    "prompt_filter_results": [{ "prompt_index": 0, "content_filter_results": {} }],
+    "system_fingerprint": null,
+    "usage": {
+      "completion_tokens": 16,
+      "completion_tokens_details": { "reasoning_tokens": 16 },
+      "prompt_tokens": 7,
+      "prompt_tokens_details": { "cached_tokens": 0 },
+      "total_tokens": 23
+    }
+  },
+  "commit": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "```text\nAdd login flag to the app\n\n- Toggle login in src/app.ts\n- Drop the unused binary\n```",
+          "role": "assistant"
+        }
+      }
+    ],
+    "id": "chatcmpl-Commit1",
+    "object": "chat.completion",
+    "usage": { "completion_tokens": 40, "prompt_tokens": 800, "total_tokens": 840 }
+  },
+  "pr": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "TITLE:  Add a login flag  \n---\nAdds a `login` flag so the app can gate the new flow.\n\n## Changes\n- `src/app.ts`: new `login` export\n",
+          "role": "assistant"
+        }
+      }
+    ],
+    "id": "chatcmpl-Pr1",
+    "object": "chat.completion",
+    "usage": { "completion_tokens": 60, "prompt_tokens": 1500, "total_tokens": 1560 }
+  },
+  "repair": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": { "content": "```ts\nexport const a = 2\nexport const b = 3\n```", "role": "assistant" }
+      }
+    ],
+    "id": "chatcmpl-Repair1",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 30,
+      "prompt_tokens": 120,
+      "prompt_tokens_details": { "cached_tokens": 0 },
+      "total_tokens": 150
+    }
+  },
+  "repairCut": {
+    "choices": [
+      {
+        "finish_reason": "length",
+        "index": 0,
+        "message": { "content": "export const a", "role": "assistant" }
+      }
+    ],
+    "id": "chatcmpl-Repair2",
+    "object": "chat.completion",
+    "usage": { "completion_tokens": 4096, "prompt_tokens": 120, "total_tokens": 4216 }
+  }
+}
