@@ -12,6 +12,7 @@
 //   GET  /api/threads/<id>   ?root= → one saved conversation.
 //   POST /api/threads/save   { root, id, summary, thread } → saves a conversation.
 //   POST /api/threads/delete { root, id } → deletes one.
+//   POST /api/threads/rename { root, id, title } · /api/threads/delete-all { root }
 //   POST /api/edit/repair    { path, original, edits } → whole file when edit blocks couldn't be placed.
 //   POST /api/git/status     { root } → branch, upstream, ahead/behind, staged / changes / conflicts.
 //   POST /api/git/stage      { root, paths } · /api/git/unstage { root, paths }
@@ -59,7 +60,7 @@ import {
   switchBranch,
   unstage,
 } from './git.ts'
-import { deleteThread, listThreads, loadThread, saveThread } from './threads.ts'
+import { deleteAllThreads, deleteThread, listThreads, loadThread, renameThread, saveThread } from './threads.ts'
 
 type Env = Record<string, string | undefined>
 type Next = (err?: unknown) => void
@@ -372,6 +373,17 @@ export function createApi(getEnv: () => Env) {
               }),
             )
         }
+      }
+
+      if (route === 'POST /api/threads/rename') {
+        const body = await readObject(req)
+        await renameThread(str(body, 'root'), str(body, 'id'), str(body, 'title'))
+        return sendJson(res, 200, { ok: true })
+      }
+
+      if (route === 'POST /api/threads/delete-all') {
+        const body = await readObject(req)
+        return sendJson(res, 200, { deleted: await deleteAllThreads(str(body, 'root')) })
       }
 
       if (route === 'POST /api/threads/delete') {

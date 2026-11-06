@@ -20,7 +20,7 @@ proposed changes. The model never writes to disk; applying is an explicit user a
   - `lib/api.ts` calls the local `/api` routes; `lib/prompt.ts` builds each turn (rules + output
     format as system prompt; only files new to the conversation or changed since, tracked by hash in
     `ThreadState.fileVersions`); conversations continue via the Responses API's `previous_response_id`
-    and are saved per project through `/api/threads`; `lib/changes.ts` turns a reply's
+    and are saved per project through `/api/threads` (Chats panel: search, rename, delete, delete all); `lib/changes.ts` turns a reply's
     `### FILE:` / `### EDIT:` / `### DELETE:` blocks into the Changes panel. To save output tokens the
     model returns existing files as SEARCH/REPLACE edit blocks (format in `FILE_FORMAT`, `lib/prompt.ts`,
     appended to the system prompt and deliberately not shown in Settings); `lib/edits.ts` rebuilds the

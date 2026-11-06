@@ -32,7 +32,8 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
     `[system, ...history, input]` from then on. `history` is kept byte-for-byte stable by the client, so
     Azure's prompt cache applies.
 - `GET /api/threads?root=` · `GET /api/threads/<id>?root=` · `POST /api/threads/save { root, id, summary, thread }` ·
-  `POST /api/threads/delete { root, id }` → saved conversations (last 30 per project, outside the project).
+  `POST /api/threads/delete { root, id }` · `POST /api/threads/rename { root, id, title }` ·
+  `POST /api/threads/delete-all { root }` → saved conversations (last 30 per project, outside the project).
 
 - `GET /api/fs/dirs?path=&hidden=1` → sub-folders of a path, plus Home, `/` and Windows drives.
 - `POST /api/project/scan` `{ root, options }` → tree, rules, branch. Exclusion reasons: `ignored: <dir>`,

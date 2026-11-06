@@ -100,6 +100,8 @@ export interface ThreadState {
   transcript: ApiMessage[]
   /** Version (hash) of each file the model has, by path. */
   fileVersions: Record<string, string>
+  /** Name given by the user; otherwise the chat is named after its first message. */
+  title?: string
   /** Files saved from this chat's replies and not yet in a pull request. */
   applied: string[]
   /** Pull requests created from this chat. */
@@ -224,6 +226,11 @@ export interface AppActions {
   newChat(): void
   /** Re-opens a saved conversation. */
   openThread(id: string): void
+  renameThread(id: string, title: string): Promise<string | null>
+  /** Deletes a saved conversation; deleting the open one starts a new chat. */
+  deleteThread(id: string): Promise<string | null>
+  /** Deletes every saved conversation of the open folder. */
+  deleteAllThreads(): Promise<string | null>
   send(text: string): void
   /** Adds pasted/dropped/picked pictures. Resolves to an error message, or null. */
   addAttachments(files: File[]): Promise<string | null>

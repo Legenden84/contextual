@@ -76,3 +76,30 @@ export async function deleteThread(root: string, id: string) {
   await rm(path.join(dir, `${id}.json`), { force: true })
   await writeAtomic(path.join(dir, 'index.json'), JSON.stringify((await readIndex(dir)).filter((t) => t.id !== id)))
 }
+
+/** Renames a conversation: the index entry and the saved conversation (its `title` field). */
+export async function renameThread(root: string, id: string, title: string) {
+  checkId(id)
+  const clean = title.trim().slice(0, 200)
+  if (!clean) throw new PathError(400, 'The name cannot be empty.')
+  const dir = threadsDir(root)
+  const file = path.join(dir, `${id}.json`)
+  let thread: Record<string, unknown>
+  try {
+    thread = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+  } catch {
+    throw new PathError(404, 'Conversation not found.')
+  }
+  await writeAtomic(file, JSON.stringify({ ...thread, title: clean }))
+  await writeAtomic(path.join(dir, 'index.json'), JSON.stringify((await readIndex(dir)).map((t) => (t.id === id ? { ...t, title: clean } : t))))
+}
+
+/** Deletes every saved conversation of a project. */
+export async function deleteAllThreads(root: string): Promise<number> {
+  const dir = threadsDir(root)
+  await mkdir(dir, { recursive: true })
+  const index = await readIndex(dir)
+  for (const t of index) await rm(path.join(dir, `${t.id}.json`), { force: true })
+  await writeAtomic(path.join(dir, 'index.json'), '[]')
+  return index.length
+}

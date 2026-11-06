@@ -308,6 +308,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api: saved.api,
       transcript: saved.transcript,
       fileVersions: saved.fileVersions,
+      title: saved.title,
       applied: saved.applied ?? [],
       pullRequests: saved.pullRequests ?? [],
     })
@@ -770,12 +771,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [project, gitTick])
 
+  /** A new, empty chat (the files stay ticked). */
+  const startFresh = useCallback(() => {
+    if (abortRef.current) return
+    referenceOnly.current.clear()
+    setThread(freshThread())
+    setMessages([])
+    setInclude({})
+    setAttachments([])
+    setCenterView('chat')
+    setActiveTab('chat')
+  }, [])
+
   // Save the conversation after each completed turn.
   useEffect(() => {
     if (!project || streaming || !thread.transcript.length) return
     const root = project.root
     const t = window.setTimeout(() => {
-      const title = messages.find((m) => m.role === 'user')?.text.slice(0, 80) ?? 'Conversation'
+      const title = thread.title ?? messages.find((m) => m.role === 'user')?.text.slice(0, 80) ?? 'Conversation'
       const saved: SavedThread = { version: 1, ...thread, messages }
       void api
         .saveThread(root, thread.id, { title, turns: thread.transcript.length / 2 }, saved)
@@ -917,15 +930,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setDeployment,
       setResendAll,
-      newChat: () => {
-        if (abortRef.current) return
-        referenceOnly.current.clear()
-        setThread(freshThread())
-        setMessages([])
-        setInclude({})
-        setAttachments([])
-        setCenterView('chat')
-        setActiveTab('chat')
+      newChat: startFresh,
+      renameThread: async (id, title) => {
+        const clean = title.trim()
+        if (!clean || !project) return 'The name cannot be empty.'
+        try {
+          // The open chat is renamed in state and saved with its next save; others on disk directly.
+          if (id === thread.id) setThread((t) => ({ ...t, title: clean }))
+          else await api.renameThread(project.root, id, clean)
+          await refreshThreads(project.root)
+          if (id === thread.id) setThreads((list) => list.map((t) => (t.id === id ? { ...t, title: clean } : t)))
+          return null
+        } catch (err) {
+          return errorText(err, 'Could not rename the conversation.')
+        }
+      },
+      deleteThread: async (id) => {
+        if (!project) return null
+        try {
+          await api.deleteThread(project.root, id)
+          if (id === thread.id) startFresh()
+          await refreshThreads(project.root)
+          return null
+        } catch (err) {
+          return errorText(err, 'Could not delete the conversation.')
+        }
+      },
+      deleteAllThreads: async () => {
+        if (!project) return null
+        try {
+          await api.deleteAllThreads(project.root)
+          startFresh()
+          setThreads([])
+          return null
+        } catch (err) {
+          return errorText(err, 'Could not delete the conversations.')
+        }
       },
       openThread: (id) => {
         if (abortRef.current || !project) return
@@ -1023,7 +1063,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       updateSettings: (patch) => setSettings((s) => ({ ...s, ...patch })),
     }),
-    [rescan, openFolder, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
+    [rescan, openFolder, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved, startFresh, thread.id, refreshThreads],
   )
 
   const value: AppContextValue = {

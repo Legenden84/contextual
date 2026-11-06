@@ -215,6 +215,8 @@ export const saveThread = (root: string, id: string, summary: { title: string; t
   postJson<{ ok: true }>('/api/threads/save', { root, id, summary, thread })
 
 export const deleteThread = (root: string, id: string) => postJson<{ ok: true }>('/api/threads/delete', { root, id })
+export const renameThread = (root: string, id: string, title: string) => postJson<{ ok: true }>('/api/threads/rename', { root, id, title })
+export const deleteAllThreads = (root: string) => postJson<{ deleted: number }>('/api/threads/delete-all', { root })
 
 // ------------------------------------------------------------------ git (Source Control) and pull requests
 
