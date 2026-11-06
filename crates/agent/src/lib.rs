@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 
 use contextual_core::host::WorkspaceHost;
 use contextual_protocol::rpc::{
-    CancelParams, InitializeParams, InitializeResult, Message, PROTOCOL_VERSION, Request, Response, RpcError, method,
+    CancelParams, InitializeParams, InitializeResult, Message, PROTOCOL_VERSION, Request, Response,
+    RpcError, method,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -21,7 +22,7 @@ use tokio::task::{AbortHandle, JoinSet};
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Capabilities reported by `initialize`; the app checks these before using a method.
-pub const CAPABILITIES: &[&str] = &["listDirs", "scan", "read", "apply", "undo"];
+pub const CAPABILITIES: &[&str] = &["listDirs", "scan", "read", "apply", "undo", "git"];
 
 /// Reads requests from `reader` until EOF or `shutdown`, writing responses to `writer`.
 pub async fn serve<R, W>(reader: R, writer: W, host: Arc<dyn WorkspaceHost>) -> std::io::Result<()>
@@ -60,10 +61,16 @@ where
         match msg {
             Message::Notification(n) if n.method == method::CANCEL => {
                 if let Ok(CancelParams { id }) = serde_json::from_value(n.params)
-                    && let Some(handle) = running.lock().unwrap_or_else(|e| e.into_inner()).remove(&id)
+                    && let Some(handle) = running
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&id)
                 {
                     handle.abort();
-                    let _ = out_tx.send(Response::err(id, RpcError::new(RpcError::REQUEST_CANCELLED, "Cancelled")));
+                    let _ = out_tx.send(Response::err(
+                        id,
+                        RpcError::new(RpcError::REQUEST_CANCELLED, "Cancelled"),
+                    ));
                 }
             }
             Message::Notification(n) => tracing::debug!("ignored notification {}", n.method),
@@ -82,7 +89,12 @@ where
                 let handle = tasks.spawn(async move {
                     let resp = dispatch(host.as_ref(), req).await;
                     // Only answer if not cancelled meanwhile (cancel already answered).
-                    if running_for_task.lock().unwrap_or_else(|e| e.into_inner()).remove(&id).is_some() {
+                    if running_for_task
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&id)
+                        .is_some()
+                    {
                         let _ = out.send(resp);
                     }
                 });
@@ -106,7 +118,11 @@ async fn dispatch(host: &dyn WorkspaceHost, req: Request) -> Response {
         method::READ => call(req.params, |p| host.read(p)).await,
         method::APPLY => call(req.params, |p| host.apply(p)).await,
         method::UNDO => call(req.params, |p| host.undo(p)).await,
-        other => Err(RpcError::new(RpcError::METHOD_NOT_FOUND, format!("Unknown method: {other}"))),
+        method::GIT => call(req.params, |p| host.git(p)).await,
+        other => Err(RpcError::new(
+            RpcError::METHOD_NOT_FOUND,
+            format!("Unknown method: {other}"),
+        )),
     };
     match result {
         Ok(v) => Response::ok(id, v),
@@ -138,7 +154,8 @@ where
 }
 
 fn parse<P: DeserializeOwned>(params: Value) -> Result<P, RpcError> {
-    serde_json::from_value(params).map_err(|e| RpcError::new(RpcError::INVALID_PARAMS, e.to_string()))
+    serde_json::from_value(params)
+        .map_err(|e| RpcError::new(RpcError::INVALID_PARAMS, e.to_string()))
 }
 
 fn to_value<T: Serialize>(v: T) -> Result<Value, RpcError> {

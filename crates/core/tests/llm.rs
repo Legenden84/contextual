@@ -1,3 +1,4 @@
+#![cfg(feature = "llm")]
 //! Foundry client tests against local mock servers (`wiremock`, plus a raw TCP server for
 //! aborts), using recorded-shape Azure payloads from `fixtures/llm/`.
 //!

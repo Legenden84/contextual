@@ -276,6 +276,71 @@ pub struct CreatePrRequest {
     pub pr: PrRequest,
 }
 
+/// `{ root, base, head? }` for the diff a PR description is drafted from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDiffRequest {
+    pub root: String,
+    pub base: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+}
+
+/// One Source Control / PR operation, sent to the workspace host as `workspace/git`.
+/// On the wire: `{ "op": "status", "root": "…" }`, `{ "op": "commit", "root": "…", "message": "…" }`…
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase")]
+pub enum GitCall {
+    Status(RootRequest),
+    /// Replies with the new status, like the old `/api/git/stage`.
+    Stage(PathsRequest),
+    Unstage(PathsRequest),
+    Diff(DiffRequest),
+    /// The staged (or else all) changes as one diff, for a drafted commit message.
+    CommitDiff(RootRequest),
+    Commit(CommitRequest),
+    Push(RootRequest),
+    Branches(BranchesRequest),
+    Switch(SwitchRequest),
+    CreateBranch(CreateBranchRequest),
+    Compare(CompareRequest),
+    PrDiff(PrDiffRequest),
+    CreatePr(CreatePrRequest),
+}
+
+impl GitCall {
+    /// The project root the call operates on (checked against the host's allowlist).
+    pub fn root(&self) -> &str {
+        match self {
+            GitCall::Status(r) | GitCall::CommitDiff(r) | GitCall::Push(r) => &r.root,
+            GitCall::Stage(r) | GitCall::Unstage(r) => &r.root,
+            GitCall::Diff(r) => &r.root,
+            GitCall::Commit(r) => &r.root,
+            GitCall::Branches(r) => &r.root,
+            GitCall::Switch(r) => &r.root,
+            GitCall::CreateBranch(r) => &r.root,
+            GitCall::Compare(r) => &r.root,
+            GitCall::PrDiff(r) => &r.root,
+            GitCall::CreatePr(r) => &r.root,
+        }
+    }
+}
+
+/// The result of a [`GitCall`]; the variant matches the call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", content = "result", rename_all = "camelCase")]
+pub enum GitReply {
+    Status(GitStatus),
+    Diff(FileDiff),
+    CommitDiff(String),
+    Commit(CommitResult),
+    Push(PushResult),
+    Branches(BranchList),
+    Compare(Comparison),
+    PrDiff(PrDiff),
+    CreatePr(PrResult),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +383,27 @@ mod tests {
                 .unwrap();
         assert_eq!(req.pr.new_branch.as_deref(), Some("x"));
         assert!(!req.pr.draft);
+    }
+
+    #[test]
+    fn git_call_wire_shape() {
+        let call = GitCall::Commit(CommitRequest {
+            root: "/r".into(),
+            message: "m".into(),
+            all: true,
+        });
+        let v = serde_json::to_value(&call).unwrap();
+        assert_eq!(
+            v,
+            json!({"op": "commit", "root": "/r", "message": "m", "all": true})
+        );
+        assert_eq!(serde_json::from_value::<GitCall>(v).unwrap(), call);
+        let pr = json!({"op": "createPr", "root": "/r", "title": "t", "base": "main"});
+        let call: GitCall = serde_json::from_value(pr).unwrap();
+        assert_eq!(call.root(), "/r");
+        let reply = GitReply::CommitDiff("d".into());
+        let v = serde_json::to_value(&reply).unwrap();
+        assert_eq!(v, json!({"op": "commitDiff", "result": "d"}));
+        assert_eq!(serde_json::from_value::<GitReply>(v).unwrap(), reply);
     }
 }

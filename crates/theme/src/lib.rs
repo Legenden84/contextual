@@ -76,8 +76,16 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub const DARK: Theme = Theme { appearance: Appearance::Dark, colors: DARK_COLORS, shadows: DARK_SHADOWS };
-    pub const LIGHT: Theme = Theme { appearance: Appearance::Light, colors: LIGHT_COLORS, shadows: LIGHT_SHADOWS };
+    pub const DARK: Theme = Theme {
+        appearance: Appearance::Dark,
+        colors: DARK_COLORS,
+        shadows: DARK_SHADOWS,
+    };
+    pub const LIGHT: Theme = Theme {
+        appearance: Appearance::Light,
+        colors: LIGHT_COLORS,
+        shadows: LIGHT_SHADOWS,
+    };
 
     pub fn get(appearance: Appearance) -> &'static Theme {
         match appearance {

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Status** | Proposed — not started |
+| **Status** | In progress — Phase 2 (core) landed; Phase 6 agent/RemoteHost started; Phase 1 (GPUI spike) needs the Windows machine |
 | **Owner** | Tobias Legenden |
 | **Date** | 2026-11-06 |
 | **Scope** | Replace the whole app — React UI (`src/web/`) and the Node "backend" mounted inside Vite (`src/server/`) — with a native Rust desktop app built on **GPUI**, for **Windows and macOS**. The Windows app can also open projects that live inside WSL. |
@@ -495,6 +495,22 @@ WSL). The current app stays in use until Phase 7.
 | 2026-11-06 | **Build a native GPUI app instead of Tauri + React.** Tauri remains the fallback if the Phase 1 gate fails. |
 | 2026-11-06 | `tokens.json` stays the only design source; the Rust theme is generated from it at build time. |
 | 2026-11-06 | The current app stays in use until the native app reaches parity, including WSL projects. |
+| 2026-11-06 | `core::llm` and `settings` sit behind the default `llm` feature. The agent builds without it: no HTTP/TLS stack (pure-Rust static musl binary), and Windows/macOS type-checks run from WSL without a C cross-compiler. |
+| 2026-11-06 | Git and PR operations travel as one `workspace/git` method with a tagged `GitCall`/`GitReply`; typed helpers live on `dyn WorkspaceHost`. Stage/unstage reply with the new status, as the old routes did. |
+| 2026-11-06 | Allowed roots are sent in the agent's `initialize`; opening another WSL project reconnects. |
+
+## 15. Progress
+
+| Phase | State |
+| --- | --- |
+| 0 — Capture behaviour | Logic, fs, git and LLM fixtures recorded from the TS code by scripts under `crates/core/tests/fixtures/` (re-runnable with Node 24). UI screenshots and per-screen checklist: not done. |
+| 1 — GPUI spike | Workspace and `contextual-theme` (generated from `tokens.json`) done. The GPUI app itself can't be built in WSL (no GUI libs); next step on Windows. |
+| 2 — Core | Done: `core::logic`, `core::workspace` (paths, browse, scan, condense, read, apply/undo, git, PR), `core::llm`, `threads`, `settings`, `process`, `WorkspaceHost` + `LocalHost` + root allowlist. Parity tests pass on Linux; core type-checks (clippy) for Windows and macOS. Windows/macOS CI not run yet. |
+| 6 — WSL host | Started: `contextual-agent` (JSON-RPC over stdio), `RemoteHost`, `core::location`, `core::wsl` (registry/`wsl.exe` discovery). The host contract suite passes against both hosts. Static musl build works. Deployment into a distro, restart/backoff and the job object are not done. |
+
+Known deviations from the TS are listed in the commit messages of the port; the notable ones:
+`DiffOp` word ranges are UTF-8 byte offsets; `localeCompare` is emulated (exact for ASCII);
+saves are atomic and refuse adding a file where a folder exists; the old 32 MB git output cap is gone.
 
 ## Appendix A — Fallback: Tauri v2 + React
 

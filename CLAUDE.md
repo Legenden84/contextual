@@ -43,6 +43,17 @@ proposed changes. The model never writes to disk; applying is an explicit user a
 - Config: `.env.local` (gitignored), template in `.env.example`. Server-only variables have no
   `VITE_` prefix, so they never reach the browser. Never prefix secrets with `VITE_`.
 
+## Rust port (in progress)
+Native GPUI rewrite per `docs/plans/cross-platform-rust-port.md` (see §15 Progress), built alongside
+the current app. Cargo workspace in `crates/`: `core` (headless logic, workspace host, Foundry client),
+`protocol` (wire types, JSON-RPC), `theme` (generated from `tokens.json` by `build.rs`), `agent`
+(WSL JSON-RPC server). Rust is in `~/.cargo/bin`.
+- `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Windows/macOS type-check from WSL: `cargo clippy -p contextual-core --no-default-features --target x86_64-pc-windows-msvc --target-dir target/xcheck`
+  (the `llm` feature needs a C cross-compiler for `ring`).
+- Parity fixtures under `crates/core/tests/fixtures/` are recorded from the TS code with Node; when TS
+  behaviour changes before cutover, re-record them.
+
 ## UI conventions
 - Dark theme is the default (`class="dark"` on `<html>`); light theme via `class="light"`.
 - Style only with design-token utilities (see UI design below); Tailwind's default palette,

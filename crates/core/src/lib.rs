@@ -11,12 +11,14 @@
 
 pub mod error;
 pub mod host;
+#[cfg(feature = "llm")]
 pub mod llm;
 pub mod location;
 pub mod logic;
 pub mod platform;
 pub mod process;
 pub mod remote;
+#[cfg(feature = "llm")]
 pub mod settings;
 pub mod threads;
 pub mod workspace;

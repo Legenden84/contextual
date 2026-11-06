@@ -46,7 +46,14 @@ fn clean(input: &str) -> &str {
 pub fn parse_wsl_unc(p: &str) -> Option<(String, String)> {
     let (distro, path) = paths::parse_wsl_unc(&p.replace('/', "\\"))?;
     let trimmed = path.trim_end_matches('/');
-    Some((distro, if trimmed.is_empty() { "/".into() } else { trimmed.to_string() }))
+    Some((
+        distro,
+        if trimmed.is_empty() {
+            "/".into()
+        } else {
+            trimmed.to_string()
+        },
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,29 +69,53 @@ pub fn detect_windows(input: &str, default_distro: Option<&str>) -> Detected {
     let p = clean(input);
     if let Some((distro, path)) = parse_wsl_unc(p) {
         if let Some(win) = paths::mnt_to_drive(&path) {
-            return Detected::Root(ProjectRoot { location: Location::Local, path: win });
+            return Detected::Root(ProjectRoot {
+                location: Location::Local,
+                path: win,
+            });
         }
-        return Detected::Root(ProjectRoot { location: Location::Wsl { distro }, path });
+        return Detected::Root(ProjectRoot {
+            location: Location::Wsl { distro },
+            path,
+        });
     }
     if p.starts_with('/') {
         if let Some(win) = paths::mnt_to_drive(p) {
-            return Detected::Root(ProjectRoot { location: Location::Local, path: win });
+            return Detected::Root(ProjectRoot {
+                location: Location::Local,
+                path: win,
+            });
         }
         return match default_distro {
-            Some(d) => Detected::Root(ProjectRoot { location: Location::Wsl { distro: d.to_string() }, path: p.to_string() }),
+            Some(d) => Detected::Root(ProjectRoot {
+                location: Location::Wsl {
+                    distro: d.to_string(),
+                },
+                path: p.to_string(),
+            }),
             None => Detected::NeedsWsl(p.to_string()),
         };
     }
-    Detected::Root(ProjectRoot { location: Location::Local, path: p.to_string() })
+    Detected::Root(ProjectRoot {
+        location: Location::Local,
+        path: p.to_string(),
+    })
 }
 
 /// Rules for macOS (and the Linux agent): native paths only.
 pub fn detect_posix(input: &str) -> Detected {
-    Detected::Root(ProjectRoot { location: Location::Local, path: clean(input).to_string() })
+    Detected::Root(ProjectRoot {
+        location: Location::Local,
+        path: clean(input).to_string(),
+    })
 }
 
 pub fn detect_for_this_os(input: &str, default_distro: Option<&str>) -> Detected {
-    if cfg!(windows) { detect_windows(input, default_distro) } else { detect_posix(input) }
+    if cfg!(windows) {
+        detect_windows(input, default_distro)
+    } else {
+        detect_posix(input)
+    }
 }
 
 #[cfg(test)]
@@ -100,9 +131,18 @@ mod tests {
 
     #[test]
     fn unc_paths() {
-        assert_eq!(parse_wsl_unc(r"\\wsl.localhost\Ubuntu\home\me\x"), Some(("Ubuntu".into(), "/home/me/x".into())));
-        assert_eq!(parse_wsl_unc(r"\\WSL$\Debian"), Some(("Debian".into(), "/".into())));
-        assert_eq!(parse_wsl_unc("//wsl$/Ubuntu/home/"), Some(("Ubuntu".into(), "/home".into())));
+        assert_eq!(
+            parse_wsl_unc(r"\\wsl.localhost\Ubuntu\home\me\x"),
+            Some(("Ubuntu".into(), "/home/me/x".into()))
+        );
+        assert_eq!(
+            parse_wsl_unc(r"\\WSL$\Debian"),
+            Some(("Debian".into(), "/".into()))
+        );
+        assert_eq!(
+            parse_wsl_unc("//wsl$/Ubuntu/home/"),
+            Some(("Ubuntu".into(), "/home".into()))
+        );
         assert_eq!(parse_wsl_unc(r"\\server\share\x"), None);
         assert_eq!(parse_wsl_unc(r"\\wsl$\"), None);
     }
@@ -110,23 +150,59 @@ mod tests {
     #[test]
     fn windows_detection() {
         let wsl = |d: &str| Location::Wsl { distro: d.into() };
-        assert_eq!(root(detect_windows(r"C:\src\x", Some("Ubuntu"))), ProjectRoot { location: Location::Local, path: r"C:\src\x".into() });
         assert_eq!(
-            root(detect_windows(r#""\\wsl.localhost\Ubuntu\home\me\x""#, None)),
-            ProjectRoot { location: wsl("Ubuntu"), path: "/home/me/x".into() }
+            root(detect_windows(r"C:\src\x", Some("Ubuntu"))),
+            ProjectRoot {
+                location: Location::Local,
+                path: r"C:\src\x".into()
+            }
         );
-        assert_eq!(root(detect_windows("/home/me/x", Some("Ubuntu"))), ProjectRoot { location: wsl("Ubuntu"), path: "/home/me/x".into() });
-        assert_eq!(detect_windows("/home/me/x", None), Detected::NeedsWsl("/home/me/x".into()));
-        assert_eq!(root(detect_windows("/mnt/c/src/x", None)), ProjectRoot { location: Location::Local, path: r"C:\src\x".into() });
+        assert_eq!(
+            root(detect_windows(
+                r#""\\wsl.localhost\Ubuntu\home\me\x""#,
+                None
+            )),
+            ProjectRoot {
+                location: wsl("Ubuntu"),
+                path: "/home/me/x".into()
+            }
+        );
+        assert_eq!(
+            root(detect_windows("/home/me/x", Some("Ubuntu"))),
+            ProjectRoot {
+                location: wsl("Ubuntu"),
+                path: "/home/me/x".into()
+            }
+        );
+        assert_eq!(
+            detect_windows("/home/me/x", None),
+            Detected::NeedsWsl("/home/me/x".into())
+        );
+        assert_eq!(
+            root(detect_windows("/mnt/c/src/x", None)),
+            ProjectRoot {
+                location: Location::Local,
+                path: r"C:\src\x".into()
+            }
+        );
         assert_eq!(
             root(detect_windows(r"\\wsl$\Ubuntu\mnt\c\src", None)),
-            ProjectRoot { location: Location::Local, path: r"C:\src".into() }
+            ProjectRoot {
+                location: Location::Local,
+                path: r"C:\src".into()
+            }
         );
     }
 
     #[test]
     fn labels() {
         assert_eq!(Location::Local.label(), "Local");
-        assert_eq!(Location::Wsl { distro: "Ubuntu".into() }.label(), "WSL: Ubuntu");
+        assert_eq!(
+            Location::Wsl {
+                distro: "Ubuntu".into()
+            }
+            .label(),
+            "WSL: Ubuntu"
+        );
     }
 }

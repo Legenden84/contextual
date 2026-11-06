@@ -22,8 +22,8 @@ pub mod method {
     pub const READ: &str = "workspace/read";
     pub const APPLY: &str = "workspace/apply";
     pub const UNDO: &str = "workspace/undo";
+    /// Source Control and pull requests: params `git::GitCall`, result `git::GitReply`.
     pub const GIT: &str = "workspace/git";
-    pub const PR: &str = "workspace/pr";
     /// Notification, app → agent: `{ id }` of the request to cancel.
     pub const CANCEL: &str = "$/cancel";
     /// Notification, agent → app: `{ id, message }` for long operations.
@@ -41,7 +41,12 @@ pub struct Request {
 
 impl Request {
     pub fn new(id: u64, method: &str, params: Value) -> Self {
-        Self { jsonrpc: JSONRPC.into(), id, method: method.into(), params }
+        Self {
+            jsonrpc: JSONRPC.into(),
+            id,
+            method: method.into(),
+            params,
+        }
     }
 }
 
@@ -55,7 +60,11 @@ pub struct Notification {
 
 impl Notification {
     pub fn new(method: &str, params: Value) -> Self {
-        Self { jsonrpc: JSONRPC.into(), method: method.into(), params }
+        Self {
+            jsonrpc: JSONRPC.into(),
+            method: method.into(),
+            params,
+        }
     }
 }
 
@@ -71,10 +80,20 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: u64, result: Value) -> Self {
-        Self { jsonrpc: JSONRPC.into(), id, result: Some(result), error: None }
+        Self {
+            jsonrpc: JSONRPC.into(),
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn err(id: u64, error: RpcError) -> Self {
-        Self { jsonrpc: JSONRPC.into(), id, result: None, error: Some(error) }
+        Self {
+            jsonrpc: JSONRPC.into(),
+            id,
+            result: None,
+            error: Some(error),
+        }
     }
 }
 
@@ -99,7 +118,11 @@ impl RpcError {
     pub const APPLICATION_ERROR: i64 = -32000;
 
     pub fn new(code: i64, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 }
 
@@ -155,10 +178,16 @@ mod tests {
             json!({"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"nope","data":{"code":"conflict","message":"nope"}}}),
             json!({"jsonrpc":"2.0","method":"$/cancel","params":{"id":3}}),
         ];
-        let parsed: Vec<Message> = lines.iter().map(|l| serde_json::from_value(l.clone()).unwrap()).collect();
+        let parsed: Vec<Message> = lines
+            .iter()
+            .map(|l| serde_json::from_value(l.clone()).unwrap())
+            .collect();
         assert!(matches!(parsed[0], Message::Request(_)));
         assert!(matches!(parsed[1], Message::Response(_)));
-        assert!(matches!(parsed[2], Message::Response(Response { error: Some(_), .. })));
+        assert!(matches!(
+            parsed[2],
+            Message::Response(Response { error: Some(_), .. })
+        ));
         assert!(matches!(parsed[3], Message::Notification(_)));
         for (m, l) in parsed.iter().zip(&lines) {
             assert_eq!(&serde_json::to_value(m).unwrap(), l);

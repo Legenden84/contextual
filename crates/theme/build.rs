@@ -28,7 +28,11 @@ fn main() {
 
 fn ident(name: &str) -> String {
     let s = name.replace('-', "_");
-    if s.starts_with(|c: char| c.is_ascii_digit()) { format!("_{s}") } else { s }
+    if s.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{s}")
+    } else {
+        s
+    }
 }
 
 fn konst(name: &str) -> String {
@@ -44,19 +48,33 @@ fn doc(out: &mut String, indent: &str, v: &Value) {
 }
 
 fn px(s: &str) -> f32 {
-    s.trim().trim_end_matches("px").parse().unwrap_or_else(|_| panic!("not a px value: {s}"))
+    s.trim()
+        .trim_end_matches("px")
+        .parse()
+        .unwrap_or_else(|_| panic!("not a px value: {s}"))
 }
 
 fn em(s: &str) -> f32 {
-    s.trim().trim_end_matches("em").parse().unwrap_or_else(|_| panic!("not an em value: {s}"))
+    s.trim()
+        .trim_end_matches("em")
+        .parse()
+        .unwrap_or_else(|_| panic!("not an em value: {s}"))
 }
 
 /// `#rgb`, `#rrggbb`, `#rrggbbaa` or `rgba(r, g, b, a)` → (r, g, b, a) in 0..=1.
 fn parse_color(s: &str) -> (f32, f32, f32, f32) {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix('#') {
-        let hex: String = if hex.len() == 3 { hex.chars().flat_map(|c| [c, c]).collect() } else { hex.to_string() };
-        let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or_else(|_| panic!("bad colour {s}")) as f32 / 255.0;
+        let hex: String = if hex.len() == 3 {
+            hex.chars().flat_map(|c| [c, c]).collect()
+        } else {
+            hex.to_string()
+        };
+        let byte = |i: usize| {
+            u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or_else(|_| panic!("bad colour {s}"))
+                as f32
+                / 255.0
+        };
         let a = if hex.len() == 8 { byte(6) } else { 1.0 };
         return (byte(0), byte(2), byte(4), a);
     }
@@ -65,8 +83,16 @@ fn parse_color(s: &str) -> (f32, f32, f32, f32) {
         .or_else(|| s.strip_prefix("rgb("))
         .and_then(|r| r.strip_suffix(')'))
         .unwrap_or_else(|| panic!("unsupported colour {s}"));
-    let parts: Vec<f32> = inner.split(',').map(|p| p.trim().parse().unwrap()).collect();
-    (parts[0] / 255.0, parts[1] / 255.0, parts[2] / 255.0, *parts.get(3).unwrap_or(&1.0))
+    let parts: Vec<f32> = inner
+        .split(',')
+        .map(|p| p.trim().parse().unwrap())
+        .collect();
+    (
+        parts[0] / 255.0,
+        parts[1] / 255.0,
+        parts[2] / 255.0,
+        *parts.get(3).unwrap_or(&1.0),
+    )
 }
 
 fn rgba_lit(s: &str) -> String {
@@ -75,7 +101,12 @@ fn rgba_lit(s: &str) -> String {
 }
 
 fn themes(json: &Value) -> Vec<String> {
-    json["color"]["themes"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect()
+    json["color"]["themes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect()
 }
 
 fn colors(json: &Value, out: &mut String) {
@@ -87,10 +118,16 @@ fn colors(json: &Value, out: &mut String) {
     }
     out.push_str("}\n\n");
     for theme in themes(json) {
-        let _ = writeln!(out, "pub const {}_COLORS: Colors = Colors {{", theme.to_uppercase());
+        let _ = writeln!(
+            out,
+            "pub const {}_COLORS: Colors = Colors {{",
+            theme.to_uppercase()
+        );
         for t in tokens {
             let name = t["name"].as_str().unwrap();
-            let v = t["value"][&theme].as_str().unwrap_or_else(|| panic!("{name} has no {theme} value"));
+            let v = t["value"][&theme]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} has no {theme} value"));
             let _ = writeln!(out, "    {}: {},", ident(name), rgba_lit(v));
         }
         out.push_str("};\n\n");
@@ -107,8 +144,15 @@ fn spacing(json: &Value, out: &mut String) {
     for t in json["spacing"]["tokens"].as_array().unwrap() {
         doc(out, "    ", t);
         let name = t["name"].as_str().unwrap();
-        let name = name.strip_prefix("space-").map(|n| format!("S{n}")).unwrap_or_else(|| konst(name));
-        let _ = writeln!(out, "    pub const {name}: f32 = {:?};", px(t["value"].as_str().unwrap()));
+        let name = name
+            .strip_prefix("space-")
+            .map(|n| format!("S{n}"))
+            .unwrap_or_else(|| konst(name));
+        let _ = writeln!(
+            out,
+            "    pub const {name}: f32 = {:?};",
+            px(t["value"].as_str().unwrap())
+        );
     }
     out.push_str("}\n\n");
 }
@@ -118,7 +162,12 @@ fn radii(json: &Value, out: &mut String) {
     for t in json["radius"]["tokens"].as_array().unwrap() {
         doc(out, "    ", t);
         let name = t["name"].as_str().unwrap().trim_start_matches("radius-");
-        let _ = writeln!(out, "    pub const {}: f32 = {:?};", konst(name), px(t["value"].as_str().unwrap()));
+        let _ = writeln!(
+            out,
+            "    pub const {}: f32 = {:?};",
+            konst(name),
+            px(t["value"].as_str().unwrap())
+        );
     }
     out.push_str("}\n\n");
 }
@@ -133,7 +182,11 @@ fn parse_shadow(s: &str) -> String {
     let get = |i: usize| nums.get(i).copied().unwrap_or(0.0);
     format!(
         "Shadow {{ offset_x: {:?}, offset_y: {:?}, blur: {:?}, spread: {:?}, color: {} }}",
-        get(0), get(1), get(2), get(3), rgba_lit(color)
+        get(0),
+        get(1),
+        get(2),
+        get(3),
+        rgba_lit(color)
     )
 }
 
@@ -142,21 +195,37 @@ fn shadows(json: &Value, out: &mut String) {
     out.push_str("/// Shadow tokens of one theme.\n#[derive(Clone, Copy, Debug, PartialEq)]\npub struct Shadows {\n");
     for t in tokens {
         doc(out, "    ", t);
-        let _ = writeln!(out, "    pub {}: Shadow,", ident(t["name"].as_str().unwrap().trim_start_matches("shadow-")));
+        let _ = writeln!(
+            out,
+            "    pub {}: Shadow,",
+            ident(t["name"].as_str().unwrap().trim_start_matches("shadow-"))
+        );
     }
     out.push_str("}\n\n");
     for theme in themes(json) {
-        let _ = writeln!(out, "pub const {}_SHADOWS: Shadows = Shadows {{", theme.to_uppercase());
+        let _ = writeln!(
+            out,
+            "pub const {}_SHADOWS: Shadows = Shadows {{",
+            theme.to_uppercase()
+        );
         for t in tokens {
             let name = t["name"].as_str().unwrap().trim_start_matches("shadow-");
-            let _ = writeln!(out, "    {}: {},", ident(name), parse_shadow(t["value"][&theme].as_str().unwrap()));
+            let _ = writeln!(
+                out,
+                "    {}: {},",
+                ident(name),
+                parse_shadow(t["value"][&theme].as_str().unwrap())
+            );
         }
         out.push_str("};\n\n");
     }
 }
 
 fn family_list(s: &str) -> String {
-    let names: Vec<String> = s.split(',').map(|f| format!("{:?}", f.trim().trim_matches('"'))).collect();
+    let names: Vec<String> = s
+        .split(',')
+        .map(|f| format!("{:?}", f.trim().trim_matches('"')))
+        .collect();
     format!("&[{}]", names.join(", "))
 }
 
@@ -164,7 +233,12 @@ fn type_styles(json: &Value, out: &mut String) {
     let ty = &json["type"];
     out.push_str("/// Font family stacks from tokens.json (first entry is the bundled font).\npub mod families {\n");
     for (k, v) in ty["families"].as_object().unwrap() {
-        let _ = writeln!(out, "    pub const {}: &[&str] = {};", konst(k), family_list(v.as_str().unwrap()));
+        let _ = writeln!(
+            out,
+            "    pub const {}: &[&str] = {};",
+            konst(k),
+            family_list(v.as_str().unwrap())
+        );
     }
     out.push_str("}\n\n/// Type styles: size, line height, weight and tracking together.\npub mod type_style {\n    use super::{FontFamily, TypeStyle};\n");
     for group in ty["groups"].as_array().unwrap() {
@@ -175,7 +249,11 @@ fn type_styles(json: &Value, out: &mut String) {
         };
         for s in group["styles"].as_array().unwrap() {
             doc(out, "    ", s);
-            let ls = s.get("letterSpacing").and_then(Value::as_str).map(em).unwrap_or(0.0);
+            let ls = s
+                .get("letterSpacing")
+                .and_then(Value::as_str)
+                .map(em)
+                .unwrap_or(0.0);
             let _ = writeln!(
                 out,
                 "    pub const {}: TypeStyle = TypeStyle {{ family: {family}, size: {:?}, line_height: {:?}, weight: {}, letter_spacing_em: {:?} }};",

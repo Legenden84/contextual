@@ -19,7 +19,10 @@ pub fn decode_wsl_output(bytes: &[u8]) -> String {
     let utf16 = bytes.starts_with(&[0xFF, 0xFE]) || bytes.contains(&0);
     let text = if utf16 {
         let body = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
-        let units: Vec<u16> = body.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = body
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(bytes).into_owned()
@@ -34,7 +37,10 @@ pub fn parse_list_quiet(bytes: &[u8]) -> Vec<Distro> {
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .enumerate()
-        .map(|(i, name)| Distro { name: name.to_string(), is_default: i == 0 })
+        .map(|(i, name)| Distro {
+            name: name.to_string(),
+            is_default: i == 0,
+        })
         .collect()
 }
 
@@ -70,13 +76,21 @@ mod registry {
     use winreg::enums::HKEY_CURRENT_USER;
 
     pub fn list() -> std::io::Result<Vec<Distro>> {
-        let lxss = RegKey::predef(HKEY_CURRENT_USER).open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Lxss")?;
+        let lxss = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Lxss")?;
         let default: String = lxss.get_value("DefaultDistribution").unwrap_or_default();
         let mut out = Vec::new();
         for guid in lxss.enum_keys().flatten() {
-            let Ok(key) = lxss.open_subkey(&guid) else { continue };
-            let Ok(name) = key.get_value::<String, _>("DistributionName") else { continue };
-            out.push(Distro { name, is_default: guid.eq_ignore_ascii_case(&default) });
+            let Ok(key) = lxss.open_subkey(&guid) else {
+                continue;
+            };
+            let Ok(name) = key.get_value::<String, _>("DistributionName") else {
+                continue;
+            };
+            out.push(Distro {
+                name,
+                is_default: guid.eq_ignore_ascii_case(&default),
+            });
         }
         out.sort_by_key(|d| !d.is_default);
         Ok(out)
@@ -105,8 +119,14 @@ mod tests {
     #[test]
     fn parses_list() {
         let expected = vec![
-            Distro { name: "Ubuntu-24.04".into(), is_default: true },
-            Distro { name: "docker-desktop".into(), is_default: false },
+            Distro {
+                name: "Ubuntu-24.04".into(),
+                is_default: true,
+            },
+            Distro {
+                name: "docker-desktop".into(),
+                is_default: false,
+            },
         ];
         let text = "Ubuntu-24.04\r\ndocker-desktop\r\n\r\n";
         assert_eq!(parse_list_quiet(&utf16(text, false)), expected);

@@ -282,7 +282,6 @@ impl CommandRunner for SystemRunner {
             .env("GH_NO_UPDATE_NOTIFIER", "1");
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.env("GCM_INTERACTIVE", "never");
             command.creation_flags(CREATE_NO_WINDOW);

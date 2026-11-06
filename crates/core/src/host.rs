@@ -10,9 +10,15 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use contextual_protocol::fs::{
-    Apply, ApplyResult, DirListing, ListDirs, ReadFiles, ReadFilesResult, ReadOptions, Scan, ScanResult, Undo, UndoResult,
+    Apply, ApplyResult, DirListing, ListDirs, ReadFiles, ReadFilesResult, ReadOptions, Scan,
+    ScanResult, Undo, UndoResult,
+};
+use contextual_protocol::git::{
+    BranchList, CommitResult, Comparison, FileDiff, GitCall, GitReply, GitStatus, PrDiff, PrResult,
+    PushResult,
 };
 
+use crate::workspace::git::Git;
 use crate::workspace::{browse, files, paths, scan};
 use crate::{Error, Result};
 
@@ -25,6 +31,76 @@ pub trait WorkspaceHost: Send + Sync {
     async fn read(&self, req: ReadFiles) -> Result<ReadFilesResult>;
     async fn apply(&self, req: Apply) -> Result<ApplyResult>;
     async fn undo(&self, req: Undo) -> Result<UndoResult>;
+    /// Source Control and pull requests. Use the typed helpers on `dyn WorkspaceHost` (`git_status`, `pr_compare`…).
+    async fn git(&self, call: GitCall) -> Result<GitReply>;
+}
+
+fn unexpected(reply: GitReply) -> Error {
+    Error::internal(format!(
+        "Unexpected reply from the workspace host: {reply:?}"
+    ))
+}
+
+macro_rules! typed {
+    ($(#[$doc:meta])* $name:ident, $variant:ident, $req:ty => $reply:ident($out:ty)) => {
+        $(#[$doc])*
+        pub async fn $name(&self, req: $req) -> Result<$out> {
+            match self.git(GitCall::$variant(req)).await? {
+                GitReply::$reply(v) => Ok(v),
+                other => Err(unexpected(other)),
+            }
+        }
+    };
+}
+
+/// Typed wrappers around [`WorkspaceHost::git`].
+impl dyn WorkspaceHost {
+    typed!(git_status, Status, contextual_protocol::git::RootRequest => Status(GitStatus));
+    typed!(git_stage, Stage, contextual_protocol::git::PathsRequest => Status(GitStatus));
+    typed!(git_unstage, Unstage, contextual_protocol::git::PathsRequest => Status(GitStatus));
+    typed!(git_diff, Diff, contextual_protocol::git::DiffRequest => Diff(FileDiff));
+    typed!(git_commit_diff, CommitDiff, contextual_protocol::git::RootRequest => CommitDiff(String));
+    typed!(git_commit, Commit, contextual_protocol::git::CommitRequest => Commit(CommitResult));
+    typed!(git_push, Push, contextual_protocol::git::RootRequest => Push(PushResult));
+    typed!(git_branches, Branches, contextual_protocol::git::BranchesRequest => Branches(BranchList));
+    typed!(git_switch, Switch, contextual_protocol::git::SwitchRequest => Status(GitStatus));
+    typed!(git_create_branch, CreateBranch, contextual_protocol::git::CreateBranchRequest => Status(GitStatus));
+    typed!(pr_compare, Compare, contextual_protocol::git::CompareRequest => Compare(Comparison));
+    typed!(pr_diff, PrDiff, contextual_protocol::git::PrDiffRequest => PrDiff(PrDiff));
+    typed!(pr_create, CreatePr, contextual_protocol::git::CreatePrRequest => CreatePr(PrResult));
+}
+
+/// Runs one [`GitCall`] with the core's [`Git`] (shared by [`LocalHost`] and the agent).
+pub async fn run_git(git: &Git, call: GitCall) -> Result<GitReply> {
+    Ok(match call {
+        GitCall::Status(r) => GitReply::Status(git.status(&r.root).await?),
+        GitCall::Stage(r) => {
+            git.stage(&r.root, &r.paths).await?;
+            GitReply::Status(git.status(&r.root).await?)
+        }
+        GitCall::Unstage(r) => {
+            git.unstage(&r.root, &r.paths).await?;
+            GitReply::Status(git.status(&r.root).await?)
+        }
+        GitCall::Diff(r) => GitReply::Diff(git.file_diff(&r.root, &r.path, r.staged).await?),
+        GitCall::CommitDiff(r) => GitReply::CommitDiff(git.commit_diff(&r.root).await?),
+        GitCall::Commit(r) => GitReply::Commit(git.commit(&r.root, &r.message, r.all).await?),
+        GitCall::Push(r) => GitReply::Push(git.push(&r.root).await?),
+        GitCall::Branches(r) => GitReply::Branches(git.list_branches(&r.root, r.fetch).await?),
+        GitCall::Switch(r) => GitReply::Status(git.switch_branch(&r.root, &r.name).await?),
+        GitCall::CreateBranch(r) => GitReply::Status(
+            git.create_branch(&r.root, &r.name, r.from.as_deref())
+                .await?,
+        ),
+        GitCall::Compare(r) => GitReply::Compare(
+            git.compare(&r.root, r.base.as_deref(), r.head.as_deref())
+                .await?,
+        ),
+        GitCall::PrDiff(r) => {
+            GitReply::PrDiff(git.pr_diff(&r.root, &r.base, r.head.as_deref()).await?)
+        }
+        GitCall::CreatePr(r) => GitReply::CreatePr(git.create_pull_request(&r.root, &r.pr).await?),
+    })
 }
 
 /// Project roots the user opened (dialog, recents, CLI). Workspace calls outside them are refused,
@@ -37,7 +113,10 @@ pub struct RootAllowlist {
 impl RootAllowlist {
     pub fn allow(&self, root: &str) {
         let root = paths::normalize_input_path(Some(root));
-        self.roots.write().unwrap_or_else(|e| e.into_inner()).insert(root);
+        self.roots
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(root);
     }
 
     /// The normalised root if it is, or is inside, an allowed root.
@@ -47,21 +126,55 @@ impl RootAllowlist {
         if roots.iter().any(|allowed| paths::is_inside(allowed, &root)) {
             Ok(root)
         } else {
-            Err(Error::forbidden(format!("Not an open project: {}", paths::path_string(&root))))
+            Err(Error::forbidden(format!(
+                "Not an open project: {}",
+                paths::path_string(&root)
+            )))
         }
     }
 }
 
 /// Runs the core in this process. The core's file functions are synchronous, so each call goes
 /// to tokio's blocking pool.
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Default)]
 pub struct LocalHost {
     allowlist: RootAllowlist,
+    git: Arc<Git>,
+    /// Undo snapshots; `None` means the OS cache dir (`files::default_undo_dir`).
+    undo_dir: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for LocalHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalHost")
+            .field("allowlist", &self.allowlist)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalHost {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// With a custom [`Git`] (e.g. a fake `gh` runner in tests).
+    pub fn with_git(git: Git) -> Self {
+        Self {
+            git: Arc::new(git),
+            ..Self::default()
+        }
+    }
+
+    /// Keeps undo snapshots in `dir` instead of the OS cache dir.
+    pub fn with_undo_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.undo_dir = Some(dir.into());
+        self
+    }
+
+    fn undo_dir(&self) -> PathBuf {
+        self.undo_dir
+            .clone()
+            .unwrap_or_else(files::default_undo_dir)
     }
 
     pub fn allowlist(&self) -> &RootAllowlist {
@@ -70,7 +183,9 @@ impl LocalHost {
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| Error::internal(format!("worker failed: {e}")))?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| Error::internal(format!("worker failed: {e}")))?
 }
 
 #[async_trait]
@@ -93,7 +208,13 @@ impl WorkspaceHost for LocalHost {
     async fn read(&self, req: ReadFiles) -> Result<ReadFilesResult> {
         self.allowlist.check(&req.root)?;
         blocking(move || {
-            let files = files::read_files(&req.root, &req.paths, ReadOptions { condense: req.condense });
+            let files = files::read_files(
+                &req.root,
+                &req.paths,
+                ReadOptions {
+                    condense: req.condense,
+                },
+            );
             Ok(ReadFilesResult { files })
         })
         .await
@@ -101,12 +222,19 @@ impl WorkspaceHost for LocalHost {
 
     async fn apply(&self, req: Apply) -> Result<ApplyResult> {
         self.allowlist.check(&req.root)?;
-        blocking(move || files::apply_changes(&req.root, &req.changes, req.backup)).await
+        let dir = self.undo_dir();
+        blocking(move || files::apply_changes_in(&dir, &req.root, &req.changes, req.backup)).await
     }
 
     async fn undo(&self, req: Undo) -> Result<UndoResult> {
         self.allowlist.check(&req.root)?;
-        blocking(move || files::undo_apply(&req.root, &req.backup_id)).await
+        let dir = self.undo_dir();
+        blocking(move || files::undo_apply_in(&dir, &req.root, &req.backup_id)).await
+    }
+
+    async fn git(&self, call: GitCall) -> Result<GitReply> {
+        self.allowlist.check(call.root())?;
+        run_git(&self.git, call).await
     }
 }
 

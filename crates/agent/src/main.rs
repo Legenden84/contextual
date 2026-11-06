@@ -16,7 +16,10 @@ async fn main() -> std::io::Result<()> {
         .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    tracing::info!("contextual-agent {} started", contextual_agent::AGENT_VERSION);
+    tracing::info!(
+        "contextual-agent {} started",
+        contextual_agent::AGENT_VERSION
+    );
     let stdin = BufReader::new(tokio::io::stdin());
     contextual_agent::serve(stdin, tokio::io::stdout(), Arc::new(LocalHost::new())).await
 }
