@@ -26,6 +26,16 @@ cargo test --workspace
 - Release builds for Windows and macOS come from CI (`.github/workflows/rust.yml`); the Windows
   artifact ships the static Linux agents (`contextual-agent-<arch>-linux`) next to `contextual.exe`.
 
+## How the model gets context
+
+With **Model picks files** (on by default, in the composer) a new chat starts with the project
+tree (paths and token sizes; large folders folded) and an index of the skills. The model asks for
+the files, folder listings and skills it needs with a `read` block; the app sends them and ticks
+the files (tagged "model" in the explorer), up to 25 files / 150k tokens and 5 rounds per
+message, asking before going further. Rules are always sent; skills are Auto (the model loads
+them), Always or Never in Skills & Rules. A reply that changes a file the model wasn't sent is
+answered with that file and asked again. Ticking files still sends them as before.
+
 ## Configuration
 
 Settings → Azure AI Foundry: endpoint, deployment, API version and model name. The API key is

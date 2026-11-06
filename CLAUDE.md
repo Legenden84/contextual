@@ -16,6 +16,7 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
     in-process with a root allowlist); `remote.rs` — `RemoteHost` (JSON-RPC client) and
     `SupervisedHost` (lazy start, restart with backoff; read-only calls retried, mutations never).
   - `logic/` — pure functions: diff, markdown/response parsing, changes, SEARCH/REPLACE edits,
+    `reads` (the model picks files: `read` blocks, project tree, skill index, limits),
     prompt (incl. `FILE_FORMAT`, appended to the system prompt and not shown in Settings), tree
     sums, context totals, images, PR helpers.
   - `chat.rs` — turn preparation (only files new or changed since sent, by hash), saved-thread

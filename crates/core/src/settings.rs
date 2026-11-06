@@ -152,6 +152,22 @@ impl WorkspaceSettings {
     }
 }
 
+/// How chats are sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ChatSettings {
+    /// The model gets the project tree and asks for the files and skills it needs.
+    pub model_picks_files: bool,
+}
+
+impl Default for ChatSettings {
+    fn default() -> Self {
+        Self {
+            model_picks_files: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
@@ -172,6 +188,8 @@ pub struct Settings {
     pub workspace: WorkspaceSettings,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub chat: ChatSettings,
     /// Models added to the catalog, or replacing built-in entries with the same id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<ModelInfo>,

@@ -1,5 +1,6 @@
 //! Skills & Rules (design spec: RulesPanel): detected instruction files, each with a Rule/Skill
-//! tag, token count and a switch that includes it in the system instructions.
+//! tag and token count. Rules have a switch that includes them in the system instructions;
+//! skills are Auto (the model loads them when the task matches), Always or Never.
 
 use contextual_core::logic::format::fmt_k;
 use contextual_core::logic::types::RuleType;
@@ -11,8 +12,11 @@ use gpui_kit::{
 };
 
 use crate::state::Project;
+use crate::state::project::SkillMode;
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::ui::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{Switch, Tag, TagTone, count, file_glyph};
+use contextual_core::logic::reads;
 
 /// Lines shown when a rule is previewed.
 const PREVIEW_LINES: usize = 9;
@@ -145,14 +149,47 @@ impl Render for RulesPanel {
                             .text_color(hsla(c.ink_muted))
                             .child(SharedString::from(fmt_k(r.tokens))),
                     )
-                    .child(Switch::new(("rule-on", i), on).on_toggle(cx.listener(
-                        move |t, _, _, cx| {
-                            t.project.update(cx, |p, cx| {
-                                p.toggle_rule(&pb);
-                                cx.notify()
+                    .map(|d| {
+                        if r.kind != RuleType::Skill {
+                            return d.child(Switch::new(("rule-on", i), on).on_toggle(
+                                cx.listener(move |t, _, _, cx| {
+                                    t.project.update(cx, |p, cx| {
+                                        p.toggle_rule(&pb);
+                                        cx.notify()
+                                    })
+                                }),
+                            ));
+                        }
+                        // Skills: the model loads them on Auto; Always sends, Never hides.
+                        let mode = p.skill_mode(&r.path);
+                        let loaded = p.model_loaded.contains(&r.path);
+                        let undescribed = reads::skill_summary(&r.path, &r.content).1.is_none();
+                        d.when(loaded, |d| d.child(Tag::new("loaded").tone(TagTone::Add)))
+                            .when(undescribed && mode == SkillMode::Auto, |d| {
+                                d.child(Tag::new("no description").tone(TagTone::Warn))
                             })
-                        },
-                    )))
+                            .child(
+                                Button::new(
+                                    ("skill-mode", i),
+                                    match mode {
+                                        SkillMode::Auto => "Auto",
+                                        SkillMode::Always => "Always",
+                                        SkillMode::Never => "Never",
+                                    },
+                                )
+                                .size(ButtonSize::Xs)
+                                .variant(ButtonVariant::Ghost)
+                                .selected(mode == SkillMode::Always)
+                                .on_click(cx.listener(
+                                    move |t, _, _, cx| {
+                                        t.project.update(cx, |p, cx| {
+                                            p.cycle_skill(&pb);
+                                            cx.notify()
+                                        })
+                                    },
+                                )),
+                            )
+                    })
             })
             .collect();
         let empty = rows.is_empty();

@@ -143,6 +143,19 @@ pub fn system_prompt(rules: &[Rule], output_format: &str) -> String {
     .join("\n\n")
 }
 
+/// The system prompt when the model picks its own files: the read protocol and the skill index
+/// come after the rules and formats (they change less often than the conversation).
+pub fn with_reads(system: String, skill_index: &str) -> String {
+    let mut out = system;
+    out.push_str("\n\n");
+    out.push_str(super::reads::READ_FORMAT);
+    if !skill_index.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(skill_index);
+    }
+    out
+}
+
 /// The files block prepended to a user message when the full context is (re)sent.
 pub fn context_block(files: &[ContextFile]) -> String {
     let mut lines = vec![format!("# Context files ({})", files.len()), String::new()];
@@ -212,6 +225,12 @@ pub struct TurnInput {
     /// Sent earlier but no longer selected.
     pub removed: Vec<String>,
     pub attachments: Vec<ContextImage>,
+    /// The project tree, sent first (when the model picks its files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<String>,
+    /// An app-written follow-up (answering a read request): no "# Request" heading.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub followup: bool,
 }
 
 fn bullets(paths: &[String]) -> String {
@@ -226,6 +245,9 @@ fn bullets(paths: &[String]) -> String {
 /// last sent are attached; the model already has the others from earlier turns.
 pub fn build_turn(turn: &TurnInput) -> ApiContent {
     let mut sections = Vec::new();
+    if let Some(tree) = &turn.tree {
+        sections.push(super::reads::tree_section(tree));
+    }
     if !turn.files.is_empty() {
         sections.push(context_block(&turn.files));
     }
@@ -243,6 +265,8 @@ pub fn build_turn(turn: &TurnInput) -> ApiContent {
     }
     let body = if sections.is_empty() {
         turn.text.clone()
+    } else if turn.followup {
+        format!("{}\n\n{}", sections.join("\n\n"), turn.text)
     } else {
         format!("{}\n\n# Request\n\n{}", sections.join("\n\n"), turn.text)
     };

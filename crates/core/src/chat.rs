@@ -51,6 +51,12 @@ pub struct ThreadState {
     pub applied: Vec<String>,
     #[serde(default)]
     pub pull_requests: Vec<PullRequestRef>,
+    /// Hash of the project tree the model was sent (when it picks its files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_version: Option<String>,
+    /// Skills and skill files the model loaded: kept in context like ticked files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded: Vec<String>,
 }
 
 impl ThreadState {
@@ -64,6 +70,8 @@ impl ThreadState {
             title: None,
             applied: Vec::new(),
             pull_requests: Vec::new(),
+            tree_version: None,
+            loaded: Vec::new(),
         }
     }
 }
@@ -127,6 +135,118 @@ pub struct UiMessage {
     pub usage: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
+    /// Assistant: the context the model asked for in this reply, and what it got.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reads: Option<ReadLog>,
+}
+
+/// What a read request fetched (shown as one row under the reply).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadLog {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<String>,
+    /// "path (reason)".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<String>,
+    /// Over the per-message limit: waiting for the user, or declined.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held_back: Vec<String>,
+    pub tokens: u64,
+    /// The reply changed files it hadn't been sent: they were sent and the changes asked again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unseen_edits: bool,
+}
+
+impl ReadLog {
+    pub fn from_resolved(r: &crate::logic::reads::Resolved) -> Self {
+        let skills: Vec<String> = r
+            .skill_files
+            .iter()
+            .filter(|p| p.ends_with("SKILL.md"))
+            .cloned()
+            .collect();
+        Self {
+            files: r
+                .files
+                .iter()
+                .chain(r.skill_files.iter().filter(|p| !p.ends_with("SKILL.md")))
+                .cloned()
+                .collect(),
+            skills,
+            folders: r.listings.iter().map(|(p, _)| p.clone()).collect(),
+            refused: r
+                .refused
+                .iter()
+                .map(|x| format!("{} ({})", x.path, x.reason))
+                .collect(),
+            held_back: Vec::new(),
+            tokens: r.tokens,
+            unseen_edits: false,
+        }
+    }
+
+    /// "Loaded skill frontend-design · read 4 files · listed 1 folder · ~12k tokens"
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.skills.is_empty() {
+            let names: Vec<String> = self
+                .skills
+                .iter()
+                .map(|p| {
+                    crate::logic::reads::skill_dir(p)
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(p)
+                        .to_string()
+                })
+                .collect();
+            parts.push(format!(
+                "Loaded {} {}",
+                if names.len() == 1 { "skill" } else { "skills" },
+                names.join(", ")
+            ));
+        }
+        let n = self.files.len();
+        if n > 0 {
+            parts.push(format!(
+                "read {n} {}",
+                if n == 1 { "file" } else { "files" }
+            ));
+        }
+        let f = self.folders.len();
+        if f > 0 {
+            parts.push(format!(
+                "listed {f} {}",
+                if f == 1 { "folder" } else { "folders" }
+            ));
+        }
+        if !self.refused.is_empty() {
+            parts.push(format!("{} not available", self.refused.len()));
+        }
+        if !self.held_back.is_empty() {
+            parts.push(format!("{} held back", self.held_back.len()));
+        }
+        if self.tokens > 0 {
+            parts.push(format!("~{} tokens", fmt_k(self.tokens)));
+        }
+        let mut s = parts.join(" · ");
+        if let Some(first) = s.get(..1) {
+            s = first.to_uppercase() + &s[1..];
+        }
+        if self.unseen_edits {
+            s = format!("Changed files it hadn't seen: sent them, asked again · {s}");
+        }
+        if s.is_empty() {
+            "Asked for context".into()
+        } else {
+            s
+        }
+    }
 }
 
 impl UiMessage {
@@ -146,6 +266,7 @@ impl UiMessage {
             api: None,
             usage: None,
             cost: None,
+            reads: None,
         }
     }
 
@@ -226,6 +347,17 @@ impl SavedThread {
     }
 }
 
+/// How a turn is built.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TurnOptions {
+    /// "Resend full context": attach every file, changed or not.
+    pub force_all: bool,
+    /// The project tree to send first.
+    pub tree: Option<String>,
+    /// An app-written follow-up (answering a read request).
+    pub followup: bool,
+}
+
 /// The next turn, ready to send.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreparedTurn {
@@ -246,8 +378,9 @@ pub fn prepare_turn(
     text: &str,
     attachments: &[MessageImage],
     rules_on: usize,
-    force_all: bool,
+    opts: TurnOptions,
 ) -> PreparedTurn {
+    let force_all = opts.force_all;
     let mut versions = thread.file_versions.clone();
     let mut changed = Vec::new();
     let mut unchanged = Vec::new();
@@ -291,6 +424,8 @@ pub fn prepare_turn(
                 url: a.url.clone(),
             })
             .collect(),
+        tree: opts.tree,
+        followup: opts.followup,
     });
     let total = read.len();
     let files = if total == 0 {
@@ -484,7 +619,15 @@ mod tests {
         let mut thread = ThreadState::fresh();
         let selected: HashSet<String> = ["a.rs".into(), "b.rs".into()].into();
         let read = [file("a.rs", "fn a() {}\n"), file("b.rs", "fn b() {}\n")];
-        let t1 = prepare_turn(&thread, &read, &selected, "hi", &[], 1, false);
+        let t1 = prepare_turn(
+            &thread,
+            &read,
+            &selected,
+            "hi",
+            &[],
+            1,
+            TurnOptions::default(),
+        );
         assert_eq!(t1.meta, "2 of 2 files sent · 1 rules");
         thread.file_versions = t1.versions;
 
@@ -492,7 +635,15 @@ mod tests {
             file("a.rs", "fn a() {}\n"),
             file("b.rs", "fn b() { changed }\n"),
         ];
-        let t2 = prepare_turn(&thread, &read2, &selected, "again", &[], 1, false);
+        let t2 = prepare_turn(
+            &thread,
+            &read2,
+            &selected,
+            "again",
+            &[],
+            1,
+            TurnOptions::default(),
+        );
         assert_eq!(t2.meta, "1 of 2 files sent (1 unchanged) · 1 rules");
         let text = crate::logic::prompt::content_text(&t2.input);
         assert!(text.contains("b.rs") && text.contains("changed"));
@@ -500,10 +651,29 @@ mod tests {
 
         // Deselected files are dropped from the versions and reported as removed.
         let only_a: HashSet<String> = ["a.rs".into()].into();
-        let t3 = prepare_turn(&thread, &read2[..1], &only_a, "x", &[], 0, false);
+        let t3 = prepare_turn(
+            &thread,
+            &read2[..1],
+            &only_a,
+            "x",
+            &[],
+            0,
+            TurnOptions::default(),
+        );
         assert!(!t3.versions.contains_key("b.rs"));
         // Force: everything is attached again.
-        let t4 = prepare_turn(&thread, &read2, &selected, "x", &[], 0, true);
+        let t4 = prepare_turn(
+            &thread,
+            &read2,
+            &selected,
+            "x",
+            &[],
+            0,
+            TurnOptions {
+                force_all: true,
+                ..TurnOptions::default()
+            },
+        );
         assert_eq!(t4.meta, "2 of 2 files sent · 0 rules");
     }
 

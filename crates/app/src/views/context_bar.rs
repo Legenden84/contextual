@@ -59,6 +59,23 @@ pub fn context_bar(
         .map(|c| c.attachments.iter().map(|a| a.tokens).sum())
         .unwrap_or(0);
     let resend_all = chat.is_some_and(|c| c.resend_all);
+    // Model picks files: the read protocol and skill index, and the tree until it is sent.
+    let auto_tokens = if a.settings.chat.model_picks_files {
+        use contextual_core::logic::format::estimate_tokens;
+        use contextual_core::logic::reads;
+        let tree_sent = chat.is_some_and(|c| {
+            c.thread.tree_version.as_deref() == Some(p.model_tree_version.as_str())
+        });
+        estimate_tokens(reads::READ_FORMAT)
+            + estimate_tokens(&p.skill_index())
+            + if tree_sent {
+                0
+            } else {
+                estimate_tokens(&reads::tree_section(&p.model_tree))
+            }
+    } else {
+        0
+    };
     let t = totals(&ContextInput {
         tree: p.tree(),
         selected: &p.selected,
@@ -69,6 +86,7 @@ pub fn context_bar(
         stale: &stale,
         resend_all,
         picture_tokens: pictures,
+        auto_tokens,
         deployment: &deployment,
     });
     let (fill, ink) = match t.level {

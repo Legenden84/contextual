@@ -2,19 +2,22 @@
 //! proposed changes and saving them. Pure steps come from `contextual_core::chat`; this model
 //! runs the async ones (read files through the host, stream from Foundry, repair, save, undo).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use contextual_core::chat::{
-    self, MessageImage, PreparedTurn, STOPPED, SavedThread, ThreadState, Tone, UiMessage, Usage,
+    self, MessageImage, PreparedTurn, ReadLog, STOPPED, SavedThread, ThreadState, Tone,
+    TurnOptions, UiMessage, Usage,
 };
 use contextual_core::host::WorkspaceHost;
 use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, RepairInput};
 use contextual_core::llm::{FoundryClient, FoundryConfig};
 use contextual_core::logic::changes::ChangeContext;
 use contextual_core::logic::edits::format_edits;
+use contextual_core::logic::format::estimate_tokens;
 use contextual_core::logic::images::Attachment;
-use contextual_core::logic::prompt::system_prompt;
+use contextual_core::logic::prompt::{system_prompt, with_reads};
+use contextual_core::logic::reads::{self, LIMITS, ReadRequest, Resolved};
 use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
 use contextual_core::threads::{ThreadStore, ThreadSummary};
 use contextual_protocol::fs::{Apply, ApplyChange, ChangeStatus as WireStatus, ReadFiles, Undo};
@@ -48,10 +51,70 @@ pub struct Toast {
 }
 
 /// What the app needs from the environment for a turn (resolved at send time).
+#[derive(Clone)]
 pub struct SendEnv {
     pub config: FoundryConfig,
     pub deployment: Deployment,
     pub output_prompt: String,
+    /// The model picks its files (project tree, read requests, skill index).
+    pub auto: bool,
+    /// The skills the model may load (system prompt), when `auto`.
+    pub skill_index: String,
+}
+
+/// Read rounds of one user message.
+#[derive(Clone, Copy, Debug, Default)]
+struct Rounds {
+    /// Rounds answered so far.
+    n: usize,
+    /// Files and tokens read automatically so far.
+    files: usize,
+    tokens: u64,
+}
+
+/// A turn to stream.
+struct Turn {
+    prepared: PreparedTurn,
+    /// The project tree version this turn sends (recorded when it completes).
+    tree_version: Option<String>,
+    rounds: Rounds,
+}
+
+/// The reads to answer a request with.
+struct ReadStep {
+    /// The reply that asked.
+    ai_id: String,
+    resolved: Resolved,
+    /// Over the limit and declined by the user (told to the model).
+    held_back: Option<Resolved>,
+    /// The reply changed files it hadn't been sent.
+    unseen: bool,
+    rounds: Rounds,
+}
+
+enum NextRound {
+    Continue(Box<ReadStep>),
+    /// Waiting for the user (over the limit).
+    Wait,
+}
+
+/// A read request over the per-message limit, waiting for the user.
+pub struct PendingReads {
+    step: ReadStep,
+    held: Resolved,
+    env: SendEnv,
+}
+
+impl PendingReads {
+    /// The reply it belongs to.
+    pub fn ai_id(&self) -> &str {
+        &self.step.ai_id
+    }
+
+    /// (files, estimated tokens) waiting.
+    pub fn size(&self) -> (usize, u64) {
+        (self.held.reads(), self.held.tokens)
+    }
 }
 
 pub struct ChatModel {
@@ -78,6 +141,8 @@ pub struct ChatModel {
     pub save_error: Option<String>,
     pub toast: Option<Toast>,
     pub threads: Vec<ThreadSummary>,
+    /// A read request waiting for the user.
+    pub pending: Option<PendingReads>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -135,6 +200,7 @@ impl ChatModel {
             save_error: None,
             toast: None,
             threads: Vec::new(),
+            pending: None,
             _tasks: Vec::new(),
         };
         this.refresh_threads(true, cx);
@@ -182,15 +248,20 @@ impl ChatModel {
         if self.streaming() {
             return;
         }
+        self.pending = None;
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
         cx.notify();
 
         let p = self.project.read(cx);
         let root = p.root.clone();
-        let mut paths: Vec<String> = p.selected.iter().cloned().collect();
+        // Ticked files, plus the skills and skill files the model loaded in this chat.
+        let mut selected = p.selected.clone();
+        selected.extend(self.thread.loaded.iter().cloned());
+        let mut paths: Vec<String> = selected.iter().cloned().collect();
         paths.sort();
-        let selected = p.selected.clone();
+        let tree = (env.auto && self.thread.tree_version.as_deref() != Some(&p.model_tree_version))
+            .then(|| (p.model_tree.clone(), p.model_tree_version.clone()));
         let host = self.host.clone();
         let read_req = ReadFiles {
             root: root.clone(),
@@ -202,7 +273,15 @@ impl ChatModel {
         let task = cx.spawn(async move |this, cx| {
             let read = read.await;
             let Ok(prepared) = this.update(cx, |this, cx| match read {
-                Ok(r) => Some(this.prepare(r.files, &selected, &text, rules_on.len(), cx)),
+                Ok(r) => {
+                    this.record_read(&r.files);
+                    let opts = TurnOptions {
+                        force_all: this.resend_all,
+                        tree: tree.as_ref().map(|(t, _)| t.clone()),
+                        followup: false,
+                    };
+                    Some(this.prepare(r.files, &selected, &text, rules_on.len(), opts, cx))
+                }
                 Err(e) => {
                     this.cancel = None;
                     this.note(
@@ -216,21 +295,19 @@ impl ChatModel {
                 return;
             };
             let Some(prepared) = prepared else { return };
-            Self::stream(this, prepared, env, rules_on, token, cx).await;
+            let turn = Turn {
+                prepared,
+                tree_version: tree.map(|(_, v)| v),
+                rounds: Rounds::default(),
+            };
+            Self::stream(this, turn, env, rules_on, token, cx).await;
         });
         self._tasks.push(task);
     }
 
-    /// Records what was read, builds the turn and adds the user and (empty) assistant messages.
-    fn prepare(
-        &mut self,
-        files: Vec<contextual_protocol::fs::FileContent>,
-        selected: &HashSet<String>,
-        text: &str,
-        rules: usize,
-        cx: &mut Context<Self>,
-    ) -> PreparedTurn {
-        for f in &files {
+    /// Remembers file contents as sent (diff originals) and which were condensed references.
+    fn record_read(&mut self, files: &[contextual_protocol::fs::FileContent]) {
+        for f in files {
             if f.condensed_from.is_some() {
                 self.reference_only.insert(f.path.clone());
             } else {
@@ -240,6 +317,18 @@ impl ChatModel {
                 }
             }
         }
+    }
+
+    /// Builds the user's turn and adds the user message.
+    fn prepare(
+        &mut self,
+        files: Vec<contextual_protocol::fs::FileContent>,
+        selected: &HashSet<String>,
+        text: &str,
+        rules: usize,
+        opts: TurnOptions,
+        cx: &mut Context<Self>,
+    ) -> PreparedTurn {
         let images: Vec<MessageImage> = self
             .attachments
             .drain(..)
@@ -248,15 +337,12 @@ impl ChatModel {
                 url: a.url,
             })
             .collect();
-        let prepared = chat::prepare_turn(
-            &self.thread,
-            &files,
-            selected,
-            text,
-            &images,
-            rules,
-            self.resend_all,
-        );
+        let tree_sent = opts.tree.is_some();
+        let mut prepared =
+            chat::prepare_turn(&self.thread, &files, selected, text, &images, rules, opts);
+        if tree_sent {
+            prepared.meta.push_str(" · project tree");
+        }
         self.resend_all = false;
         self.messages.push(UiMessage::user(text, &prepared, &now()));
         cx.notify();
@@ -265,12 +351,17 @@ impl ChatModel {
 
     async fn stream(
         this: gpui_kit::WeakEntity<Self>,
-        prepared: PreparedTurn,
+        turn: Turn,
         env: SendEnv,
         rules_on: Vec<Rule>,
         token: CancellationToken,
         cx: &mut gpui_kit::AsyncApp,
     ) {
+        let Turn {
+            prepared,
+            tree_version,
+            rounds,
+        } = turn;
         let Ok((base, ai_id)) = this.update(cx, |this, cx| {
             let ai = UiMessage::assistant(&env.deployment.name, &now());
             let id = ai.id.clone();
@@ -281,8 +372,12 @@ impl ChatModel {
             return;
         };
 
+        let mut system = system_prompt(&rules_on, &env.output_prompt);
+        if env.auto {
+            system = with_reads(system, &env.skill_index);
+        }
         let req = ConversationRequest {
-            system: system_prompt(&rules_on, &env.output_prompt),
+            system,
             history: chat::history(&base),
             input: chat::to_message_content(&prepared.input),
             previous_response_id: base.response_id.clone(),
@@ -311,7 +406,12 @@ impl ChatModel {
             match event {
                 ChatEvent::Delta { text } => {
                     reply.push_str(&text);
-                    let current = reply.clone();
+                    // A read request is shown as a row, not as a code block.
+                    let current = if env.auto {
+                        reads::without_read_blocks(&reply)
+                    } else {
+                        reply.clone()
+                    };
                     let alive = this
                         .update(cx, |this, cx| {
                             if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
@@ -359,8 +459,9 @@ impl ChatModel {
             .is_some_and(|d| d.0.as_deref() == Some("length"));
         let completed = !reply.is_empty() && done.is_some() && failure.is_none();
 
-        // Originals for every touched file the model wasn't sent, so diffs compare against disk.
-        let Ok((root, missing, host)) = this.update(cx, |this, cx| {
+        // Commit the turn, then see whether the model asked for context (or edited files it
+        // hadn't seen): if so, answer it in another round instead of finishing.
+        let Ok(next) = this.update(cx, |this, cx| {
             if completed && let Some((_, response_id, api, _)) = &done {
                 this.thread.response_id = response_id.clone();
                 this.thread.api = Some(*api);
@@ -373,7 +474,31 @@ impl ChatModel {
                     content: contextual_core::logic::prompt::ApiContent::Text(reply.clone()),
                 });
                 this.thread.file_versions = prepared.versions.clone();
+                if let Some(v) = &tree_version {
+                    this.thread.tree_version = Some(v.clone());
+                }
             }
+            if !(env.auto && completed && !truncated) {
+                return None;
+            }
+            this.next_round(&reply, &ai_id, &rounds, usage, &env, cx)
+        }) else {
+            return;
+        };
+        if let Some(step) = next {
+            match step {
+                NextRound::Continue(next) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.continue_reads(*next, env, rules_on, cx);
+                    });
+                }
+                NextRound::Wait => {}
+            }
+            return;
+        }
+
+        // Originals for every touched file the model wasn't sent, so diffs compare against disk.
+        let Ok((root, missing, host)) = this.update(cx, |this, cx| {
             let p = this.project.read(cx);
             let missing: Vec<String> = chat::touched_paths(&reply)
                 .into_iter()
@@ -413,6 +538,7 @@ impl ChatModel {
         }) else {
             return;
         };
+        // Each reply shows its own usage; earlier rounds show theirs.
         let mut usage_total = usage;
         for change in proposed.iter_mut() {
             let Some(unplaced) = change.unplaced.clone().filter(|u| !u.is_empty()) else {
@@ -474,6 +600,12 @@ impl ChatModel {
             {
                 this.note(t, tone);
             }
+            if env.auto && completed && rounds.n > LIMITS.rounds {
+                this.note(
+                    "The model kept asking for files after the read limit; its last reply is shown as is.",
+                    Tone::Warn,
+                );
+            }
             if !changes.is_empty() {
                 this.include = changes
                     .iter()
@@ -488,10 +620,240 @@ impl ChatModel {
         });
     }
 
+    /// After a completed reply (model picks files): the next round if the model asked for
+    /// context or changed files it hadn't been sent; `None` to finish the reply as usual.
+    fn next_round(
+        &mut self,
+        reply: &str,
+        ai_id: &str,
+        rounds: &Rounds,
+        usage: Option<Usage>,
+        env: &SendEnv,
+        cx: &mut Context<Self>,
+    ) -> Option<NextRound> {
+        if rounds.n > LIMITS.rounds {
+            return None;
+        }
+        let p = self.project.read(cx);
+        let sent: BTreeSet<String> = self.thread.file_versions.keys().cloned().collect();
+        let (request, unseen) = match reads::parse_read_request(reply) {
+            Some(req) => (req, false),
+            None => {
+                // Changes to existing files the model was never sent: send them, ask again.
+                let unseen: Vec<String> = chat::touched_paths(reply)
+                    .into_iter()
+                    .filter(|path| {
+                        p.node(path).is_some()
+                            && !sent.contains(path)
+                            && !self.reference_only.contains(path)
+                    })
+                    .collect();
+                if unseen.is_empty() || rounds.n == LIMITS.rounds {
+                    return None;
+                }
+                (
+                    ReadRequest {
+                        paths: unseen,
+                        folders: Vec::new(),
+                    },
+                    true,
+                )
+            }
+        };
+        let resolved = reads::resolve(&request, p.tree(), &p.rules, &p.skills_never, &sent);
+        let (now_ok, held) = reads::within_limits(resolved, rounds.files, rounds.tokens, LIMITS);
+        let mut log = ReadLog::from_resolved(&now_ok);
+        log.unseen_edits = unseen;
+        let deployment = env.deployment.clone();
+        if let Some(m) = self.messages.iter_mut().find(|m| m.id == ai_id) {
+            m.text = reads::without_read_blocks(reply);
+            m.streaming = false;
+            m.changes = None;
+            if let Some(u) = usage {
+                let (meta, cost) = chat::usage_meta(&u, &deployment);
+                m.meta = Some(meta);
+                m.usage = Some(u);
+                m.cost = cost;
+            }
+            if let Some(h) = &held {
+                log.held_back = h.files.iter().chain(&h.skill_files).cloned().collect();
+            }
+            m.reads = Some(log);
+        }
+        let next = Rounds {
+            n: rounds.n + 1,
+            files: rounds.files,
+            tokens: rounds.tokens,
+        };
+        let step = ReadStep {
+            ai_id: ai_id.to_string(),
+            resolved: now_ok,
+            held_back: None,
+            unseen,
+            rounds: next,
+        };
+        if let Some(held) = held {
+            // Past the limit for one message: the user decides about the rest.
+            self.pending = Some(PendingReads {
+                step,
+                held,
+                env: env.clone(),
+            });
+            self.cancel = None;
+            self.save_thread(cx);
+            cx.notify();
+            return Some(NextRound::Wait);
+        }
+        Some(NextRound::Continue(Box::new(step)))
+    }
+
+    /// Reads what the model asked for, ticks it, and sends it as the next round.
+    fn continue_reads(
+        &mut self,
+        step: ReadStep,
+        env: SendEnv,
+        rules_on: Vec<Rule>,
+        cx: &mut Context<Self>,
+    ) {
+        let token = CancellationToken::new();
+        self.cancel = Some(token.clone());
+        let r = &step.resolved;
+        self.project.update(cx, |p, cx| {
+            p.add_model_picks(&r.files);
+            p.model_loaded.extend(
+                r.skill_files
+                    .iter()
+                    .filter(|f| f.ends_with("SKILL.md"))
+                    .cloned(),
+            );
+            cx.notify();
+        });
+        for f in &r.skill_files {
+            if !self.thread.loaded.contains(f) {
+                self.thread.loaded.push(f.clone());
+            }
+        }
+        let paths: Vec<String> = r.files.iter().chain(&r.skill_files).cloned().collect();
+        let mut selected = self.project.read(cx).selected.clone();
+        selected.extend(self.thread.loaded.iter().cloned());
+        let host = self.host.clone();
+        let read_req = ReadFiles {
+            root: self.root(cx),
+            paths,
+            condense: true,
+        };
+        let read = (!read_req.paths.is_empty())
+            .then(|| runtime::spawn(cx, async move { host.read(read_req).await }));
+        cx.notify();
+        let task = cx.spawn(async move |this, cx| {
+            let files = match read {
+                None => Vec::new(),
+                Some(job) => match job.await {
+                    Ok(r) => r.files,
+                    Err(e) => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.cancel = None;
+                            this.note(
+                                format!(
+                                    "Could not read the files the model asked for. {}",
+                                    e.message
+                                ),
+                                Tone::Error,
+                            );
+                            cx.notify();
+                        });
+                        return;
+                    }
+                },
+            };
+            if token.is_cancelled() {
+                let _ = this.update(cx, |this, cx| {
+                    this.cancel = None;
+                    this.note(STOPPED, Tone::Warn);
+                    cx.notify();
+                });
+                return;
+            }
+            let Ok(turn) = this.update(cx, |this, _| {
+                this.record_read(&files);
+                let read_tokens: u64 = files
+                    .iter()
+                    .map(|f| f.content.as_deref().map_or(0, estimate_tokens))
+                    .sum();
+                if let Some(m) = this.messages.iter_mut().find(|m| m.id == step.ai_id)
+                    && let Some(log) = m.reads.as_mut()
+                {
+                    log.tokens = read_tokens;
+                }
+                let last = step.rounds.n == LIMITS.rounds;
+                let text = if step.unseen {
+                    reads::unseen_edit_text(&step.resolved.files)
+                } else {
+                    reads::followup_text(&step.resolved, step.held_back.as_ref(), last)
+                };
+                let prepared = chat::prepare_turn(
+                    &this.thread,
+                    &files,
+                    &selected,
+                    &text,
+                    &[],
+                    rules_on.len(),
+                    TurnOptions {
+                        followup: true,
+                        ..TurnOptions::default()
+                    },
+                );
+                let mut rounds = step.rounds;
+                rounds.files += step.resolved.reads();
+                rounds.tokens += read_tokens;
+                Turn {
+                    prepared,
+                    tree_version: None,
+                    rounds,
+                }
+            }) else {
+                return;
+            };
+            Self::stream(this, turn, env, rules_on, token, cx).await;
+        });
+        self._tasks.push(task);
+    }
+
+    /// The model asked for more than one message may read: send it all (`true`) or tell the
+    /// model the rest was declined.
+    pub fn answer_pending(&mut self, send: bool, rules_on: Vec<Rule>, cx: &mut Context<Self>) {
+        let Some(PendingReads {
+            mut step,
+            held,
+            env,
+        }) = self.pending.take()
+        else {
+            return;
+        };
+        if send {
+            step.resolved.files.extend(held.files);
+            step.resolved.skill_files.extend(held.skill_files);
+            step.resolved.tokens += held.tokens;
+            if let Some(log) = self
+                .messages
+                .iter_mut()
+                .find(|m| m.id == step.ai_id)
+                .and_then(|m| m.reads.as_mut())
+            {
+                let back = std::mem::take(&mut log.held_back);
+                log.files.extend(back);
+            }
+        } else {
+            step.held_back = Some(held);
+        }
+        self.continue_reads(step, env, rules_on, cx);
+    }
+
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         if let Some(t) = &self.cancel {
             t.cancel();
         }
+        self.pending = None;
         cx.notify();
     }
 
@@ -501,6 +863,11 @@ impl ChatModel {
             return;
         }
         self.reference_only.clear();
+        self.pending = None;
+        self.project.update(cx, |p, cx| {
+            p.clear_model_marks();
+            cx.notify()
+        });
         self.thread = ThreadState::fresh();
         self.messages.clear();
         self.include.clear();
@@ -594,10 +961,15 @@ impl ChatModel {
             this.update(cx, |this, cx| {
                 // Re-tick the files the model has from this chat.
                 let paths: Vec<String> = saved.thread.file_versions.keys().cloned().collect();
+                let loaded = saved.thread.loaded.clone();
                 this.project.update(cx, |p, cx| {
                     p.select_paths(&paths);
+                    p.clear_model_marks();
+                    p.model_loaded
+                        .extend(loaded.into_iter().filter(|f| f.ends_with("SKILL.md")));
                     cx.notify()
                 });
+                this.pending = None;
                 this.include = SavedThread::last_changes(&saved.messages)
                     .iter()
                     .map(|c| (c.path.clone(), c.conflict.is_none()))

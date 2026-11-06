@@ -28,10 +28,13 @@ pub fn install(
         return;
     };
     let after = std::env::var("CONTEXTUAL_DEV_AFTER").unwrap_or_default();
-    project.update(cx, |p, cx| {
-        p.select_all();
-        cx.notify()
-    });
+    // With "Model picks files" the model asks for what it needs; otherwise tick everything.
+    if !app.read(cx).settings.chat.model_picks_files {
+        project.update(cx, |p, cx| {
+            p.select_all();
+            cx.notify()
+        });
+    }
     panel.update(cx, |p, cx| p.dev_send(text, window, cx));
 
     let (app, chat_for_obs, chats) = (app.clone(), chat.clone(), chats.clone());

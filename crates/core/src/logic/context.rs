@@ -66,6 +66,8 @@ pub struct ContextInput<'a> {
     pub resend_all: bool,
     /// Tokens of the pictures attached to the next message.
     pub picture_tokens: u64,
+    /// Tokens of the project tree and skill index sent when the model picks its files.
+    pub auto_tokens: u64,
     pub deployment: &'a Deployment,
 }
 
@@ -108,7 +110,8 @@ pub fn totals(input: &ContextInput<'_>) -> Totals {
         })
         .map(|p| sizes.get(p).copied().unwrap_or(0))
         .sum();
-    let new_tokens = new_file_tokens + input.picture_tokens + USER_MESSAGE_TOKENS;
+    let new_tokens =
+        new_file_tokens + input.picture_tokens + input.auto_tokens + USER_MESSAGE_TOKENS;
     let raw = estimate_tokens(&system_prompt(input.rules_on, input.output_format))
         + conversation_tokens
         + new_tokens;
@@ -184,6 +187,7 @@ mod tests {
             stale: &stale,
             resend_all: false,
             picture_tokens: 0,
+            auto_tokens: 0,
             deployment: &dep,
         };
         let t = totals(&input);

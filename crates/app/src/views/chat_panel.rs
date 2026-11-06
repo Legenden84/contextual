@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use contextual_core::chat::{Role, Tone, UiMessage};
+use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
 use contextual_core::logic::format::fmt_k;
 use contextual_core::logic::images::{IMAGE_TYPES, to_attachment};
 use contextual_theme::layout;
@@ -128,12 +128,16 @@ impl ChatPanel {
             });
             return;
         };
+        let auto = a.settings.chat.model_picks_files;
+        let p = self.project.read(cx);
         let env = SendEnv {
             config,
             deployment: a.deployment(),
             output_prompt: a.settings.workspace.output_prompt.clone(),
+            auto,
+            skill_index: if auto { p.skill_index() } else { String::new() },
         };
-        let rules = self.project.read(cx).rules_on();
+        let rules = p.rules_on();
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.chat.update(cx, |c, cx| c.send(text, env, rules, cx));
     }
@@ -261,6 +265,9 @@ fn render_message(
                 .when(m.streaming && m.text.is_empty(), |d| {
                     d.child(div().text_color(hsla(c.ink_muted)).child("Thinking…"))
                 })
+                .when_some(m.reads.clone(), |d, log| {
+                    d.child(read_row(this, &m.id, &log, entity, cx))
+                })
                 .when(!changes.is_empty() && !m.streaming, |d| {
                     d.child(
                         div()
@@ -292,6 +299,119 @@ fn render_message(
     row.child(el).into_any_element()
 }
 
+/// "Loaded skill frontend-design · read 4 files · ~12k tokens", expandable to the paths; with
+/// the buttons when a request over the limit waits for the user.
+fn read_row(
+    this: &ChatPanel,
+    id: &str,
+    log: &ReadLog,
+    entity: &WeakEntity<ChatPanel>,
+    cx: &App,
+) -> AnyElement {
+    let c = &cx.tokens().colors;
+    let key = format!("reads-{id}");
+    let open = this.expanded.contains(&key);
+    let pending = this
+        .chat
+        .read(cx)
+        .pending
+        .as_ref()
+        .filter(|p| p.ai_id() == id)
+        .map(|p| p.size());
+    let toggle = entity.clone();
+    let toggle_key = key.clone();
+    let paths: Vec<String> = log
+        .skills
+        .iter()
+        .chain(&log.files)
+        .chain(log.folders.iter())
+        .cloned()
+        .chain(log.refused.iter().map(|r| format!("{r}: not sent")))
+        .chain(log.held_back.iter().map(|h| format!("{h}: held back")))
+        .collect();
+    div()
+        .mt(sp(2))
+        .flex()
+        .flex_col()
+        .gap(sp(1))
+        .type_style(contextual_theme::type_style::UI_SMALL)
+        .text_color(hsla(c.ink_muted))
+        .child(
+            div()
+                .id(SharedString::from(key.clone()))
+                .flex()
+                .items_center()
+                .gap(sp(1))
+                .cursor_pointer()
+                .hover(|s| s.text_color(hsla(c.ink)))
+                .on_click(move |_, _, cx| {
+                    toggle
+                        .update(cx, |t, cx| {
+                            if !t.expanded.remove(&toggle_key) {
+                                t.expanded.insert(toggle_key.clone());
+                            }
+                            t.list.reset(t.rendered);
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .child(
+                    Icon::new(if open {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .size(px(12.0)),
+                )
+                .child(Icon::new(IconName::File).size(px(12.0)))
+                .child(SharedString::from(log.summary())),
+        )
+        .when(open, |d| {
+            d.child(
+                div()
+                    .pl(sp(6))
+                    .flex()
+                    .flex_col()
+                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                    .children(paths.into_iter().map(|p| div().child(SharedString::from(p)))),
+            )
+        })
+        .when_some(pending, |d, (files, tokens)| {
+            let (send_chat, skip_chat) = (this.chat.clone(), this.chat.clone());
+            let (send_project, skip_project) = (this.project.clone(), this.project.clone());
+            d.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(sp(2))
+                    .text_color(hsla(c.warning))
+                    .child(SharedString::from(format!(
+                        "The model wants {files} more {} (~{} tokens), past the limit for one message.",
+                        if files == 1 { "file" } else { "files" },
+                        fmt_k(tokens)
+                    )))
+                    .child(
+                        Button::new("reads-send", "Send them")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Primary)
+                            .on_click(move |_, _, cx| {
+                                let rules = send_project.read(cx).rules_on();
+                                send_chat.update(cx, |c, cx| c.answer_pending(true, rules, cx));
+                            }),
+                    )
+                    .child(
+                        Button::new("reads-skip", "Skip")
+                            .size(ButtonSize::Xs)
+                            .on_click(move |_, _, cx| {
+                                let rules = skip_project.read(cx).rules_on();
+                                skip_chat.update(cx, |c, cx| c.answer_pending(false, rules, cx));
+                            }),
+                    ),
+            )
+        })
+        .into_any_element()
+}
+
 fn header(who: &str, m: &UiMessage, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()
@@ -318,6 +438,7 @@ impl Render for ChatPanel {
         let chat = self.chat.read(cx);
         let streaming = chat.streaming();
         let resend = chat.resend_all;
+        let auto = self.app.read(cx).settings.chat.model_picks_files;
         let empty = chat.messages.is_empty();
         let attachments: Vec<_> = chat
             .attachments
@@ -343,8 +464,14 @@ impl Render for ChatPanel {
                         .gap(sp(2))
                         .type_style(contextual_theme::type_style::UI_PROSE)
                         .text_color(hsla(c.ink_muted))
-                        .child(div().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child("Pick the files the model should see"))
-                        .child("Tick files in the explorer, then ask for a change. Click a file to preview it."),
+                        .when(auto, |d| {
+                            d.child(div().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child("Ask for a change"))
+                                .child("The model gets the project tree and asks for the files and skills it needs. Tick files to include them yourself.")
+                        })
+                        .when(!auto, |d| {
+                            d.child(div().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child("Pick the files the model should see"))
+                                .child("Tick files in the explorer, then ask for a change. Click a file to preview it.")
+                        }),
                 )
                 .into_any_element()
         } else {
@@ -464,6 +591,18 @@ impl Render for ChatPanel {
                                                         t.chat.update(cx, |c, cx| {
                                                             c.resend_all = true;
                                                             cx.notify();
+                                                        })
+                                                    })),
+                                            )
+                                            .child(div().w(sp(2)))
+                                            .child(
+                                                mode("auto-pick", "Model picks files", auto)
+                                                    .on_click(cx.listener(|t, _, _, cx| {
+                                                        t.app.update(cx, |a, cx| {
+                                                            let mut s = a.settings.clone();
+                                                            s.chat.model_picks_files =
+                                                                !s.chat.model_picks_files;
+                                                            a.save_settings(s, None, cx);
                                                         })
                                                     })),
                                             )

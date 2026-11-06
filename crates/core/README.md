@@ -27,7 +27,8 @@ user didn't open (`allow_root`).
   connection, commit/PR drafts, edit repair. The API key never leaves the app process.
 - `chat` — a turn: which files to attach, the saved-thread JSON, notes after a reply.
 - `logic` — pure functions shared by the UI (diff, markdown, changes, edits, prompt, tree,
-  context totals, images, PR helpers).
+  context totals, images, PR helpers; `reads`: the model picks its files — the `read` protocol,
+  the project tree and skill index it is sent, checking requests and the per-message limits).
 - `threads` (saved chats, per project key; `import_legacy` copies the old app's), `settings`
   (`settings.json`, env overrides, `SecretStore`), `recents` (`state.json`), `migrate`
   (`.env.local` import), `models` (model catalog: context limit and prices per model, from

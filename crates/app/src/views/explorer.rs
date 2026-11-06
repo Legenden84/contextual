@@ -106,6 +106,7 @@ impl Explorer {
         let changed = node.changed_on_disk == Some(true);
         let image = node.image == Some(true) && !blocked;
         let condensed = node.condensed_from.is_some();
+        let picked = !is_dir && p.model_picked.contains(&node.path) && file_selected;
         let depth = row.depth;
 
         div()
@@ -201,6 +202,7 @@ impl Explorer {
                 )
             })
             .when(condensed, |d| d.child(Tag::new("condensed")))
+            .when(picked, |d| d.child(Tag::new("model").tone(TagTone::Add)))
             .when(blocked, |d| {
                 d.child(Tag::new("excluded").tone(TagTone::Excluded))
             })

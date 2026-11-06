@@ -46,7 +46,17 @@ pub struct Project {
     pub rules: Vec<Rule>,
     /// Bumped by every rescan, so other models can refresh (Source Control).
     pub rescans: u64,
+    /// Rules and skills sent with every message ("always" for skills).
     pub rules_on: HashSet<String>,
+    /// The tree as the model is sent it (when it picks its files), and its hash.
+    pub model_tree: String,
+    pub model_tree_version: String,
+    /// Skills the model may not load.
+    pub skills_never: HashSet<String>,
+    /// Files the model asked for in this chat (ticked for it; tagged in the explorer).
+    pub model_picked: HashSet<String>,
+    /// Skills the model loaded in this chat.
+    pub model_loaded: HashSet<String>,
     pub rule_preview: Option<String>,
     pub tabs: Vec<String>,
     pub active: Tab,
@@ -54,6 +64,16 @@ pub struct Project {
     rows: Vec<Row>,
     /// The filtered tree the rows were built from (only while filtering).
     filtered: Option<Vec<TreeNode>>,
+}
+
+/// Whether a skill is sent, offered to the model, or left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkillMode {
+    /// In the index: the model loads it when the task matches (with "Model picks files" off:
+    /// not sent).
+    Auto,
+    Always,
+    Never,
 }
 
 /// Scan JSON → the logic layer's types (same wire shape, so this is a straight conversion).
@@ -111,6 +131,11 @@ impl Project {
                 .map(|r| r.path.clone())
                 .collect(),
             rules,
+            model_tree: String::new(),
+            model_tree_version: String::new(),
+            skills_never: HashSet::new(),
+            model_picked: HashSet::new(),
+            model_loaded: HashSet::new(),
             rescans: 0,
             rule_preview: None,
             tabs: Vec::new(),
@@ -120,7 +145,16 @@ impl Project {
             filtered: None,
         };
         this.recompute();
+        this.refresh_model_tree();
         this
+    }
+
+    fn refresh_model_tree(&mut self) {
+        self.model_tree = contextual_core::logic::reads::project_tree(
+            &self.tree,
+            contextual_core::logic::reads::TREE_LINES,
+        );
+        self.model_tree_version = contextual_core::logic::hash::hash_text(&self.model_tree);
     }
 
     /// Replaces the tree after a rescan, keeping what still exists of the selection and tabs.
@@ -140,6 +174,10 @@ impl Project {
         self.frameworks = fresh.frameworks;
         self.rules = fresh.rules;
         self.rules_on = rules_on;
+        self.model_tree = fresh.model_tree;
+        self.model_tree_version = fresh.model_tree_version;
+        self.skills_never
+            .retain(|p| self.rules.iter().any(|r| &r.path == p));
         self.selected.retain(|p| pickable.contains(p));
         self.rescans += 1;
         self.tabs.retain(|t| self.index.contains_key(t));
@@ -294,6 +332,61 @@ impl Project {
             .cloned()
             .collect();
         self.recompute();
+    }
+
+    /// Ticks files the model asked for (keeping the rest of the selection).
+    pub fn add_model_picks(&mut self, paths: &[String]) {
+        let pickable = pickable_files(&self.tree);
+        for p in paths.iter().filter(|p| pickable.contains(*p)) {
+            self.selected.insert(p.clone());
+            self.model_picked.insert(p.clone());
+        }
+        self.recompute();
+    }
+
+    /// A new chat: the model hasn't picked or loaded anything yet.
+    pub fn clear_model_marks(&mut self) {
+        self.model_picked.clear();
+        self.model_loaded.clear();
+    }
+
+    pub fn skill_mode(&self, path: &str) -> SkillMode {
+        if self.rules_on.contains(path) {
+            SkillMode::Always
+        } else if self.skills_never.contains(path) {
+            SkillMode::Never
+        } else {
+            SkillMode::Auto
+        }
+    }
+
+    /// Auto → Always → Never → Auto.
+    pub fn cycle_skill(&mut self, path: &str) {
+        match self.skill_mode(path) {
+            SkillMode::Auto => {
+                self.rules_on.insert(path.to_string());
+            }
+            SkillMode::Always => {
+                self.rules_on.remove(path);
+                self.skills_never.insert(path.to_string());
+            }
+            SkillMode::Never => {
+                self.skills_never.remove(path);
+            }
+        }
+    }
+
+    /// The skill index for the system prompt (skills on Auto).
+    pub fn skill_index(&self) -> String {
+        contextual_core::logic::reads::skill_index(&self.auto_skills())
+    }
+
+    /// Skills the model may load (not sent already, not turned off).
+    pub fn auto_skills(&self) -> Vec<&Rule> {
+        self.rules
+            .iter()
+            .filter(|r| r.kind == RuleType::Skill && self.skill_mode(&r.path) == SkillMode::Auto)
+            .collect()
     }
 
     pub fn clear_selection(&mut self) {
