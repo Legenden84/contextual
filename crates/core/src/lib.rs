@@ -17,6 +17,8 @@ pub mod host;
 pub mod llm;
 pub mod location;
 pub mod logic;
+#[cfg(feature = "llm")]
+pub mod migrate;
 pub mod platform;
 pub mod process;
 pub mod recents;

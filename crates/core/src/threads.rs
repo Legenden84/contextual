@@ -254,6 +254,40 @@ impl ThreadStore {
     }
 
     /// Deletes every saved conversation of a project; returns how many there were.
+    /// Copies one project's chats from the old app's store (`~/.cache/contextual/threads`,
+    /// keyed by the project's path as the old server saw it) into this store under `key`.
+    /// Does nothing when this store already has chats for `key`. Returns the files copied.
+    pub async fn import_legacy(
+        &self,
+        legacy_dir: &Path,
+        legacy_root: &str,
+        key: &str,
+    ) -> Result<usize> {
+        let src = legacy_dir.join(project_hash(legacy_root));
+        let dst = self.project_dir(key)?;
+        if !tokio::fs::try_exists(src.join("index.json"))
+            .await
+            .unwrap_or(false)
+            || tokio::fs::try_exists(dst.join("index.json"))
+                .await
+                .unwrap_or(false)
+        {
+            return Ok(0);
+        }
+        tokio::fs::create_dir_all(&dst).await?;
+        let mut copied = 0;
+        let mut entries = tokio::fs::read_dir(&src).await?;
+        while let Some(e) = entries.next_entry().await? {
+            let name = e.file_name();
+            if name.to_string_lossy().ends_with(".json") && e.file_type().await?.is_file() {
+                let data = tokio::fs::read(e.path()).await?;
+                Self::write_atomic(&dst.join(&name), &data).await?;
+                copied += 1;
+            }
+        }
+        Ok(copied)
+    }
+
     pub async fn delete_all(&self, root: &str) -> Result<usize> {
         let dir = self.project_dir(root)?;
         tokio::fs::create_dir_all(&dir).await?;

@@ -2,8 +2,8 @@
 //! Foundry client tests against local mock servers (`wiremock`, plus a raw TCP server for
 //! aborts), using recorded-shape Azure payloads from `fixtures/llm/`.
 //!
-//! `parity_with_node_server` replays `fixtures/llm/record.ts` (the old server on the openai SDK,
-//! recorded into `fixtures/llm/expected.json`) and compares every HTTP request and every result.
+//! `parity_with_node_server` replays what the old server on the openai SDK sent and returned
+//! (`fixtures/llm/expected.json`; see `fixtures/README.md`) and compares every HTTP request and every result.
 
 use contextual_core::error::ErrorCode;
 use contextual_core::llm::{
@@ -28,7 +28,7 @@ fn file(name: &str) -> String {
     std::fs::read_to_string(fixtures().join(name)).unwrap()
 }
 
-/// Mirrors `route()` in `fixtures/llm/record.ts`.
+/// Mirrors `route()` in the recorder (`fixtures/llm/record.ts`, see `fixtures/README.md`).
 struct AzureLike {
     canned: Value,
 }

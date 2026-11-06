@@ -129,6 +129,37 @@ pub fn detect_for_this_os(input: &str, default_distro: Option<&str>) -> Detected
     }
 }
 
+/// The folder in a `contextual://open?path=<percent-encoded path>` deep link.
+pub fn parse_open_url(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("contextual://open")?
+        .trim_start_matches('/');
+    let query = rest.strip_prefix('?')?;
+    let value = query.split('&').find_map(|kv| kv.strip_prefix("path="))?;
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+                out.push(u8::from_str_radix(hex, 16).ok()?);
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    let path = String::from_utf8(out).ok()?;
+    (!path.trim().is_empty()).then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +246,24 @@ mod tests {
             .label(),
             "WSL: Ubuntu"
         );
+    }
+
+    #[test]
+    fn deep_links() {
+        assert_eq!(
+            parse_open_url("contextual://open?path=%2Fhome%2Fme%2Fx").as_deref(),
+            Some("/home/me/x")
+        );
+        assert_eq!(
+            parse_open_url("contextual://open/?path=C%3A%5Csrc%5Capp&x=1").as_deref(),
+            Some(r"C:\src\app")
+        );
+        assert_eq!(
+            parse_open_url("contextual://open?path=a+b").as_deref(),
+            Some("a b")
+        );
+        assert_eq!(parse_open_url("contextual://open?path=").as_deref(), None);
+        assert_eq!(parse_open_url("https://open?path=x"), None);
+        assert_eq!(parse_open_url("contextual://open?path=%ZZ"), None);
     }
 }

@@ -120,6 +120,74 @@ impl Hosts {
     }
 }
 
+/// Where the old app kept a project's chats: its thread store (`~/.cache/contextual/threads`,
+/// inside WSL when the old app ran there) and the project path as the old server saw it.
+pub enum LegacyThreads {
+    /// This machine (Linux/macOS, or dev-remote mode).
+    Local,
+    /// Inside a WSL distro; `root` is translated (`C:\x` → `/mnt/c/x` for Windows projects).
+    Wsl {
+        distro: String,
+        host: Arc<dyn WorkspaceHost>,
+        windows_project: bool,
+    },
+}
+
+impl LegacyThreads {
+    pub async fn resolve(&self, root: &str) -> Option<(PathBuf, String)> {
+        match self {
+            LegacyThreads::Local => Some((
+                contextual_core::threads::legacy_threads_dir()?,
+                root.to_string(),
+            )),
+            LegacyThreads::Wsl {
+                distro,
+                host,
+                windows_project,
+            } => {
+                // The distro user's home, from the agent's folder listing.
+                let home = host
+                    .list_dirs(contextual_protocol::fs::ListDirs {
+                        path: None,
+                        hidden: false,
+                    })
+                    .await
+                    .ok()?
+                    .path;
+                let dir = format!(r"\\wsl.localhost\{distro}{home}/.cache/contextual/threads")
+                    .replace('/', "\\");
+                let root = if *windows_project {
+                    contextual_core::workspace::paths::drive_to_mnt(root)?
+                } else {
+                    root.to_string()
+                };
+                Some((PathBuf::from(dir), root))
+            }
+        }
+    }
+}
+
+impl Hosts {
+    /// Where to look for a project's chats from the old app.
+    pub fn legacy_threads(&mut self, location: &Location) -> Option<LegacyThreads> {
+        if self.dev_remote || !cfg!(windows) {
+            return Some(LegacyThreads::Local);
+        }
+        let (distro, windows_project) = match location {
+            Location::Wsl { distro } => (distro.clone(), false),
+            Location::Local => (self.default_distro()?.to_string(), true),
+        };
+        let host = self.get(&Location::Wsl {
+            distro: distro.clone(),
+        });
+        Some(LegacyThreads::Wsl {
+            distro,
+            host,
+            windows_project,
+        })
+    }
+}
+
 /// On Windows, puts this process in a job that kills its children (the WSL agents) when the app
 /// exits, even if it crashes (plan §6.6).
 pub fn kill_children_with_app() {

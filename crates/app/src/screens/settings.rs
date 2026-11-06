@@ -44,6 +44,10 @@ pub struct SettingsScreen {
     theme: ThemePreference,
     /// Remove the stored key on save.
     remove_key: bool,
+    /// `.env.local` of the old app to import from.
+    env_path: Entity<InputState>,
+    /// An API key read from `.env.local`, stored on Save (unless one was typed).
+    imported_key: Option<String>,
     status: Option<String>,
     _sub: Subscription,
 }
@@ -141,6 +145,12 @@ impl SettingsScreen {
                 .rows(10)
                 .default_value(s.workspace.output_prompt.clone())
         });
+        let env_guess = find_env_local(&app.read(cx).state.recents);
+        let env_path = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("/path/to/old/contextual/.env.local")
+                .default_value(env_guess)
+        });
         let sub = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             endpoint,
@@ -161,6 +171,8 @@ impl SettingsScreen {
             include_hidden: s.workspace.include_hidden,
             theme: s.theme,
             remove_key: false,
+            env_path,
+            imported_key: None,
             status: None,
             app,
             _sub: sub,
@@ -204,8 +216,61 @@ impl SettingsScreen {
             Some(String::new())
         } else {
             self.text(&self.api_key, cx)
+                .or_else(|| self.imported_key.clone())
         };
         Ok((s, key))
+    }
+
+    /// Fills the Foundry fields from the old app's `.env.local` (review, then Save).
+    fn import_env(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let path = self.env_path.read(cx).value().trim().to_string();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = Some(format!("Couldn't read {path}: {e}"));
+                cx.notify();
+                return;
+            }
+        };
+        let imp = contextual_core::migrate::import_env(&text);
+        let f = &imp.foundry;
+        let mut n = 0;
+        for (field, value) in [
+            (&self.endpoint, f.endpoint.clone()),
+            (&self.api_version, f.api_version.clone()),
+            (&self.deployment, f.deployment.clone()),
+            (&self.model_name, f.model_name.clone()),
+            (&self.context_limit, f.context_limit.map(|v| v.to_string())),
+            (
+                &self.max_tokens,
+                f.max_completion_tokens.map(|v| v.to_string()),
+            ),
+            (&self.in_price, f.input_price_per_1m.map(|v| v.to_string())),
+            (
+                &self.out_price,
+                f.output_price_per_1m.map(|v| v.to_string()),
+            ),
+        ] {
+            if let Some(v) = value {
+                field.input.update(cx, |i, cx| i.set_value(v, window, cx));
+                n += 1;
+            }
+        }
+        if imp.api_key.is_some() {
+            n += 1;
+        }
+        self.imported_key = imp.api_key;
+        let mut msg = format!(
+            "Imported {n} values from .env.local. Review them, then Save (the API key goes to the keychain)."
+        );
+        if !imp.skipped.is_empty() {
+            msg.push_str(&format!(
+                " Skipped (not numbers): {}.",
+                imp.skipped.join(", ")
+            ));
+        }
+        self.status = Some(msg);
+        cx.notify();
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -389,6 +454,27 @@ impl Render for SettingsScreen {
                         d.child(div().mt(sp(2)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child(SharedString::from(s)))
                     })
                     .child(section("Azure AI Foundry", cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(sp(2))
+                            .mb(sp(2))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child("Import from the old app:")
+                            .child(div().flex_1().child(Input::new(&self.env_path)))
+                            .child(Button::new("import-env", "Import .env.local").on_click(cx.listener(|t, _, w, cx| t.import_env(w, cx)))),
+                    )
+                    .when(self.imported_key.is_some(), |d| {
+                        d.child(
+                            div()
+                                .pl(px(LABEL_W) + sp(4))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child("An API key was imported and will be stored on Save."),
+                        )
+                    })
                     .when(env_note, |d| {
                         d.child(
                             div()
@@ -484,4 +570,24 @@ impl Render for SettingsScreen {
                     .child(div().flex().gap(sp(1)).children(theme_buttons)),
             )
     }
+}
+
+/// The old app's `.env.local` near a recently opened project (the old repo is often a parent of
+/// the projects opened from it), else empty.
+fn find_env_local(recents: &[contextual_core::recents::RecentProject]) -> String {
+    for r in recents
+        .iter()
+        .filter(|r| r.location == contextual_core::location::Location::Local)
+    {
+        let mut dir = Some(std::path::Path::new(&r.path));
+        for _ in 0..4 {
+            let Some(d) = dir else { break };
+            let candidate = d.join(".env.local");
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+            dir = d.parent();
+        }
+    }
+    String::new()
 }

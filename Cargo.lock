@@ -960,6 +960,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+ "tracing",
  "tree-sitter",
  "tree-sitter-c-sharp",
  "win32job",

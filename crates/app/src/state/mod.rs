@@ -250,19 +250,38 @@ impl AppModel {
         let host = self.hosts.get(&root.location);
         let path = root.path.clone();
         let location = root.location.clone();
+        let location_for_key = root.location.clone();
         let options = self.settings.workspace.scan_options();
         self.scanning = true;
         self.error = None;
         self.folder_dialog_open = false;
         cx.notify();
         let project_host = host.clone();
+        let legacy = self.hosts.legacy_threads(&location);
         let job = runtime::spawn(cx, async move {
             host.allow_root(&path).await?;
-            host.scan(Scan {
-                root: path,
-                options,
-            })
-            .await
+            let scan = host
+                .scan(Scan {
+                    root: path,
+                    options,
+                })
+                .await?;
+            // Bring this project's chats over from the old app, once (best effort).
+            let key = ProjectRoot {
+                location: location_for_key,
+                path: scan.root.clone(),
+            }
+            .key();
+            if let (Some(legacy), Ok(store)) = (
+                legacy,
+                contextual_core::threads::ThreadStore::open_default(),
+            ) && let Some((dir, root)) = legacy.resolve(&scan.root).await
+                && let Ok(n) = store.import_legacy(&dir, &root, &key).await
+                && n > 0
+            {
+                tracing::info!("imported {n} saved chat files from the old app");
+            }
+            Ok(scan)
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;

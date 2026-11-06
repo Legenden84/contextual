@@ -1,5 +1,5 @@
-//! Replays the Phase 0 logic fixtures (recorded from `src/web/lib` by
-//! `tests/fixtures/logic/generate.mjs`) against `contextual_core::logic`.
+//! Replays the Phase 0 logic fixtures (recorded from the old TypeScript `src/web/lib`; see
+//! `tests/fixtures/README.md`) against `contextual_core::logic`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;

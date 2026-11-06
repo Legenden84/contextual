@@ -151,3 +151,44 @@ async fn rejects_bad_ids_and_tolerates_a_broken_index() {
     let list = store.list(ROOT).await.unwrap();
     assert_eq!(list[0].title.chars().count(), 200);
 }
+
+#[tokio::test]
+async fn imports_legacy_chats_once() {
+    let legacy = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let old_store = ThreadStore::new(legacy.path());
+    let thread = serde_json::json!({ "version": 1, "id": "t1", "messages": [] });
+    old_store
+        .save("/home/me/proj", "t1", Some("Old chat"), 2, &thread)
+        .await
+        .unwrap();
+
+    let store = ThreadStore::new(new.path());
+    let key = "wsl://Ubuntu/home/me/proj";
+    assert_eq!(
+        store
+            .import_legacy(legacy.path(), "/home/me/proj", key)
+            .await
+            .unwrap(),
+        2
+    );
+    let list = store.list(key).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "Old chat");
+    assert_eq!(store.load(key, "t1").await.unwrap()["id"], "t1");
+    // Already there: not imported again; unknown projects: nothing.
+    assert_eq!(
+        store
+            .import_legacy(legacy.path(), "/home/me/proj", key)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        store
+            .import_legacy(legacy.path(), "/elsewhere", "/elsewhere")
+            .await
+            .unwrap(),
+        0
+    );
+}

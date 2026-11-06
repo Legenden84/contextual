@@ -1,6 +1,6 @@
 //! Contextual, the native desktop app (Windows, macOS; developed on Linux).
 //!
-//! `contextual [PATH]` opens PATH (or the last project; `--no-restore` starts on Welcome).
+//! `contextual [PATH]` (or a `contextual://open?path=…` link) opens PATH (or the last project; `--no-restore` starts on Welcome).
 //! `--settings` starts on Settings. `contextual --spike` shows the Phase 1 prototypes instead.
 
 mod assets;
@@ -62,49 +62,65 @@ fn main() {
     runtime::init_local_offset();
     state::hosts::kill_children_with_app();
     let args = args();
-    gpui_kit::application()
-        .with_assets(assets::AppAssets)
-        .run(move |cx: &mut App| {
-            gpui_kit::init(cx);
-            assets::load_fonts(cx);
-            theme::register_languages();
-            runtime::init(cx);
-            keymap(cx);
+    // `contextual://open?path=…` links (when the OS has the scheme registered) arrive here.
+    let (url_tx, mut url_rx) = futures::channel::mpsc::unbounded::<String>();
+    let app = gpui_kit::application().with_assets(assets::AppAssets);
+    app.on_open_urls(move |urls| {
+        for u in urls {
+            let _ = url_tx.unbounded_send(u);
+        }
+    });
+    app.run(move |cx: &mut App| {
+        gpui_kit::init(cx);
+        assets::load_fonts(cx);
+        theme::register_languages();
+        runtime::init(cx);
+        keymap(cx);
 
-            let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Contextual".into()),
-                    ..Default::default()
-                }),
+        let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Contextual".into()),
                 ..Default::default()
-            };
-            if args.spike {
-                theme::apply(contextual_theme::Appearance::Dark, None, cx);
-                gpui_kit::open_window(options, cx, |window, cx| {
-                    cx.new(|cx| spike::Spike::new(window, cx))
-                })
-                .expect("failed to open the main window");
-            } else {
-                let model = cx.new(state::AppModel::new);
-                let path = args.path.clone();
-                gpui_kit::open_window(options, cx, |window, cx| {
-                    let pref = model.read(cx).settings.theme;
-                    theme::apply(theme::resolve(pref, window), Some(window), cx);
-                    let (no_restore, settings) = (args.no_restore, args.settings);
-                    model.update(cx, |m, cx| {
-                        m.startup(path, no_restore, cx);
-                        if settings {
-                            m.open_settings(cx);
-                        }
-                    });
-                    cx.new(|cx| shell::Shell::new(model.clone(), window, cx))
-                })
-                .expect("failed to open the main window");
-            }
-            cx.activate(true);
-        });
+            }),
+            ..Default::default()
+        };
+        if args.spike {
+            theme::apply(contextual_theme::Appearance::Dark, None, cx);
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| spike::Spike::new(window, cx))
+            })
+            .expect("failed to open the main window");
+        } else {
+            let model = cx.new(state::AppModel::new);
+            let links = model.clone();
+            cx.spawn(async move |cx| {
+                use futures::StreamExt as _;
+                while let Some(url) = url_rx.next().await {
+                    if let Some(path) = contextual_core::location::parse_open_url(&url) {
+                        links.update(cx, |m, cx| m.open_folder(path, None, cx));
+                    }
+                }
+            })
+            .detach();
+            let path = args.path.clone();
+            gpui_kit::open_window(options, cx, |window, cx| {
+                let pref = model.read(cx).settings.theme;
+                theme::apply(theme::resolve(pref, window), Some(window), cx);
+                let (no_restore, settings) = (args.no_restore, args.settings);
+                model.update(cx, |m, cx| {
+                    m.startup(path, no_restore, cx);
+                    if settings {
+                        m.open_settings(cx);
+                    }
+                });
+                cx.new(|cx| shell::Shell::new(model.clone(), window, cx))
+            })
+            .expect("failed to open the main window");
+        }
+        cx.activate(true);
+    });
 }
 
 fn keymap(cx: &mut App) {

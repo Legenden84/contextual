@@ -1,32 +1,56 @@
-# React + TypeScript + Vite
+# Contextual
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A local desktop tool for working on code with a self-hosted model (Azure AI Foundry): tick the
+files the model should see, ask for a change, review the proposed diff file by file, and save what
+you want. The model never writes to disk; saving is an explicit action, checked against what the
+model saw, atomic and undoable. Source Control and pull requests (`git`, `gh`) are built in.
 
-Currently, two official plugins are available:
+Native Rust app (GPUI) for **Windows and macOS**. On Windows it also opens projects that live
+inside WSL, served by a small agent it deploys into the distro.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Build and run
 
-## React Compiler
+Development happens on Linux (WSL is fine); the app runs there too, through WSLg.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```sh
+# one-time, for the GUI on Linux and the Windows cross-build
+sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev \
+  libfreetype-dev libvulkan-dev libasound2-dev clang mingw-w64
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+cargo run -p contextual                 # opens the last project
+cargo run -p contextual -- ~/src/app    # opens a folder
+cargo test --workspace
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+- Windows `.exe` from Linux (debug, for checks): `cargo build -p contextual --target x86_64-pc-windows-gnu`.
+- Release builds for Windows and macOS come from CI (`.github/workflows/rust.yml`); the Windows
+  artifact ships the static Linux agents (`contextual-agent-<arch>-linux`) next to `contextual.exe`.
+
+## Configuration
+
+Settings → Azure AI Foundry: endpoint, deployment, API version, model name, context limit and
+prices. The API key is stored in the OS keychain (Credential Manager, Keychain, Secret Service),
+never in `settings.json`. "Import .env.local" reads the old app's file.
+
+These environment variables override the settings (handy for development):
+`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT`,
+`AZURE_OPENAI_MODEL_NAME`, `AZURE_OPENAI_MAX_COMPLETION_TOKENS`, `AZURE_OPENAI_CONTEXT_LIMIT`,
+`AZURE_OPENAI_INPUT_PRICE_PER_1M`, `AZURE_OPENAI_OUTPUT_PRICE_PER_1M`. The endpoint must be HTTPS,
+or `http://localhost` for a local mock.
+
+Data lives in the OS config/data dirs: `settings.json`, `state.json` (recent projects),
+`threads/` (saved chats); undo snapshots in the cache dir of the machine the project is on.
+Chats saved by the old app are copied in the first time their project is opened.
+
+## Layout
+
+| Crate | What |
+| --- | --- |
+| `crates/core` | Everything but the UI: workspace (scan, read, save/undo, git, PRs), Foundry client, chat turns, threads, settings, WSL deployment. See its README. |
+| `crates/protocol` | Wire types shared by the app, the core and the agent (JSON-RPC). |
+| `crates/theme` | The design tokens, generated at build time from `docs/design/contextual/tokens.json`. |
+| `crates/agent` | `contextual-agent`: serves the workspace host over stdio JSON-RPC (inside WSL). |
+| `crates/app` | `contextual`: the GPUI app. |
+
+Design spec: `docs/design/contextual/`. Architecture and history:
+`docs/plans/cross-platform-rust-port.md`.

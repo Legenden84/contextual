@@ -1,5 +1,5 @@
 //! Phase 0 parity: replays what the TypeScript server's `src/server/fs/*.ts` returned for the
-//! fixture projects (recorded by `tests/fixtures/record-fs.mjs` into `tests/fixtures/fs/*.json`)
+//! fixture projects (recorded into `tests/fixtures/fs/*.json`; see `tests/fixtures/README.md`)
 //! against the Rust port, comparing whole JSON values field by field.
 //!
 //! Allowances (applied identically to the recording and to the Rust output):
@@ -51,7 +51,7 @@ fn copy_dir(src: &Path, dst: &Path) {
     }
 }
 
-/// Mirrors `materialize` in record-fs.mjs.
+/// Mirrors `materialize` in the recorder (`record-fs.mjs`, see `fixtures/README.md`).
 fn materialize(tmp: &Path) {
     use std::os::unix::fs::symlink;
     copy_dir(&fixtures().join("projects/basic"), &tmp.join("basic"));
@@ -111,7 +111,7 @@ impl Tmp {
         s.replace("<TMP>", &self.s)
     }
 
-    /// Mirrors `normalize` in record-fs.mjs.
+    /// Mirrors `normalize` in the recorder.
     fn normalize(&self, v: Value) -> Value {
         match v {
             Value::String(s) => Value::String(s.replace(&self.s, "<TMP>")),
@@ -219,7 +219,7 @@ fn b64(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-/// Mirrors `state()` in record-fs.mjs.
+/// Mirrors `state()` in the recorder.
 fn state(root: &Path, tracked: &[String], tracked_dirs: &[String]) -> Value {
     let files: Map<String, Value> = tracked
         .iter()
@@ -237,7 +237,7 @@ fn state(root: &Path, tracked: &[String], tracked_dirs: &[String]) -> Value {
     json!({ "files": files, "dirs": dirs })
 }
 
-/// Mirrors `snapshots()` in record-fs.mjs.
+/// Mirrors `snapshots()` in the recorder.
 fn snapshots(undo_base: &Path, root: &Path) -> Value {
     fn walk(dir: &Path, rel: &str, out: &mut Map<String, Value>) {
         let Ok(rd) = fs::read_dir(dir) else { return };

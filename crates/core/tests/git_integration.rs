@@ -1,8 +1,8 @@
 //! Git / PR integration tests on temporary repositories with real `git`; `gh` is faked through
 //! the `CommandRunner` (the fake answers like `fixtures/git/gh`).
 //!
-//! `parity_with_node_server` replays the sequence of `fixtures/git/record.ts` (recorded from the
-//! old TypeScript server into `fixtures/git/expected.json`) and compares the JSON, ignoring
+//! `parity_with_node_server` replays the sequence the old TypeScript server was recorded with
+//! (`fixtures/git/expected.json`; see `fixtures/README.md`) and compares the JSON, ignoring
 //! hashes, relative dates and the temp dir.
 #![cfg(unix)]
 
