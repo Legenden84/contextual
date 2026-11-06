@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::workspace::paths;
+
 /// Where a project lives. `Wsl` is only produced by Windows builds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -39,48 +41,12 @@ fn clean(input: &str) -> &str {
     p.strip_suffix(['"', '\'']).unwrap_or(p)
 }
 
-/// `\\wsl$\Ubuntu\home\me` / `\\wsl.localhost\Ubuntu\home\me` (either slash) → ("Ubuntu", "/home/me").
+/// `\\wsl$\Ubuntu\home\me` / `\\wsl.localhost\Ubuntu\home\me`, also with forward slashes
+/// → ("Ubuntu", "/home/me"). Trailing separators are dropped.
 pub fn parse_wsl_unc(p: &str) -> Option<(String, String)> {
-    let norm = p.replace('/', "\\");
-    let rest = norm.strip_prefix("\\\\")?;
-    let (host, rest) = rest.split_once('\\').unwrap_or((rest, ""));
-    if !host.eq_ignore_ascii_case("wsl$") && !host.eq_ignore_ascii_case("wsl.localhost") {
-        return None;
-    }
-    let (distro, tail) = rest.split_once('\\').unwrap_or((rest, ""));
-    if distro.is_empty() {
-        return None;
-    }
-    let tail: Vec<&str> = tail.split('\\').filter(|s| !s.is_empty()).collect();
-    Some((distro.to_string(), format!("/{}", tail.join("/"))))
-}
-
-/// `/mnt/c/src/x` → `C:\src\x`.
-pub fn mnt_to_windows(p: &str) -> Option<String> {
-    let rest = p.strip_prefix("/mnt/")?;
-    let (drive, tail) = rest.split_once('/').unwrap_or((rest, ""));
-    let mut chars = drive.chars();
-    let letter = chars.next().filter(|c| c.is_ascii_alphabetic())?;
-    if chars.next().is_some() {
-        return None;
-    }
-    let tail = tail.trim_end_matches('/').replace('/', "\\");
-    Some(format!("{}:\\{tail}", letter.to_ascii_uppercase()))
-}
-
-/// `C:\src\x` or `c:/src/x` → `/mnt/c/src/x` (for the WSL side).
-pub fn windows_to_mnt(p: &str) -> Option<String> {
-    let mut chars = p.chars();
-    let letter = chars.next().filter(|c| c.is_ascii_alphabetic())?;
-    if chars.next() != Some(':') {
-        return None;
-    }
-    let tail = &p[2..];
-    if !(tail.is_empty() || tail.starts_with(['\\', '/'])) {
-        return None;
-    }
-    let tail: Vec<&str> = tail.split(['\\', '/']).filter(|s| !s.is_empty()).collect();
-    Some(format!("/mnt/{}/{}", letter.to_ascii_lowercase(), tail.join("/")))
+    let (distro, path) = paths::parse_wsl_unc(&p.replace('/', "\\"))?;
+    let trimmed = path.trim_end_matches('/');
+    Some((distro, if trimmed.is_empty() { "/".into() } else { trimmed.to_string() }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,13 +61,13 @@ pub enum Detected {
 pub fn detect_windows(input: &str, default_distro: Option<&str>) -> Detected {
     let p = clean(input);
     if let Some((distro, path)) = parse_wsl_unc(p) {
-        if let Some(win) = mnt_to_windows(&path) {
+        if let Some(win) = paths::mnt_to_drive(&path) {
             return Detected::Root(ProjectRoot { location: Location::Local, path: win });
         }
         return Detected::Root(ProjectRoot { location: Location::Wsl { distro }, path });
     }
     if p.starts_with('/') {
-        if let Some(win) = mnt_to_windows(p) {
+        if let Some(win) = paths::mnt_to_drive(p) {
             return Detected::Root(ProjectRoot { location: Location::Local, path: win });
         }
         return match default_distro {
@@ -139,17 +105,6 @@ mod tests {
         assert_eq!(parse_wsl_unc("//wsl$/Ubuntu/home/"), Some(("Ubuntu".into(), "/home".into())));
         assert_eq!(parse_wsl_unc(r"\\server\share\x"), None);
         assert_eq!(parse_wsl_unc(r"\\wsl$\"), None);
-    }
-
-    #[test]
-    fn drive_paths() {
-        assert_eq!(mnt_to_windows("/mnt/c/src/x"), Some(r"C:\src\x".into()));
-        assert_eq!(mnt_to_windows("/mnt/d"), Some(r"D:\".into()));
-        assert_eq!(mnt_to_windows("/mnt/wsl/x"), None);
-        assert_eq!(windows_to_mnt(r"C:\src\x"), Some("/mnt/c/src/x".into()));
-        assert_eq!(windows_to_mnt("c:/"), Some("/mnt/c/".into()));
-        assert_eq!(windows_to_mnt("C:"), Some("/mnt/c/".into()));
-        assert_eq!(windows_to_mnt("Cx"), None);
     }
 
     #[test]
