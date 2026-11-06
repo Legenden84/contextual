@@ -1,11 +1,12 @@
-# Cross-platform Rust port
+# Native Rust port (GPUI)
 
 | | |
 | --- | --- |
 | **Status** | Proposed — not started |
 | **Owner** | Tobias Legenden |
 | **Date** | 2026-11-06 |
-| **Scope** | Replace the Node "backend" (`src/server/`, mounted inside Vite) with a Rust core in a Tauri v2 desktop app for **Windows and macOS**. The Windows app can also open projects that live inside WSL. The React UI (`src/web/`) stays. |
+| **Scope** | Replace the whole app — React UI (`src/web/`) and the Node "backend" mounted inside Vite (`src/server/`) — with a native Rust desktop app built on **GPUI**, for **Windows and macOS**. The Windows app can also open projects that live inside WSL. |
+| **Supersedes** | The earlier Tauri + React plan (kept as the fallback in Appendix A). |
 
 ## 1. Summary
 
@@ -14,94 +15,112 @@ Contextual today only runs as long as `vite` runs: the `/api` routes are a Vite 
 its own repo, and is guarded against other websites by a same-origin check instead of by
 construction.
 
-We will:
+We will build a **native Rust application** with no webview, no JavaScript and no HTTP server:
 
-1. Move all server logic into a **Rust library (`contextual-core`)** with no UI or transport
-   dependencies.
-2. Ship it in a **Tauri v2 app** that hosts the existing React UI in the OS webview and exposes
-   the core through typed Tauri commands — no HTTP server, no open port, no Node at runtime.
-3. Put every project-file operation behind a **`WorkspaceHost`** interface with two
+1. **`contextual-core`** — a headless Rust library holding all logic: today's server
+   (files, scan, apply/undo, git, PRs, threads, Foundry) **and** today's pure UI logic in
+   `src/web/lib/` (diff, markdown/response parsing, edit blocks, prompt building, selection and
+   token sums).
+2. **`contextual` app** — a GPUI application (with `gpui-component` for standard widgets) that
+   renders the Contextual design system natively on Windows (DirectX) and macOS (Metal).
+3. **`WorkspaceHost`** — every project-file operation goes through one interface with two
    implementations: *Local* (in-process) and *Remote* (JSON-RPC over stdio to a small
-   `contextual-agent` process). On Windows, the Remote host runs the agent inside WSL, the
-   same model VS Code's Remote-WSL uses.
+   `contextual-agent`). On Windows, the Remote host runs the agent inside WSL, the same model VS
+   Code's Remote-WSL uses.
 
-**Targets:** the desktop app is built for **Windows and macOS only**. Linux code exists only as
-the headless `contextual-agent`, which the Windows app deploys into a WSL distro. There is no
-Linux desktop build.
+**Targets:** desktop app for **Windows and macOS only**. Linux code exists only as the headless
+`contextual-agent`, deployed by the Windows app into a WSL distro.
 
-The port is incremental (strangler pattern): during `tauri dev` the UI is served by Vite, so
-routes that are not yet ported keep working through the old middleware until each slice reaches
-parity. The Node version stays usable until the Windows app can open WSL projects, so today's
-WSL workflow never regresses.
+**Migration style:** a UI rewrite can't be swapped in route by route, so the new app is built
+**alongside** the current one. The current Node/React app stays usable (inside WSL, as today)
+until the native app reaches feature parity, including WSL projects. Then it is removed.
+
+**First milestone is a go/no-go spike** (Phase 1). GPUI is pre-1.0; if it fails the gate
+criteria, we fall back to Appendix A without having lost work, because `contextual-core` is UI
+independent.
 
 ## 2. Context
 
-- **UI:** React 19 + TypeScript + Vite 8 + Tailwind v4, ~8,300 lines. All backend calls go through
-  `src/web/lib/api.ts` (312 lines): `fetch('/api/…')` with JSON bodies; chat is NDJSON streamed
-  over the response body and cancelled with an `AbortSignal`.
-- **Server:** ~2,300 lines across 12 files (`src/server/README.md` is the route reference):
+- **UI:** React 19 + TypeScript + Vite 8 + Tailwind v4, ~8,300 lines:
+
+  | Area | Lines | Notes |
+  | --- | --- | --- |
+  | `lib/` | 1,645 | Pure logic: syntax tokenizer, LCS diff + word ranges, response parser, `changes`, `edits`, `prompt`, `images`, `tree`. Moves to `contextual-core`. |
+  | `state/` | 1,395 | `AppProvider`: all UI state. Becomes app models. |
+  | `components/` | ~4,450 | `ui/` primitives (662), chat (1,026), scm (512), pr (469), explorer, code, diff, changes, apply, project, shell. Rewritten as GPUI views. |
+  | `screens/` | 659 | Welcome, Workspace, Diff, Settings. |
+  | `styles/tokens.css` | 231 | Mirror of `tokens.json`. Replaced by a generated Rust theme. |
+
+- **Server:** ~2,300 lines across 12 files (`src/server/README.md` is the behaviour reference):
   config + health, Foundry chat (Responses API with `previous_response_id`, fallback to chat
   completions, chain reset), edit repair, folder browsing, project scan (exclusions,
   `.gitignore`, token estimates, skill discovery, HTML/SVG condensing), file read, apply/undo
   with line-ending/BOM preservation and optimistic checks, saved threads, git (status, stage,
   diff, commit, push, branches) and PRs via `gh`.
-- **Platform assumptions baked in today:** the server assumes it runs inside WSL/Linux/macOS —
-  `fs/paths.ts` translates `C:\…` → `/mnt/c/…` and `\\wsl$\…` → `/…`; `fs/browse.ts` lists
-  `/mnt/<x>` as drives; `threads.ts` and `fs/files.ts` use `$XDG_CACHE_HOME` / `~/.cache`.
-- **Client state:** settings and recents in `localStorage`, the open folder in
-  `sessionStorage`, `#open=<path>` deep link. Secrets in `.env.local`, read by the Vite plugin.
-- **Tests:** none today. This is the biggest risk for a rewrite; see §10.
+- **Design system:** `docs/design/contextual/` — `README.md`, `tokens.json` (dark + light
+  themes; Inter for UI, JetBrains Mono for code, loaded from Google Fonts today), and one spec
+  per component/screen (ApplyDialog, ChangesPanel, ChatMessage, CodeBlock, CodeView, Composer,
+  ContextBar, Controls, DiffFile, FileTree, RulesPanel, Toast, Screen*). These stay the UI spec.
+- **Platform assumptions baked in today:** the server assumes it runs inside WSL/Linux/macOS
+  (`fs/paths.ts` translates `C:\…` → `/mnt/c/…`; `fs/browse.ts` lists `/mnt/<x>`; caches under
+  `~/.cache`).
+- **Client state:** settings and recents in `localStorage`, open folder in `sessionStorage`,
+  `#open=<path>` deep link; secrets in `.env.local`.
+- **Tests:** none today. This is the biggest risk for a rewrite; see §11.
 
 ## 3. Goals
 
-- G1. Run as a native desktop app on **Windows 10/11 and macOS (Apple Silicon + Intel)**.
+- G1. Native desktop app on **Windows 10/11 and macOS (Apple Silicon + Intel)**, written in
+  Rust, with no webview, no JavaScript runtime and no network listener.
 - G2. Open projects that live **inside WSL from the Windows app**, with native-speed file and git
   access and the user's WSL git config and `gh` login. Local Windows projects (`C:\…`) are
-  handled natively by the Windows app, not through WSL.
-- G3. **No standalone backend service**: no listening port, nothing left running after the app
-  closes. Helper processes are started on demand and owned by the app.
-- G4. **Behavioural parity** with the current server for every route in `src/server/README.md`.
-- G5. Keep the React UI and design system; UI changes are limited to the transport layer and the
-  few platform-dependent screens (folder picker, settings for credentials, location badge).
+  handled natively, not through WSL.
+- G3. **No standalone backend service**: helper processes (the WSL agent, git, gh) are started on
+  demand and owned by the app; nothing keeps running after it closes.
+- G4. **Feature parity** with the current app: every route in `src/server/README.md` and every
+  screen in `docs/design/contextual/components/`.
+- G5. **Design-system fidelity**: `tokens.json` stays the only source of colours, spacing, radii,
+  shadows and type styles; both themes; the component specs are followed.
 - G6. Keep the safety model: the model never writes to disk; saving is explicit, checked against
   what the model saw, atomic and undoable.
+- G7. Feel native and fast: large trees, files and diffs stay smooth (virtualised rendering).
 
 ## 4. Non-goals
 
 - A Linux desktop build, including running the app inside WSL through WSLg.
-- Rewriting the UI in a Rust UI framework (Leptos, Dioxus, egui).
-- Remote hosts other than WSL (SSH, dev containers). The design must *allow* them; we don't build
-  them now.
-- Auto-update, code signing / notarization and installers for distribution. This is a
-  local-only tool; unsigned local builds are acceptable. Revisit if it is shared.
-- Replacing the `git` / `gh` CLIs with `git2` or `gix`. Shelling out keeps behaviour identical
-  to what users see in their terminal and reuses their credentials.
-- A browser-only mode. Once the port is complete, the app runs only inside Tauri.
+- Keeping React/TypeScript in any form (no Tauri, no Dioxus/Leptos webview).
+- Remote hosts other than WSL (SSH, dev containers). The design must *allow* them.
+- Auto-update, code signing / notarization and installers for distribution. Unsigned local builds
+  are fine for a local-only tool. Revisit if it is shared.
+- Replacing the `git` / `gh` CLIs with `git2` or `gix`. Shelling out keeps behaviour identical to
+  the terminal and reuses the user's credentials.
+- An in-app code *editor*. Code views stay read-only, as today.
 
 ## 5. Decision and alternatives
 
-**Decision:** Tauri v2 + React UI + Rust core, with a stdio agent for WSL.
+**Decision:** native GPUI app + `gpui-component`, a UI-independent Rust core, and a stdio agent
+for WSL.
 
 | Option | Verdict | Why |
 | --- | --- | --- |
-| **Tauri v2, keep React** | ✅ Chosen | Small rewrite (server only), native webviews on Windows and macOS, typed IPC, capability-based permissions, small binaries. |
-| Rust UI framework (Leptos/Dioxus/egui) | ❌ | Rewrites ~8,300 lines of UI for no user-facing gain; egui also discards the design system. |
-| Single Rust binary (axum) serving the built UI + opening a browser | ❌ | Smallest change, but it is still a local HTTP server: open port, same-origin defences, lifecycle tied to a browser tab. Exactly what we are moving away from. |
-| Electron | ❌ | Same UI story as Tauri but bundles Chromium + Node; keeps a JS backend, which is the thing we want to drop. |
-| Windows app accessing WSL files via `\\wsl.localhost\…` | ❌ | 9P file access is slow; Windows git on a Linux repo produces filemode/line-ending noise and ignores WSL git config and `gh` auth. |
-| Linux build inside WSL shown through WSLg | ❌ | Out of scope (Windows and macOS only). The window also feels foreign (HiDPI, clipboard, fonts, drag-and-drop) and `/mnt/c` is slow. |
+| **GPUI + gpui-component** | ✅ Chosen | Built for exactly this kind of app: Zed (which GPUI was made for) renders code views, diffs, markdown, git panels and very large files with it, on Windows and macOS. GPU-rendered, fast text, virtualised lists. `gpui-component` provides tree, virtual list, inputs, select, dialog, popover, markdown and tree-sitter highlighting. Pre-1.0: API churn and thin docs. |
+| Iced | ⚠️ Backup native option | More stable API, text editor and markdown widgets; code views and diffs need more custom work, and matching the design system is harder. |
+| Slint | ❌ | Good for forms; weak at rich text, code views and diffs. |
+| egui | ❌ | Fastest to start, but immediate-mode styling makes the design system hard to match. |
+| Dioxus desktop / Leptos in Tauri | ❌ | All Rust, keeps CSS, but still a webview — not the native app wanted. |
+| Tauri v2 + React | ⚠️ Fallback (Appendix A) | Least work; Rust backend only. Used if GPUI fails the Phase 1 gate. |
 
 ## 6. Architecture
 
 ```mermaid
 flowchart LR
-  subgraph App["Tauri app (Windows / macOS)"]
-    UI["React UI<br/>src/web"] -- "typed commands<br/>+ Channels" --> Cmd["Tauri commands<br/>src-tauri"]
-    Cmd --> Hosts["HostRegistry"]
-    Cmd --> LLM["core::llm<br/>(Foundry client)"]
-    Cmd --> Store["core::threads / settings<br/>(app data dir, keychain)"]
+  subgraph App["contextual (GPUI) — Windows / macOS"]
+    Views["Views<br/>screens + components"] --> Models["App models<br/>(GPUI entities)"]
+    Models --> Core["contextual-core<br/>llm · threads · settings · logic"]
+    Models --> Hosts["HostRegistry"]
     Hosts --> Local["LocalHost<br/>core::workspace in-process"]
     Hosts --> Remote["RemoteHost<br/>JSON-RPC client"]
+    Theme["contextual-theme<br/>(generated from tokens.json)"] --> Views
   end
   Remote -- "stdio<br/>wsl.exe -d &lt;distro&gt; -- contextual-agent" --> Agent
   subgraph WSL["WSL distro (Windows only)"]
@@ -112,41 +131,51 @@ flowchart LR
 ### 6.1 Repository layout
 
 ```
-Cargo.toml                 # workspace
+Cargo.toml                 # workspace; default-members excludes crates/app on Linux
 crates/
-  core/                    # contextual-core: no Tauri, no transport
+  core/                    # contextual-core: no GPUI, no transport
     src/workspace/         # paths, browse, scan, condense, read, apply, undo, git, pr
     src/llm/               # config, Foundry (Responses + chat completions), repair, drafts
+    src/logic/             # ported from src/web/lib: diff, response parser, changes, edits,
+                           #   prompt (incl. FILE_FORMAT), tree sums, image scaling + token estimate
     src/threads.rs
+    src/settings.rs
     src/process.rs         # CommandRunner (PATH, no console window, timeouts)
     src/platform.rs        # dirs, hidden-file rules, drive/volume listing
-  protocol/                # serde types shared by app, agent and (generated) TypeScript
-  agent/                   # contextual-agent binary (Linux only): stdio JSON-RPC loop around core::workspace
-src-tauri/                 # the Tauri app (Windows, macOS): commands, HostRegistry, capabilities, bundling
-src/web/                   # React UI (unchanged apart from lib/api.ts and a few screens)
-src/server/                # deleted in Phase 5
+  protocol/                # serde types for app <-> agent
+  agent/                   # contextual-agent (Linux only): stdio JSON-RPC loop around core::workspace
+  theme/                   # contextual-theme: build.rs turns docs/design/contextual/tokens.json
+                           #   into typed Rust (colours, spacing, radii, shadows, type styles)
+  app/                     # contextual: the GPUI app (Windows, macOS)
+    src/models/            # AppState, Project, Thread, Changes, Scm, Settings
+    src/views/             # one module per design spec: file_tree, code_view, diff_file,
+                           #   chat_message, composer, changes_panel, apply_dialog, …
+    src/screens/           # welcome, workspace, diff, settings
+    src/ui/                # primitives: button, checkbox, switch, segmented, tag, icon, kbd, …
+    assets/                # bundled fonts (Inter, JetBrains Mono — OFL), icons (SVG)
+docs/design/contextual/    # unchanged: the UI spec
+src/, package.json, …      # the current app; deleted at cutover (Phase 7)
 ```
 
 ### 6.2 Where each concern runs
 
-The split follows one rule: **anything that touches project files or project tools runs on the
-host where the project lives; anything that does not stays in the app.**
+**Anything that touches project files or project tools runs on the host where the project
+lives; anything else stays in the app.**
 
 | Concern | Runs in | Notes |
 | --- | --- | --- |
 | Browse, scan, read, condense | Workspace host | |
-| Apply, undo, undo snapshots | Workspace host | Snapshots live next to the files' OS (`<cache>/contextual/undo/…` on that host). |
-| git, branches, PR (`gh`) | Workspace host | Uses that host's git config and `gh` auth. |
+| Apply, undo, undo snapshots | Workspace host | Snapshots in that host's cache dir. |
+| git, branches, PR (`gh`) | Workspace host | That host's git config and `gh` auth. |
 | Foundry calls (chat, test, repair) | App | Needs network + key, not files. |
-| Commit message / PR drafts | App, orchestrating | App asks the host for the diff/commits, then calls the model. |
-| Threads (saved chats) | App | Keyed by `(location, root)`. |
-| Settings, API key | App | Settings file in the config dir; key in the OS keychain. |
+| Commit message / PR drafts | App, orchestrating | Asks the host for diff/commits, then calls the model. |
+| Response parsing, diffs, prompt building | App (`core::logic`) | Pure functions. |
+| Threads, settings, API key | App | Settings file in config dir; key in OS keychain. |
 
 ### 6.3 Core interfaces (sketch)
 
 ```rust
-/// Where a project lives. Serialised into every workspace request and into thread keys.
-/// `Wsl` only exists in Windows builds; macOS only ever uses `Local`.
+/// Where a project lives. `Wsl` exists only in Windows builds.
 pub enum Location { Local, Wsl { distro: String } }
 
 #[async_trait]
@@ -161,26 +190,58 @@ pub trait WorkspaceHost: Send + Sync {
 }
 ```
 
-- `LocalHost` calls `core::workspace` directly. `RemoteHost` serialises the same request types
-  over JSON-RPC. Both are tested against the same suite (§10).
-- Request/response types live in `crates/protocol` and are the single source of truth: TypeScript
-  bindings are generated from them with `specta` / `tauri-specta`, replacing the hand-written
-  interfaces in `lib/api.ts`. A CI check fails if the generated file is stale.
-- Errors are a typed enum (`thiserror`) with a stable `code` + human message, mapped to the
-  UI's current error display. Path errors keep the current 400-style semantics.
+- `LocalHost` calls `core::workspace` directly; `RemoteHost` serialises the same `protocol`
+  types over JSON-RPC. Both pass the same test suite (§11).
+- Errors: a typed enum (`thiserror`) with a stable code + human message, shown in the UI the
+  way the design spec describes (Banner / Toast).
 
-### 6.4 UI ↔ app transport
+### 6.4 App structure (GPUI)
 
-- Every route becomes a Tauri command, e.g. `project_scan`, `git_status`.
-- **Streaming chat:** `chat_start(request, channel: Channel<ChatEvent>) -> RequestId`. The
-  existing `ChatEvent` union (`delta`, `usage`, `done`, `error`) is sent over the channel
-  unchanged, so `AppProvider` logic doesn't change.
-- **Cancellation:** `chat_cancel(RequestId)` triggers a `CancellationToken`; `lib/api.ts` wires
-  the existing `AbortSignal` to it. Dropping the stream must also abort the HTTP request.
-- `lib/api.ts` keeps its exported function signatures; only their bodies change. During the
-  migration it holds a small `Transport` switch (§9, Phase 0).
+- **Models are GPUI entities.** `AppState` (open project, location, screen, settings) owns
+  `Project` (tree, selection, token sums), `Thread` (messages, streaming state, `fileVersions`,
+  `previous_response_id`), `Changes` (proposed files, accept/reject, save/undo), `Scm`. Views
+  observe models and re-render on `cx.notify()`. This replaces `AppProvider` + `useApp()`.
+- **Business rules stay in `core`.** Models call core functions and hold results; they don't
+  reimplement logic. This keeps the app thin and testable without a window.
+- **Async runtime.** `reqwest` needs a tokio reactor, GPUI has its own executor. The app owns
+  one tokio runtime on background threads; core futures are spawned there and their
+  `JoinHandle`s awaited from `cx.spawn`. Streaming chat sends `ChatEvent`s over a channel that a
+  GPUI task drains into the `Thread` model.
+- **Cancellation:** every long operation gets a `CancellationToken`; closing a thread or pressing
+  Stop cancels it, and dropping the stream aborts the HTTP request.
+- **Virtualisation everywhere it can grow:** file tree, code view, diff view and chat history use
+  `uniform_list`/virtual lists. The design spec's collapsed unchanged regions in diffs are list
+  rows, not hidden DOM.
+- **Text:** code views, diffs and code blocks use tree-sitter highlighting (via
+  `gpui-component`'s highlighter, or `tree-sitter-highlight` directly) mapped to the `syn-*`
+  tokens. Chat prose renders markdown natively, incrementally as deltas arrive.
+- **Input:** composer is a multi-line input with IME support; pasted and dropped images go
+  through `core::logic::images` (2048px scaling, vision token estimate). File drops use GPUI's
+  external-paths events.
+- **Keyboard:** all actions are GPUI `actions!` with keybindings in one keymap (per-OS: `cmd`
+  on macOS, `ctrl` on Windows), matching the shortcuts the current app has.
+- **Windows and dialogs:** native folder picker (`cx.prompt_for_paths`) for local projects; the
+  custom folder browser stays for WSL. Apply, PR and branch picker are in-window dialogs/popovers
+  as in the design specs.
 
-### 6.5 App ↔ agent protocol (WSL)
+### 6.5 Design system in Rust
+
+- `crates/theme/build.rs` reads `docs/design/contextual/tokens.json` and generates
+  `Theme { dark, light }` with typed fields (`color.surface_100`, `color.ink_muted`,
+  `color.diff_add_word`, `color.syn_keyword`, `space(2)`, `radius.md`, `shadow.popover`,
+  `type_style.ui_body`, …). Changing `tokens.json` changes the app on the next build; there is no
+  hand-written mirror any more.
+- Views only use theme fields. A clippy-style check (simple grep in CI) rejects literal
+  `rgb(…)`/`hsla(…)`/pixel values in `crates/app` outside `theme`.
+- `gpui-component`'s own theme is configured from the same generated values so its widgets match.
+- Spacing uses only the token steps (1, 2, 3, 4, 6, 8 × 4px); fixed layout widths from the
+  README (312px, 320px, 820px) become named constants.
+- **Fonts are bundled** (Inter, JetBrains Mono; both SIL OFL) instead of Google Fonts; code
+  ligatures off, tab width 4, as the README requires. Fallbacks: Segoe UI / Cascadia Code /
+  Consolas on Windows, system fonts on macOS.
+- Dark is the default theme; light is selectable; optionally follow the OS appearance.
+
+### 6.6 App ↔ agent protocol (WSL)
 
 - **JSON-RPC 2.0**, newline-delimited over the agent's stdin/stdout; stderr carries `tracing`
   logs, which the app forwards to its log.
@@ -203,208 +264,248 @@ pub trait WorkspaceHost: Send + Sync {
     `WSL_UTF8` unset. Detect it per call (UTF-16LE if the bytes contain NULs or start with
     `FF FE`, otherwise UTF-8) and cover both cases with tests.
   - Treat other `wsl.exe` output (errors, `--status`) the same way.
-- **Location detection (Windows app):** this replaces today's path translation in
-  `fs/paths.ts`, which assumed the server runs inside WSL.
+- **Location detection (Windows app):** replaces today's path translation in `fs/paths.ts`.
   - `C:\src\x` → `Location::Local` + `C:\src\x` (opened natively, not through WSL).
   - `\\wsl.localhost\Ubuntu\home\me\x` or `\\wsl$\Ubuntu\…` → `Location::Wsl { distro: "Ubuntu" }`
     + `/home/me/x`.
   - A POSIX path such as `/home/me/x` or `~/x` → the default WSL distro, when WSL is installed.
-  - `/mnt/c/src/x` → `Location::Local` + `C:\src\x`, since the files are on the Windows side
-    and native access is faster than going through the agent.
+  - `/mnt/c/src/x` → `Location::Local` + `C:\src\x`, since native access is faster.
 - **macOS** only accepts native paths (`/Users/…`, `~`); the Windows/WSL translations are
   compiled out.
 
 ## 7. Platform matrix
 
-The desktop app has two targets. The third column is the headless agent the Windows app runs
-inside WSL; it has no UI.
-
 | Concern | Windows app | macOS app | WSL agent (Linux, headless) |
 | --- | --- | --- | --- |
-| Webview | WebView2 (preinstalled on 10/11; bundle the bootstrapper) | WKWebView | None |
+| Rendering | GPUI DirectX renderer; check behaviour over RDP / without a GPU (WARP) | GPUI Metal renderer | None |
 | Paths | `PathBuf` + `dunce::canonicalize` (avoid `\\?\` prefixes); long paths | Case-insensitive APFS by default | Case-sensitive |
-| Containment check (`resolveInside[Real]`) | Compare canonicalised paths; case-insensitive | Compare canonicalised paths; case-insensitive | As today |
+| Containment check (`resolveInside[Real]`) | Canonicalised, case-insensitive | Canonicalised, case-insensitive | As today |
 | Hidden files | `FILE_ATTRIBUTE_HIDDEN` **or** leading `.` | Leading `.` (+ `UF_HIDDEN` optional) | Leading `.` |
-| Spawning git/gh | `CREATE_NO_WINDOW` (also for `wsl.exe`); resolve `git.exe`/`gh.exe` | **GUI apps don't inherit the shell `PATH`** — resolve once via `$SHELL -ilc 'printf %s "$PATH"'` and fall back to `/opt/homebrew/bin:/usr/local/bin` | Started via `wsl.exe`, so it gets a non-interactive environment — resolve `PATH` from the login shell the same way as macOS |
+| Spawning git/gh | `CREATE_NO_WINDOW` (also for `wsl.exe`); resolve `git.exe`/`gh.exe` | **GUI apps don't inherit the shell `PATH`** — resolve once via `$SHELL -ilc 'printf %s "$PATH"'`, fall back to `/opt/homebrew/bin:/usr/local/bin` | Started via `wsl.exe` (non-interactive env) — resolve `PATH` from the login shell like macOS |
 | Git env | `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` | `GIT_TERMINAL_PROMPT=0` | `GIT_TERMINAL_PROMPT=0` |
 | Writing files | Temp file + atomic replace, retry on sharing violations (editors/AV hold files) | Temp + rename | Temp + rename |
-| Folder picker | Native dialog (`tauri-plugin-dialog`) for local; custom browser for WSL | Native dialog | Serves the custom browser's listings for WSL folders |
-| "Places" in browser | Home, drives (`GetLogicalDrives`), one entry per WSL distro | Home, `/Volumes/*` | Home and `/` of that distro (`/mnt/<x>` is hidden: those are opened locally) |
+| Folder picker | Native dialog for local; custom browser for WSL | Native dialog | Serves the custom browser's listings |
+| "Places" in browser | Home, drives (`GetLogicalDrives`), one entry per WSL distro | Home, `/Volumes/*` | Home and `/` of that distro (`/mnt/<x>` hidden: opened locally) |
+| Shortcuts | `ctrl` | `cmd`; standard app menu (About, Settings…, Quit) | — |
 | Data dirs (`directories` crate) | `%APPDATA%`, `%LOCALAPPDATA%` | `~/Library/Application Support`, `~/Library/Caches` | XDG (agent binary, undo snapshots) |
 | API key | Credential Manager (`keyring`) | Keychain | Never sent to the agent |
-| Build | `windows-latest` runner; bundles the musl agent built on `ubuntu-latest` | `macos-latest` runner, universal binary, ad-hoc signed | `ubuntu-latest` runner, static musl, x86_64 (+ aarch64) |
+| Build | `windows-latest`; bundles the musl agent built on `ubuntu-latest` | `macos-latest`, universal binary, ad-hoc signed | `ubuntu-latest`, static musl, x86_64 (+ aarch64) |
 
 Line endings, BOM and final-newline preservation on save must behave identically on every
-target (it is byte-level logic, so this is a test requirement, not a platform branch).
+target (byte-level logic, so a test requirement, not a platform branch).
 
-Because the macOS app uses WKWebView (Safari's engine) and the Windows app uses WebView2
-(Chromium), the UI runs on two browser engines; both must be checked for CSS and JS
-differences.
+## 8. Development environment
 
-## 8. Data, configuration and security
+- **WSL (Ubuntu, already set up):** `crates/core`, `protocol`, `agent`, `theme` build and test
+  here. `crates/app` is excluded from the workspace's default members on Linux, so no GUI
+  libraries are needed in WSL. Add `rustup target add x86_64-unknown-linux-musl` and
+  `musl-tools` for the agent (Phase 6).
+- **Windows (to set up):** Visual Studio Build Tools ("Desktop development with C++"), rustup
+  (MSVC toolchain), Git for Windows and `gh`. Use a **separate clone on the Windows drive**
+  (e.g. `C:\dev\contextual`) — building over `\\wsl.localhost` is slow. Node is not needed for
+  the new app. The app is run and debugged here; it can also be driven from a WSL shell via
+  `powershell.exe`.
+- **macOS:** CI (`macos-latest`) builds and tests every change; manual testing on a friend's Mac
+  at the Phase 1 gate and before cutover.
+- **The current app** keeps running inside WSL with `npm run dev` throughout, for daily use and
+  for side-by-side comparison.
 
-### 8.1 Storage and migration
+## 9. Data, configuration and security
+
+### 9.1 Storage and migration
 
 | Data | Today | After | Migration |
 | --- | --- | --- | --- |
 | Foundry config | `.env.local` in the repo | `settings.json` in the config dir; edited in Settings | On first run, offer to import from a `.env.local` path. Env vars still override (useful for dev). |
 | API key | `.env.local` | OS keychain | Imported with the config; never written to `settings.json`. |
-| Threads | `~/.cache/contextual/threads/` (inside WSL today) | App **data** dir (chats aren't a cache) | On first run, the Windows app offers to import from `\\wsl.localhost\<distro>\home\<user>\.cache\contextual\threads`, re-keying WSL projects to `Location::Wsl` and `/mnt/<x>` projects to local Windows paths; the original is left in place. |
+| UI settings, recents | `localStorage` | `settings.json` / `state.json` in the config dir | Not readable from a native app; add an "Export settings" button to the current app before cutover, import once. |
+| Threads | `~/.cache/contextual/threads/` (inside WSL) | App **data** dir (chats aren't a cache) | The Windows app offers to import from `\\wsl.localhost\<distro>\home\<user>\.cache\contextual\threads`, re-keying WSL projects to `Location::Wsl` and `/mnt/<x>` projects to local Windows paths; the original is left in place. |
 | Undo snapshots | `~/.cache/contextual/undo/` | Cache dir on the workspace host | None needed (short-lived). |
-| UI settings, recents | `localStorage` | Tauri store plugin (file in config dir) | Webview origin changes, so old `localStorage` is not readable; one-time import is not possible automatically — document it. |
-| Open folder on reload | `sessionStorage` | Keep (reloads still happen in dev) | — |
-| `#open=<path>` | URL hash | CLI argument (`contextual <path>`) and `contextual://open?path=` deep link | Keep the hash for dev. |
+| Open folder on reload | `sessionStorage` | Last open project restored on start | — |
+| `#open=<path>` | URL hash | CLI argument (`contextual <path>`) and `contextual://open?path=` deep link | — |
 
-### 8.2 Security model
+### 9.2 Security model
 
-- **No network listener.** The same-origin and `Content-Type` checks in `api.ts` become
-  unnecessary and are removed; Tauri IPC is only reachable from the app's own webview.
-- **Capabilities:** allow only the app's own commands plus `dialog` and `store`. No `shell`,
-  `fs` or `http` plugin permissions for the webview — all file and process access goes through
-  core functions that validate inputs.
-- **CSP:** `default-src 'self'`; `img-src 'self' data: blob:` (pasted images); no remote
-  scripts. The webview never talks to Azure directly; the key never reaches JS.
+- **No network listener and no webview.** The same-origin/`Content-Type` checks disappear, and
+  there is no HTML/JS surface for model output to inject into: markdown is parsed and drawn
+  natively, never interpreted as HTML.
+- **Links in model output** open in the OS browser only after a click, and only for
+  `http(s)` URLs.
+- **The API key** lives in the OS keychain, is read only by `core::llm`, and is never logged or
+  sent to the agent.
 - **Path containment** stays in the core (`resolve_inside`, symlink-aware variant) and is
   enforced on the workspace host, so the agent is as safe as the local host.
-- **Root allowlist:** the app records roots the user opened (dialog, recents, CLI). Workspace
-  commands reject a `root` that isn't in that set. This closes the "UI passes any root" gap.
+- **Root allowlist:** workspace operations accept only roots the user opened (dialog, recents,
+  CLI).
 - **Process execution:** fixed argument vectors, never a shell; inherited env filtered.
 - **Endpoint validation** (HTTPS, or `http://localhost` for mocks) is ported as-is.
 
-## 9. Delivery plan
+## 10. Delivery plan
 
-Each phase ends with a working app. Phases 1–4 are vertical slices; the old Node routes keep
-serving anything not yet ported, because `tauri dev` loads the UI from the Vite dev server.
+Each phase has exit criteria. Phases 1 and 2 can run in parallel (UI spike on Windows, core in
+WSL). The current app stays in use until Phase 7.
 
-WSL support (Phase 4) comes **before** Node is removed (Phase 5). Today the app runs inside WSL,
-so removing Node first would leave the main current workflow unsupported until the agent
-existed.
+### Phase 0 — Capture current behaviour
 
-**Dev setup note:** `tauri dev` for the Windows app runs on Windows (Rust + Node on the Windows
-side, repo checked out on Windows or opened over `\\wsl.localhost`). Until Phase 4 is done, the
-Node routes then run on Windows too, so WSL projects are only usable through the old
-`npm run dev` inside WSL during the port.
+- **Server parity fixtures:** representative projects (CRLF/BOM files, `.gitignore`, skills,
+  large HTML/SVG, images, symlinks) and the JSON each route returns for them, recorded from the
+  current Node server.
+- **Logic fixtures:** inputs/outputs for `lib/` functions (diff hunks and word ranges, response
+  parsing, edit-block placement and failures, prompt assembly, token sums).
+- **UI reference:** screenshots of every screen and dialog in both themes, plus a feature
+  checklist per screen (states, shortcuts, empty/error states) derived from the current app and
+  the design specs. This is the parity checklist for Phases 3–5.
+- **Exit:** fixtures and checklist checked in.
 
-### Phase 0 — Prepare the TypeScript side
+### Phase 1 — GPUI spike and go/no-go gate
 
-- Add a `Transport` seam in `lib/api.ts`: per-route choice between `fetch('/api/…')` and
-  `invoke(…)`, defaulting to HTTP. No behaviour change.
-- Write the **parity fixtures** (§10.2) against the current Node server: representative
-  projects (CRLF/BOM files, `.gitignore`, skills, large HTML/SVG, images, symlinks) and the
-  JSON each route returns for them.
-- **Exit:** app unchanged; fixtures captured and checked in.
+- Workspace skeleton; `crates/theme` generated from `tokens.json`; bundled fonts.
+- Pin a **matched pair** of `gpui` and `gpui-component` (same source: crates.io release or a
+  pinned git revision, whichever `gpui-component` targets) with a committed `Cargo.lock`. The
+  crates.io `gpui` has lagged behind Zed's repository, so this choice is made here and recorded.
+- Prototype, in both themes, on Windows and macOS:
+  1. A file tree of 20,000 rows with checkboxes and token sums (virtualised).
+  2. A read-only code view of a 5,000-line file with tree-sitter highlighting in the `syn-*`
+     colours.
+  3. A side-by-side diff with word-level highlights and collapsed unchanged regions.
+  4. A composer: multi-line input, IME, image paste and file drop.
+  5. Streaming markdown of a ~50 KB reply with code blocks, appended live.
+  6. A dropdown, a modal dialog and a toast styled from the tokens.
+- CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` on all jobs; app build on
+  `windows-latest` and `macos-latest`; core tests on `ubuntu-latest`.
+- **Gate (all must pass):** smooth scrolling in 1–3; correct text rendering and IME on both OSes;
+  visuals match the design spec within reason; build works from a clean checkout on Windows and
+  macOS; no blocking bug in the pinned GPUI. **If it fails:** switch to Appendix A; Phases 0 and
+  2 carry over unchanged.
 
-### Phase 1 — Tauri shell and workspace skeleton
+### Phase 2 — Core (headless, in WSL)
 
-- Cargo workspace, `crates/{core,protocol,agent}`, `src-tauri`; `tauri dev` points at Vite.
-- `tauri-specta` binding generation wired into `npm run build` and CI.
-- CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `npm run lint`,
-  `npm run build` on all jobs; `tauri build` on `windows-latest` and `macos-latest`; `core` +
-  `agent` tests and the musl agent build on `ubuntu-latest`.
-- Check the UI in both engines (WebView2 and WKWebView) early.
-- **Exit:** the current UI runs inside a Tauri window on Windows and macOS, still using Node
-  routes.
+- Port `src/server/` to `core::workspace`, `core::llm`, `core::threads`, `core::settings`
+  (scan with `ignore` + `globset`, HTTP with `reqwest` (rustls) + an SSE parser, no OpenAI SDK).
+- Port `src/web/lib/` to `core::logic`.
+- `LocalHost` + root allowlist.
+- **Exit:** all Phase 0 server and logic fixtures pass; core tests green on Linux, Windows and
+  macOS CI.
 
-### Phase 2 — LLM slice
+### Phase 3 — App shell and read-only flows
 
-- `core::llm`: config validation, health, connection test, chat streaming over
-  Responses API (`store: true`, `previous_response_id`), chain-reset retry, fallback to chat
-  completions, usage incl. `cachedTokens`, cancellation; `edit/repair`.
-- Settings screen gains endpoint/deployment fields and a key field (keychain).
-- HTTP client: `reqwest` (rustls) + an SSE parser; no OpenAI SDK.
-- **Exit:** chat, test and repair go through Rust on Windows and macOS; parity tests pass against
-  a mock Foundry server.
+- Welcome (recents, open folder), Workspace layout (explorer, rules panel, context bar, status
+  bar), code preview, Settings (Foundry config + keychain, connection test, theme), app menu and
+  keymap, CLI argument.
+- **Exit:** open a local project on Windows and macOS, browse, select files and see token sums
+  and rules, configure and test the connection — matching the Phase 0 checklist for these
+  screens.
 
-### Phase 3 — Workspace slice (local host)
+### Phase 4 — Chat, changes and saving
 
-- `core::workspace`: paths, browse, scan (`ignore` + `globset`), condense, read, apply, undo;
-  threads in the app.
-- `LocalHost` + `HostRegistry` (only `Location::Local` for now) and the root allowlist.
-- Native folder picker for local projects; custom browser kept for typed paths.
-- Then git, branches and PR (`CommandRunner` with the per-OS rules in §7).
-- **Exit:** every route runs through Rust for local projects; parity suite green on Windows,
-  macOS and Linux CI (the core is also what the agent runs).
+- Composer (text, images), streaming replies (Responses API, chain reset, fallback), chat
+  messages with markdown and code blocks, context bar usage/cost, saved threads (Chats panel:
+  search, rename, delete, delete all).
+- Changes panel from `### FILE:` / `### EDIT:` / `### DELETE:` blocks, quiet re-request of
+  unplaceable edits (repair), Diff screens (unified + split), Apply ("Save") dialog, save with
+  pre-checks, Undo, toasts.
+- **Exit:** a full chat → review → save → undo cycle on a local project, matching the checklist.
 
-### Phase 4 — WSL remote host (Windows app)
+### Phase 5 — Source Control and pull requests
 
-- `contextual-agent` (JSON-RPC server around `core::workspace`), musl builds, bundled into the
-  Windows app only.
-- `RemoteHost`, agent deployment and lifecycle, distro discovery, location detection (§6.5).
+- Source Control tab (stage, unstage, diff, commit, smart commit, push, model-drafted commit
+  message), branch picker (switch, create with recorded parent), PR compare view (base/compare
+  dropdowns, commits, file diffs, drafted title/body, create via `gh`).
+- **Exit:** all Source Control and PR checklist items pass on Windows and macOS.
+
+### Phase 6 — WSL remote host (Windows app)
+
+- `contextual-agent`, musl builds, bundling, deployment and lifecycle; `RemoteHost`; distro
+  discovery; location detection.
 - UI (Windows only): location badge in the status bar (*Local* / *WSL: Ubuntu*), WSL distros
-  under "Places", threads keyed by location. On macOS these elements are not rendered.
-- **Exit:** from the Windows app, open a project in `\\wsl.localhost\Ubuntu\…`, scan, chat,
-  save, undo, commit and open a PR, with timings comparable to today's app running inside WSL.
-  The shared host test suite passes against `RemoteHost`.
+  under "Places", threads keyed by location.
+- **Exit:** from the Windows app, open a project in `\\wsl.localhost\Ubuntu\…` and complete scan,
+  chat, save, undo, commit and PR, with timings comparable to today's app running inside WSL.
+  The host test suite passes against `RemoteHost`.
 
-### Phase 5 — Remove Node, ship builds
+### Phase 7 — Cutover
 
-- Delete `src/server/`, the Vite plugin, `openai`, `ignore` and `picomatch` dependencies and
-  the `Transport` switch.
-- Data migration (§8.1), CLI argument and deep link, app icons, release builds for Windows and
-  macOS.
-- Update `CLAUDE.md` and replace `src/server/README.md` with a command reference.
-- **Exit:** `npm run dev` no longer serves `/api`; release builds run on Windows (local and WSL
-  projects) and macOS.
+- Data migration (§9.1), deep link, app icons, release builds for Windows and macOS.
+- Delete `src/`, `index.html`, `package.json`, Vite/Tailwind/oxlint config and `components.json`;
+  remove the JS-only project skills (`shadcn`, `tailwind-design-system`,
+  `vercel-composition-patterns`, `vercel-react-best-practices`) from `.claude/skills/`.
+- Rewrite `CLAUDE.md` for the Rust workspace (layout, theme rule, build commands, platform
+  notes); replace `src/server/README.md` with a `crates/core` reference.
+- **Exit:** the native app is the only app; you've used it as your daily tool for a week on
+  Windows (local + WSL projects) and it was smoke-tested on the Mac.
 
-### Phase 6 — Hardening
+### Phase 8 — Hardening
 
-- Performance pass: scan of a large repo (including skill discovery's 20,000-entry cap) on
-  Windows, macOS and over the agent.
+- Performance pass on large repos (including skill discovery's 20,000-entry cap), locally and
+  over the agent.
 - Failure drills: agent crash mid-save, distro shut down, WSL not installed, `gh` logged out,
-  git missing, keychain unavailable, file locked on Windows.
-- Accessibility check of the changed screens (`web-design-guidelines` skill).
+  git missing, keychain unavailable, file locked on Windows, no GPU / RDP.
+- Accessibility pass (§12, risk on screen readers).
 
-## 10. Testing strategy
+## 11. Testing strategy
 
-There are no tests today, so the port must create the safety net it relies on.
+1. **Unit tests in `core`**: path normalisation and containment (Windows and case-insensitive
+   cases), exclusion rules, token estimates, condensing, line-ending/BOM/final-newline
+   preservation, apply pre-checks, and all of `core::logic`.
+2. **Parity tests** replay the Phase 0 fixtures against the Rust core, field by field, with
+   documented allowances (e.g. `mtimeMs`). They define "done" for Phase 2.
+3. **Host contract suite**: one generic suite run against `LocalHost` and `RemoteHost` (agent
+   spawned locally on Linux CI), so the two can't drift.
+4. **Git integration tests** in temporary repos; `gh` is behind `CommandRunner` and faked.
+5. **LLM tests** against a local mock server (`wiremock`): streaming, usage, chain reset,
+   fallback, cancellation, error mapping, using recorded real responses with the key redacted.
+6. **Model tests without a window**: app models are driven through GPUI's test context
+   (`TestAppContext`) for flows like send → stream → parse changes → save → undo.
+7. **Visual checks**: the Phase 0 screenshot set is compared by eye at each phase exit;
+   automated screenshot diffs are optional later.
+8. **Manual smoke checklist** per phase exit on Windows and macOS, plus WSL projects from Phase 6.
 
-1. **Unit tests in `core`** for the pure logic most likely to regress: path normalisation and
-   containment (including Windows and case-insensitive cases), exclusion rules, token
-   estimates, condensing, line-ending/BOM/final-newline preservation, apply pre-checks.
-2. **Parity tests:** the Phase 0 fixtures are replayed against the Rust implementation and
-   compared field by field (with explicit, documented allowances, e.g. `mtimeMs`). This is
-   the definition of "done" for each slice.
-3. **Host contract suite:** one generic test suite run against `LocalHost` and `RemoteHost`
-   (agent spawned as a child process locally on Linux CI), so the two can't drift.
-4. **Git integration tests** in temporary repos: status letters, stage/unstage, staged vs
-   working diffs, smart commit, branch create with recorded parent, compare/merge-base. `gh`
-   calls are behind the `CommandRunner` and faked in tests.
-5. **LLM tests** against a local mock server (`wiremock`): streaming deltas, usage, chain
-   reset, Responses → chat-completions fallback, cancellation mid-stream, error mapping.
-6. **Manual smoke checklist** per release on Windows and macOS (open, scan, chat, save, undo,
-   commit, PR), plus the same list for a WSL project from the Windows app.
-
-## 11. Risks and mitigations
+## 12. Risks and mitigations
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Behaviour drift during the rewrite (no existing tests) | High | Phase 0 fixtures + parity tests gate each slice; port module by module, not all at once. |
-| Webview differences (WKWebView on macOS vs WebView2 on Windows) for CSS/JS features | Medium | Test the UI on both in Phase 1; avoid Chromium-only APIs. |
-| WSL project unusable while the Windows app is being built | Medium | Keep the Node version runnable inside WSL until Phase 4 is done; Node is removed only in Phase 5. |
-| No Mac for day-to-day development (testing happens later on a friend's Mac) | Low | `macos-latest` CI runner builds and tests every change; run the manual smoke checklist on the Mac at the end of Phase 1 (UI in WKWebView) and before each release. |
-| Agent deployment fails (no `/tmp` space, noexec mounts, arm64 distro) | Medium | Deploy to `~/.cache`; static musl builds for x86_64 and aarch64; clear error with a manual install command. |
-| macOS GUI `PATH` misses Homebrew git/gh | Medium | PATH resolution in `CommandRunner` (§7) and a "git/gh not found" diagnostic in Settings. |
-| Windows file locks break atomic save | Medium | Retry with backoff; pre-checks stay before any write so a partial save is impossible. |
-| Losing `localStorage` settings on switch | Low | Documented; settings are few and re-entered once. |
-| Responses API differences between SDK and hand-rolled client | Medium | Mock-server tests from recorded real responses (key redacted). |
+| GPUI is pre-1.0: API churn, thin docs, crates.io release lagging Zed's repo | High | Phase 1 gate; pin a matched `gpui`/`gpui-component` pair with a committed `Cargo.lock`; upgrade deliberately, not continuously; keep app code thin over core. |
+| Long time before the new app is usable (full UI rewrite) | High | Current app stays in daily use until Phase 7; phases deliver usable slices (read-only → chat → SCM → WSL). |
+| Behaviour drift (no existing tests) | High | Phase 0 fixtures and checklist; parity tests gate Phase 2; screen checklists gate Phases 3–5. |
+| A design-spec detail is hard in GPUI (custom widgets, text layout) | Medium | Spike the hardest components first (Phase 1); accept documented, small visual deviations. |
+| Screen-reader support in GPUI is limited | Medium | Decide the requirement (open question 1); keyboard navigation and focus order are covered regardless. |
+| Windows rendering over RDP / without a GPU | Medium | Test in Phase 1 and Phase 8; document requirements. |
+| Agent deployment fails (no space, noexec, arm64 distro) | Medium | Deploy to `~/.cache`; static musl builds for x86_64 and aarch64; clear error with a manual install command. |
+| macOS GUI `PATH` misses Homebrew git/gh | Medium | PATH resolution in `CommandRunner`; "git/gh not found" diagnostic in Settings. |
+| Windows file locks break atomic save | Medium | Retry with backoff; pre-checks before any write, so a partial save is impossible. |
+| No Mac for day-to-day development | Low | `macos-latest` CI on every change; manual tests on a friend's Mac at the Phase 1 gate and before cutover. |
 
-## 12. Open questions
+## 13. Open questions
 
-1. Which WSL distros/architectures must the agent support at first — only the default
-   x86_64 distro, or all installed ones?
-2. Should a POSIX path typed into the Windows app (`/home/me/x`) default to the default WSL
-   distro, or should the user always pick the distro?
-3. Keep the custom folder browser at all for local projects once the native dialog exists?
-4. Is an import of the old `localStorage` settings worth a small export button in the last
-   Node-based version?
-5. Do we want a `contextual` CLI shim on `PATH` (like `code .`) in Phase 5 or later?
+1. Is screen-reader support a requirement, or are keyboard navigation and focus enough?
+2. Should a POSIX path typed into the Windows app (`/home/me/x`) open in the default WSL distro,
+   or should the user always pick the distro?
+3. Which WSL distros/architectures must the agent support at first?
+4. Follow the OS light/dark setting, or keep dark as the fixed default with a manual switch?
+5. Do we want a `contextual` CLI shim on `PATH` (like `code .`)?
 
-## 13. Decision log
+## 14. Decision log
 
 | Date | Decision |
 | --- | --- |
-| 2026-11-06 | Port the server to Rust inside Tauri v2; keep the React UI. |
+| 2026-11-06 | Port the server to Rust inside Tauri v2; keep the React UI. *(Superseded the same day.)* |
 | 2026-11-06 | WSL projects are served by a stdio agent inside the distro, not via `\\wsl.localhost` file access. |
 | 2026-11-06 | Keep shelling out to `git` and `gh`; no libgit2/gix. |
 | 2026-11-06 | Desktop targets are Windows and macOS only; no Linux desktop build. WSL projects are a Windows-app feature. |
-| 2026-11-06 | WSL support lands before Node is removed, so today's WSL workflow never regresses. |
+| 2026-11-06 | **Build a native GPUI app instead of Tauri + React.** Tauri remains the fallback if the Phase 1 gate fails. |
+| 2026-11-06 | `tokens.json` stays the only design source; the Rust theme is generated from it at build time. |
+| 2026-11-06 | The current app stays in use until the native app reaches parity, including WSL projects. |
+
+## Appendix A — Fallback: Tauri v2 + React
+
+If GPUI fails the Phase 1 gate, keep the React UI and host it in Tauri v2:
+
+- The same `contextual-core`, `protocol`, `agent`, `WorkspaceHost` and WSL design apply
+  unchanged; `core::logic` can stay in Rust or remain in `src/web/lib`.
+- `src/web/lib/api.ts` keeps its function signatures; bodies call Tauri commands (`invoke`)
+  instead of `fetch('/api/…')`. Chat streams over a Tauri `Channel<ChatEvent>`; cancellation via
+  a `chat_cancel` command. TypeScript types are generated from `protocol` with `tauri-specta`.
+- Webviews: WebView2 on Windows, WKWebView on macOS — test the UI in both engines.
+- Security: allow only the app's own commands plus dialog/store; strict CSP; no remote content.
+- Migration can be incremental: during `tauri dev` the UI is served by Vite, so routes not yet
+  ported keep working through the Node middleware until each slice reaches parity.
