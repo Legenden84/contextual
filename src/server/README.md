@@ -59,8 +59,12 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
   { root, path, staged }` (staged: HEAD→index, else index→working tree) · `/api/git/commit { root, message, all }`
   (all: `git add -A` first, like VS Code's smart commit) · `/api/git/push { root }` (publishes the branch with `-u`
   when it has no upstream) · `/api/git/draft-commit { root }` (model-written message for the staged, or all, changes).
-- **Pull requests**: `POST /api/pr/compare { root, base? }` → like GitHub's compare view: commits and file diffs of
-  `merge-base(origin/base, HEAD)..HEAD` (base fetched quietly first), uncommitted and unpushed counts, an open PR for
+- **Branches**: `POST /api/git/branches { root, fetch? }` (local and origin branches, newest first) ·
+  `/api/git/switch { root, name }` (a remote-only `origin/x` is checked out as a tracking branch) ·
+  `/api/git/create-branch { root, name, from? }` (records the parent in `git config branch.<name>.contextualParent`).
+- **Pull requests**: `POST /api/pr/compare { root, base?, head? }` → like GitHub's compare view: commits and file diffs of
+  `merge-base(origin/base, head)..head`. `head` defaults to the checked-out branch; `base` defaults to head's parent
+  (the recorded one, else the branch it forked from most recently, else the default branch) (base fetched quietly first), uncommitted and unpushed counts, an open PR for
   the branch. `/api/pr/draft { root, base, notes }` → model-written `{ title, body }` from the commits, the diff and
   the chat notes. `/api/pr/create { root, title, body, base, draft, newBranch? }` → pushes and runs `gh pr create`
   (or only pushes if the branch already has an open PR). On the default branch, `newBranch` is created at HEAD and the

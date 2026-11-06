@@ -95,8 +95,10 @@ function wordRanges(ops: DiffOp[]): DiffOp[] {
 }
 
 export function computeDiff(oldText: string, newText: string): Diff {
-  const a = oldText ? oldText.split('\n') : []
-  const b = newText ? newText.split('\n') : []
+  // A final newline ends the last line; it isn't an extra empty line.
+  const lines = (t: string) => (t ? t.replace(/\n$/, '').split('\n') : [])
+  const a = lines(oldText)
+  const b = lines(newText)
   const ops = wordRanges(lcsOps(a, b))
   return {
     ops,

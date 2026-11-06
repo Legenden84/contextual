@@ -110,7 +110,7 @@ function Section({
 
 /** VS Code-style Source Control: stage, unstage, write a message, commit, push. */
 export function SourceControl() {
-  const { project, git, gitChanged, foundry } = useApp()
+  const { project, git, gitChanged, foundry, openBranchPicker } = useApp()
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -161,8 +161,16 @@ export function SourceControl() {
 
       <div className="flex flex-none flex-col gap-2 px-3 pb-2">
         <div className="flex items-center gap-1.5 text-ui-small text-ink-muted">
-          <Icon name="branch" className="size-3.5" />
-          <span className="truncate font-mono text-ink">{git.branch ?? '(detached)'}</span>
+          <button
+            type="button"
+            onClick={openBranchPicker}
+            title="Switch branch or create a new one"
+            className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm hover:text-ink"
+          >
+            <Icon name="branch" className="size-3.5 flex-none" />
+            <span className="truncate font-mono text-ink">{git.branch ?? '(detached)'}</span>
+            <Icon name="chevronDown" className="size-3 flex-none" />
+          </button>
           {git.upstream && (git.ahead > 0 || git.behind > 0) && (
             <span className="font-mono" title={`${git.ahead} to push, ${git.behind} to pull (${git.upstream})`}>
               {git.ahead > 0 && `↑${git.ahead}`} {git.behind > 0 && `↓${git.behind}`}

@@ -182,6 +182,108 @@ export async function push(rootInput: string): Promise<{ branch: string; upstrea
   return { branch: st.branch, upstream: after.upstream ?? `origin/${st.branch}` }
 }
 
+// ------------------------------------------------------------------ branches
+
+export interface BranchInfo {
+  /** Local: "feature/x"; remote: "origin/feature/x". */
+  name: string
+  upstream: string | null
+  sha: string
+  when: string
+  subject: string
+}
+
+export interface BranchList {
+  current: string | null
+  local: BranchInfo[]
+  remote: BranchInfo[]
+}
+
+/** Local and origin branches, most recently committed first. `fetch` refreshes the remote ones first. */
+export async function listBranches(rootInput: string, fetch = false): Promise<BranchList> {
+  const root = await repoRoot(rootInput)
+  if (fetch) await run('git', ['fetch', '--prune', '--quiet', 'origin'], root, 20_000)
+  const out = await must(
+    'git',
+    ['for-each-ref', '--sort=-committerdate', '--format=%(refname)%00%(upstream:short)%00%(objectname:short)%00%(committerdate:relative)%00%(contents:subject)%00', 'refs/heads', 'refs/remotes/origin'],
+    root,
+    'Listing branches',
+  )
+  const f = out.split('\0')
+  const list: BranchList = { current: (await gitStatus(root)).branch, local: [], remote: [] }
+  for (let i = 0; i + 4 < f.length; i += 5) {
+    const ref = f[i].replace(/^\n/, '')
+    const info = { upstream: f[i + 1] || null, sha: f[i + 2], when: f[i + 3], subject: f[i + 4] }
+    if (ref.startsWith('refs/heads/')) list.local.push({ name: ref.slice(11), ...info })
+    else if (ref.startsWith('refs/remotes/') && !ref.endsWith('/HEAD')) list.remote.push({ name: ref.slice(13), ...info })
+  }
+  return list
+}
+
+const PARENT_KEY = (branch: string) => `branch.${branch}.contextualParent`
+
+/** Switches to a branch. A remote branch without a local copy is checked out as a new tracking branch. */
+export async function switchBranch(rootInput: string, name: string): Promise<GitStatus> {
+  const root = await repoRoot(rootInput)
+  if (name.startsWith('origin/')) {
+    const local = name.slice(7)
+    const exists = (await run('git', ['rev-parse', '--verify', '-q', `refs/heads/${local}`], root)).ok
+    if (exists) await must('git', ['switch', local], root, `Switching to ${local}`)
+    else await must('git', ['switch', '--track', name], root, `Checking out ${name}`)
+  } else {
+    await must('git', ['check-ref-format', '--branch', name], root, 'Branch name check')
+    await must('git', ['switch', name], root, `Switching to ${name}`)
+  }
+  return gitStatus(root)
+}
+
+/** Creates a branch from `from` (default: the current branch), switches to it and records its parent. */
+export async function createBranch(rootInput: string, name: string, from?: string): Promise<GitStatus> {
+  const root = await repoRoot(rootInput)
+  await must('git', ['check-ref-format', '--branch', name], root, 'Branch name check')
+  const parent = from || (await gitStatus(root)).branch
+  await must('git', ['switch', '-c', name, ...(from ? [from] : [])], root, `Creating ${name}`)
+  if (parent) await run('git', ['config', PARENT_KEY(name), parent.replace(/^origin\//, '')], root)
+  return gitStatus(root)
+}
+
+/** A local branch if it exists, else its origin copy. */
+async function refFor(root: string, branch: string): Promise<string | null> {
+  if ((await run('git', ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], root)).ok) return branch
+  if ((await run('git', ['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}`], root)).ok) return `origin/${branch}`
+  return null
+}
+
+/** Base for comparing: the origin copy when it exists (it is what the PR merges into), else the local branch. */
+async function baseRefFor(root: string, branch: string): Promise<string> {
+  return (await run('git', ['rev-parse', '--verify', '-q', `refs/remotes/origin/${branch}`], root)).ok ? `origin/${branch}` : branch
+}
+
+/**
+ * The branch `branch` was created from, like GitHub's suggested base: the parent recorded when
+ * Contextual created it, else the branch it forked from most recently (fewest commits since the
+ * fork point), else the default branch.
+ */
+async function parentOf(root: string, branch: string, defaultBranch: string | null, names: string[]): Promise<string | null> {
+  const recorded = (await run('git', ['config', '--get', PARENT_KEY(branch)], root)).stdout.trim()
+  if (recorded && recorded !== branch && (await refFor(root, recorded))) return recorded
+
+  const head = await refFor(root, branch)
+  if (!head) return defaultBranch
+  const tip = (await run('git', ['rev-parse', head], root)).stdout.trim()
+  let best: { name: string; ahead: number } | null = null
+  for (const name of names.filter((n) => n !== branch).slice(0, 40)) {
+    const ref = await refFor(root, name)
+    if (!ref) continue
+    const mb = (await run('git', ['merge-base', ref, head], root)).stdout.trim()
+    // No shared history, or this branch is fully contained in the candidate (a child or a copy).
+    if (!mb || mb === tip) continue
+    const ahead = Number((await run('git', ['rev-list', '--count', `${mb}..${head}`], root)).stdout.trim())
+    if (!best || ahead < best.ahead || (ahead === best.ahead && name === defaultBranch)) best = { name, ahead }
+  }
+  return best?.name ?? defaultBranch
+}
+
 // ------------------------------------------------------------------ pull requests
 
 export interface Commit {
@@ -192,8 +294,12 @@ export interface Commit {
 }
 
 export interface Comparison {
+  /** Source branch of the PR (compare). */
   branch: string | null
+  /** The checked-out branch. */
+  current: string | null
   defaultBranch: string | null
+  /** Target branch of the PR (base). */
   base: string
   remote: string | null
   /** gh can reach the repository. */
@@ -202,9 +308,9 @@ export interface Comparison {
   problem: string | null
   commits: Commit[]
   files: (FileDiff & { letter: ChangeLetter })[]
-  /** Uncommitted changes (not part of the PR until committed). */
+  /** Uncommitted changes (only counted when the source is the checked-out branch). */
   uncommitted: number
-  /** Commits not pushed yet (they're pushed when the PR is created). */
+  /** Commits of the source branch not on origin yet (they're pushed when the PR is created). */
   unpushed: number
   existingPr: { url: string; number: number } | null
 }
@@ -219,21 +325,27 @@ async function defaultBranchOf(root: string): Promise<{ name: string | null; git
   return { name: head || null, github: false, problem }
 }
 
-/** What a PR from the current branch into `base` would contain, like GitHub's compare view. */
-export async function compare(rootInput: string, baseInput?: string): Promise<Comparison> {
+/**
+ * What a PR from `head` (default: the checked-out branch) into `base` (default: head's parent)
+ * would contain, like GitHub's compare view.
+ */
+export async function compare(rootInput: string, baseInput?: string, headInput?: string): Promise<Comparison> {
   const root = await repoRoot(rootInput)
   const st = await gitStatus(root)
   const remote = (await run('git', ['remote', 'get-url', 'origin'], root)).stdout.trim() || null
+  if (remote) await run('git', ['fetch', '--quiet', 'origin'], root, 20_000)
   const def = remote ? await defaultBranchOf(root) : { name: null, github: false, problem: 'The repository has no "origin" remote.' }
-  const base = baseInput?.trim() || def.name || 'main'
 
-  // Compare against the remote base when it exists (fetched quietly), else the local branch.
-  if (remote) await run('git', ['fetch', '--quiet', 'origin', base], root, 20_000)
-  const baseRef = (await run('git', ['rev-parse', '--verify', '-q', `origin/${base}`], root)).ok ? `origin/${base}` : base
-  const mergeBase = (await run('git', ['merge-base', baseRef, 'HEAD'], root)).stdout.trim()
+  const head = headInput?.trim() || st.branch
+  const isCurrent = !!head && head === st.branch
+  const headRef = !head ? 'HEAD' : isCurrent ? 'HEAD' : await refFor(root, head)
+  const branches = await listBranches(root)
+  const names = [...new Set([...branches.local.map((b) => b.name), ...branches.remote.map((b) => b.name.replace(/^origin\//, ''))])]
+  const base = baseInput?.trim() || (head ? await parentOf(root, head, def.name, names) : def.name) || def.name || 'main'
 
   const result: Comparison = {
-    branch: st.branch,
+    branch: head,
+    current: st.branch,
     defaultBranch: def.name,
     base,
     remote,
@@ -241,36 +353,46 @@ export async function compare(rootInput: string, baseInput?: string): Promise<Co
     problem: def.problem,
     commits: [],
     files: [],
-    uncommitted: st.staged.length + st.changes.length,
-    unpushed: st.upstream ? st.ahead : 0,
+    uncommitted: isCurrent ? st.staged.length + st.changes.length : 0,
+    unpushed: 0,
     existingPr: null,
   }
+  if (!headRef) {
+    result.problem ??= `Branch ${head} doesn't exist.`
+    return result
+  }
+  const baseRef = await baseRefFor(root, base)
+  const mergeBase = (await run('git', ['merge-base', baseRef, headRef], root)).stdout.trim()
   if (!mergeBase) {
-    result.problem ??= `Can't compare with ${base}: the branches have no common history.`
+    result.problem ??= `Can't compare ${head} with ${base}: the branches have no common history.`
     return result
   }
 
-  const log = await run('git', ['log', '--format=%h%x00%s%x00%an%x00%ar%x00', `${mergeBase}..HEAD`], root)
+  const log = await run('git', ['log', '--format=%h%x00%s%x00%an%x00%ar%x00', `${mergeBase}..${headRef}`], root)
   const fields = log.stdout.split('\0')
   for (let i = 0; i + 3 < fields.length; i += 4)
-    result.commits.push({ sha: fields[i].trim(), subject: fields[i + 1], author: fields[i + 2], when: fields[i + 3] })
-  if (!st.upstream) result.unpushed = result.commits.length
+    result.commits.push({ sha: fields[i].replace(/^\n/, '').trim(), subject: fields[i + 1], author: fields[i + 2], when: fields[i + 3] })
 
-  const names = (await run('git', ['diff', '--name-status', '-z', '-M', mergeBase, 'HEAD'], root)).stdout.split('\0')
-  for (let i = 0; i < names.length; i++) {
-    const code = names[i]
+  if (head) {
+    const onOrigin = (await run('git', ['rev-parse', '--verify', '-q', `refs/remotes/origin/${head}`], root)).ok
+    result.unpushed = onOrigin ? Number((await run('git', ['rev-list', '--count', `origin/${head}..${headRef}`], root)).stdout.trim()) : result.commits.length
+  }
+
+  const names2 = (await run('git', ['diff', '--name-status', '-z', '-M', mergeBase, headRef], root)).stdout.split('\0')
+  for (let i = 0; i < names2.length; i++) {
+    const code = names2[i]
     if (!code) continue
     const letter: ChangeLetter = code[0] === 'R' ? 'R' : code[0] === 'A' ? 'A' : code[0] === 'D' ? 'D' : 'M'
-    const from = code[0] === 'R' || code[0] === 'C' ? names[++i] : undefined
-    const path = names[++i]
+    const from = code[0] === 'R' || code[0] === 'C' ? names2[++i] : undefined
+    const path = names2[++i]
     const before = letter === 'A' ? '' : await show(root, `${mergeBase}:${from ?? path}`)
-    const after = letter === 'D' ? '' : await show(root, `HEAD:${path}`)
+    const after = letter === 'D' ? '' : await show(root, `${headRef}:${path}`)
     const skipped = skipReason(before, after)
     result.files.push({ path, letter, old: skipped ? '' : lf(before ?? ''), new: skipped ? '' : lf(after ?? ''), skipped })
   }
 
-  if (def.github && st.branch && st.branch !== def.name) {
-    const pr = await run('gh', ['pr', 'view', st.branch, '--json', 'url,number,state'], root)
+  if (def.github && head && head !== def.name) {
+    const pr = await run('gh', ['pr', 'view', head, '--json', 'url,number,state,baseRefName'], root)
     if (pr.ok) {
       const j = JSON.parse(pr.stdout) as { url: string; number: number; state: string }
       if (j.state === 'OPEN') result.existingPr = { url: j.url, number: j.number }
@@ -279,13 +401,13 @@ export async function compare(rootInput: string, baseInput?: string): Promise<Co
   return result
 }
 
-/** Diff of base...HEAD plus the commit list, for an AI-written PR description. */
-export async function prDiff(rootInput: string, base: string): Promise<{ diff: string; commits: string; branch: string }> {
+/** Diff of base...head plus the commit list, for an AI-written PR description. */
+export async function prDiff(rootInput: string, base: string, head?: string): Promise<{ diff: string; commits: string; branch: string }> {
   const root = await repoRoot(rootInput)
-  const c = await compare(root, base)
-  const baseRef = (await run('git', ['rev-parse', '--verify', '-q', `origin/${c.base}`], root)).ok ? `origin/${c.base}` : c.base
+  const c = await compare(root, base, head)
+  const headRef = !c.branch || c.branch === c.current ? 'HEAD' : ((await refFor(root, c.branch)) ?? 'HEAD')
   return {
-    diff: await diffText(root, [`${baseRef}...HEAD`]),
+    diff: await diffText(root, [`${await baseRefFor(root, c.base)}...${headRef}`]),
     commits: c.commits.map((x) => `- ${x.subject}`).join('\n'),
     branch: c.branch ?? '',
   }
@@ -295,8 +417,10 @@ export interface PrRequest {
   title: string
   body: string
   base: string
+  /** Source branch; default: the checked-out branch. */
+  head?: string
   draft: boolean
-  /** Create this branch at HEAD first (when on the default branch). */
+  /** Create this branch at HEAD first (when the source is the checked-out default branch). */
   newBranch?: string
 }
 
@@ -307,20 +431,23 @@ export interface PrResult {
   updatedExisting: boolean
 }
 
-/** Pushes the current branch (or a new one from HEAD) and opens a PR into `base`. */
+/** Pushes the source branch (or a new one from HEAD) and opens a PR into `base`. */
 export async function createPullRequest(rootInput: string, req: PrRequest): Promise<PrResult> {
   const root = await repoRoot(rootInput)
   if (!req.title.trim()) throw new PathError(400, 'The pull request needs a title.')
-  const c = await compare(root, req.base)
+  const c = await compare(root, req.base, req.head)
   if (!c.github) throw new PathError(409, c.problem ?? 'GitHub is not available for this repository.')
-  if (!c.commits.length) throw new PathError(409, `There are no commits to compare with ${c.base}. Commit your changes first.`)
   if (!c.branch) throw new PathError(409, 'Not on a branch (detached HEAD).')
+  if (c.branch === c.base) throw new PathError(409, 'Choose different branches to compare.')
+  if (!c.commits.length) throw new PathError(409, `There are no commits to compare between ${c.base} and ${c.branch}.`)
 
   let branch = c.branch
-  if (req.newBranch) {
+  const isCurrent = branch === c.current
+  if (req.newBranch && isCurrent) {
     await must('git', ['check-ref-format', '--branch', req.newBranch], root, 'Branch name check')
     const from = branch
     await must('git', ['switch', '-c', req.newBranch], root, `Creating branch ${req.newBranch}`)
+    await run('git', ['config', PARENT_KEY(req.newBranch), c.base], root)
     branch = req.newBranch
     // The commits now live on the new branch; put the default branch back where the remote has it,
     // as GitHub Desktop does, but only when that loses nothing (it was purely ahead of origin).
@@ -329,10 +456,12 @@ export async function createPullRequest(rootInput: string, req: PrRequest): Prom
       if (behind === '0') await run('git', ['branch', '-f', from, `origin/${from}`], root)
     }
   } else if (branch === c.defaultBranch) {
-    throw new PathError(409, `You're on ${branch}, the default branch. Create a new branch for the pull request.`)
+    throw new PathError(409, `${branch} is the default branch. Create a new branch for the pull request.`)
   }
 
-  await must('git', ['push', '-u', 'origin', 'HEAD'], root, 'Push', 120_000)
+  // Push the source branch (a local branch that isn't checked out is pushed by name).
+  const hasLocal = (await run('git', ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], root)).ok
+  if (hasLocal) await must('git', ['push', '-u', 'origin', isCurrent || req.newBranch ? 'HEAD' : branch], root, 'Push', 120_000)
   if (c.existingPr && !req.newBranch) return { url: c.existingPr.url, number: c.existingPr.number, branch, updatedExisting: true }
 
   const args = ['pr', 'create', '--base', c.base, '--head', branch, '--title', req.title.trim(), '--body', req.body.trim() || ' ']

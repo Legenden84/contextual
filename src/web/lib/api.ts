@@ -244,8 +244,26 @@ export interface FileDiff {
   skipped?: string
 }
 
+export interface BranchInfo {
+  /** Local: "feature/x"; remote: "origin/feature/x". */
+  name: string
+  upstream: string | null
+  sha: string
+  when: string
+  subject: string
+}
+
+export interface BranchList {
+  current: string | null
+  local: BranchInfo[]
+  remote: BranchInfo[]
+}
+
 export interface Comparison {
+  /** Source branch (compare). */
   branch: string | null
+  /** The checked-out branch. */
+  current: string | null
   defaultBranch: string | null
   base: string
   remote: string | null
@@ -274,11 +292,18 @@ export const gitCommit = (root: string, message: string, all: boolean) =>
 export const gitPush = (root: string) => postJson<{ branch: string; upstream: string }>('/api/git/push', { root })
 export const draftCommit = (root: string) => postJson<{ message: string }>('/api/git/draft-commit', { root })
 
-export const comparePr = (root: string, base?: string) => postJson<Comparison>('/api/pr/compare', { root, base })
-export const draftPr = (root: string, base: string, notes: string) =>
-  postJson<{ title: string; body: string }>('/api/pr/draft', { root, base, notes })
-export const createPr = (root: string, req: { title: string; body: string; base: string; draft: boolean; newBranch?: string }) =>
-  postJson<PrResult>('/api/pr/create', { root, ...req })
+export const listBranches = (root: string, fetch = false) => postJson<BranchList>('/api/git/branches', { root, fetch })
+export const switchBranch = (root: string, name: string) => postJson<GitStatus>('/api/git/switch', { root, name })
+export const createBranch = (root: string, name: string, from?: string) =>
+  postJson<GitStatus>('/api/git/create-branch', { root, name, from })
+
+export const comparePr = (root: string, base?: string, head?: string) => postJson<Comparison>('/api/pr/compare', { root, base, head })
+export const draftPr = (root: string, base: string, notes: string, head?: string) =>
+  postJson<{ title: string; body: string }>('/api/pr/draft', { root, base, notes, head })
+export const createPr = (
+  root: string,
+  req: { title: string; body: string; base: string; head?: string; draft: boolean; newBranch?: string },
+) => postJson<PrResult>('/api/pr/create', { root, ...req })
 
 /** Rebuilds a whole file when the reply's edit blocks couldn't be placed (internal fallback). */
 export const repairEdits = (path: string, original: string, edits: string) =>

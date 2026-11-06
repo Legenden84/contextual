@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { BranchSelect } from './BranchSelect'
 import { DiffFile } from '@/components/diff/DiffFile'
 import { Button, IconButton, LinkButton } from '@/components/ui/Button'
 import { Checkbox, CheckLabel } from '@/components/ui/Checkbox'
@@ -41,7 +42,11 @@ export function PullRequestDialog() {
   const [cmp, setCmp] = useState<api.Comparison | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [base, setBase] = useState('')
+  const [branchNames, setBranchNames] = useState<string[]>([])
+  /** The user picked these; undefined lets the server choose (head: checked-out branch, base: its parent). */
+  const [pick, setPick] = useState<{ base?: string; head?: string }>({})
+  /** The title or description was typed by the user: don't overwrite it on a new comparison. */
+  const edited = useRef(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [newBranch, setNewBranch] = useState('')
@@ -65,41 +70,45 @@ export function PullRequestDialog() {
   )
   const firstAsk = messages.find((m) => m.role === 'user')?.text ?? ''
 
-  const draftFor = (baseName: string) => {
+  const draftFor = (baseName: string, head: string | null) => {
     setDrafting(true)
     setDraftError(null)
     api
-      .draftPr(root, baseName, notes)
+      .draftPr(root, baseName, notes, head ?? undefined)
       .then((d) => {
+        edited.current = false
         setTitle(d.title)
         setBody(d.body)
       })
       .catch((err: unknown) => setDraftError(err instanceof Error ? err.message : 'Could not draft the text.'))
       .finally(() => setDrafting(false))
   }
-  const runDraft = () => cmp && draftFor(cmp.base)
-  // Draft the text once per opening, as soon as there is something to describe.
-  const autoDrafted = useRef(false)
+  const runDraft = () => cmp && draftFor(cmp.base, cmp.branch)
   const canDraft = foundry.state === 'ready'
 
-  // Compare once on open and whenever the base changes (debounced while typing).
-  const [baseKey, setBaseKey] = useState<string | undefined>(undefined)
+  // Branch names for the dropdowns: local branches plus remote ones without a local copy.
+  useEffect(() => {
+    api
+      .listBranches(root)
+      .then((l) => setBranchNames([...new Set([...l.local.map((b) => b.name), ...l.remote.map((b) => b.name.replace(/^origin\//, ''))])]))
+      .catch(() => {})
+  }, [root])
+
+  // Compare on open and whenever a branch is picked.
   useEffect(() => {
     const req = { live: true }
     api
-      .comparePr(root, baseKey)
+      .comparePr(root, pick.base, pick.head)
       .then((c) => {
         if (!req.live) return
         setCmp(c)
-        setBase((b) => b || c.base)
         const first = c.commits[c.commits.length - 1]?.subject ?? firstAsk
-        if (c.branch && c.branch === c.defaultBranch) setNewBranch((n) => n || suggestBranch(first))
-        // Single commit: its subject is a good title (GitHub does the same).
-        setTitle((t) => t || (c.commits.length === 1 ? c.commits[0].subject : first.split('\n')[0].slice(0, 72)))
-        if (!autoDrafted.current && canDraft && c.commits.length && !c.existingPr) {
-          autoDrafted.current = true
-          draftFor(c.base)
-        }
+        if (c.branch && c.branch === c.defaultBranch && c.branch === c.current) setNewBranch((n) => n || suggestBranch(first))
+        if (edited.current) return
+        // Single commit: its subject is a good title (GitHub does the same). Then draft a better one.
+        setTitle(c.commits.length === 1 ? c.commits[0].subject : first.split('\n')[0].slice(0, 72))
+        setBody('')
+        if (canDraft && c.commits.length && !c.existingPr) draftFor(c.base, c.branch)
       })
       .catch((err: unknown) => req.live && setLoadError(err instanceof Error ? err.message : 'Could not compare the branches.'))
       .finally(() => req.live && setLoading(false))
@@ -107,17 +116,14 @@ export function PullRequestDialog() {
       req.live = false
     }
     // draftFor only reads stable inputs (root, notes); comparing again shouldn't depend on it.
-  }, [root, baseKey, firstAsk, canDraft]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [root, pick, firstAsk, canDraft]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (!base || base === (baseKey ?? cmp?.base)) return
-    const t = window.setTimeout(() => {
-      setLoading(true)
-      setLoadError(null)
-      setBaseKey(base)
-    }, 600)
-    return () => window.clearTimeout(t)
-  }, [base, baseKey, cmp?.base])
+  const choose = (side: 'base' | 'head', branch: string) => {
+    setLoading(true)
+    setLoadError(null)
+    setError(null)
+    setPick((p) => ({ base: cmp?.base, head: cmp?.branch ?? undefined, ...p, [side]: branch }))
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !creating && closePr()
@@ -138,19 +144,28 @@ export function PullRequestDialog() {
     [files],
   )
 
-  const onDefault = !!cmp?.branch && cmp.branch === cmp.defaultBranch
+  // Comparing from the checked-out default branch: the commits move to a new branch first.
+  const onDefault = !!cmp?.branch && cmp.branch === cmp.defaultBranch && cmp.branch === cmp.current
   const existing = !onDefault ? cmp?.existingPr ?? null : null
-  const nothing = !!cmp && !cmp.problem && cmp.commits.length === 0
+  const nothing = !!cmp && !cmp.problem && cmp.commits.length === 0 && cmp.branch !== cmp.base
   const ready = !!cmp && cmp.github && cmp.commits.length > 0
+  const sameBranch = !!cmp && cmp.branch === cmp.base
   const canCreate =
-    ready && !creating && !loading && !!base.trim() && (existing ? cmp.unpushed > 0 : !!title.trim()) && (!onDefault || !!newBranch.trim())
+    ready && !sameBranch && !creating && !loading && (existing ? cmp.unpushed > 0 : !!title.trim()) && (!onDefault || !!newBranch.trim())
 
   const create = () => {
     if (!cmp) return
     setCreating(true)
     setError(null)
     api
-      .createPr(root, { title, body, base: cmp.base, draft, newBranch: onDefault ? newBranch.trim() : undefined })
+      .createPr(root, {
+        title,
+        body,
+        base: cmp.base,
+        head: cmp.branch && cmp.branch !== cmp.current ? cmp.branch : undefined,
+        draft,
+        newBranch: onDefault ? newBranch.trim() : undefined,
+      })
       .then((r) => recordPr(r))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not create the pull request.'))
       .finally(() => setCreating(false))
@@ -181,20 +196,14 @@ export function PullRequestDialog() {
         {/* base ← compare, as on GitHub */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-000 px-4 py-2 text-ui-small text-ink-muted">
           <Icon name="branch" className="size-3.5" />
-          <label className="inline-flex items-center gap-1.5">
-            base:
-            <TextInput mono size="sm" boxClassName="w-[150px]" aria-label="Base branch" value={base} onChange={(e) => setBase(e.target.value)} />
-          </label>
+          <BranchSelect label="base" value={cmp?.base ?? ''} options={branchNames} disabled={creating} onChange={(b) => choose('base', b)} />
           <span aria-hidden>←</span>
-          {onDefault ? (
+          <BranchSelect label="compare" value={cmp?.branch ?? ''} options={branchNames} disabled={creating} onChange={(b) => choose('head', b)} />
+          {onDefault && (
             <label className="inline-flex items-center gap-1.5">
-              new branch:
-              <TextInput mono size="sm" boxClassName="w-[300px]" aria-label="New branch name" value={newBranch} onChange={(e) => setNewBranch(e.target.value)} />
+              as new branch:
+              <TextInput mono size="sm" boxClassName="w-[280px]" aria-label="New branch name" value={newBranch} onChange={(e) => setNewBranch(e.target.value)} />
             </label>
-          ) : (
-            <span>
-              compare: <span className="font-mono text-ink">{cmp?.branch ?? '…'}</span>
-            </span>
           )}
           <span className="flex-1" />
           {loading && <span>Comparing…</span>}
@@ -215,6 +224,10 @@ export function PullRequestDialog() {
               <Icon name="warning" className="mt-px size-3.5 text-warning" />
               {cmp.problem}
             </p>
+          )}
+
+          {sameBranch && (
+            <p className="text-ui-small text-ink-muted">Choose different branches: base and compare are the same.</p>
           )}
 
           {onDefault && ready && (
@@ -267,14 +280,21 @@ export function PullRequestDialog() {
                     </LinkButton>
                   )}
                 </span>
-                <TextInput value={title} disabled={drafting} onChange={(e) => setTitle(e.target.value)} />
+                <TextInput value={title} disabled={drafting} onChange={(e) => {
+                    edited.current = true
+                    setTitle(e.target.value)
+                  }}
+                />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-ui-small font-medium text-ink">Description</span>
                 <textarea
                   value={body}
                   disabled={drafting}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={(e) => {
+                    edited.current = true
+                    setBody(e.target.value)
+                  }}
                   rows={7}
                   placeholder={drafting ? 'Drafting from the commits, the diff and the chat…' : 'Markdown'}
                   className="w-full resize-y rounded-md border border-border-strong bg-surface-100 px-2 py-1.5 font-mono text-[12px] leading-[18px] text-ink outline-none focus:border-focus-ring disabled:opacity-60"

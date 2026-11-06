@@ -9,7 +9,7 @@ function Item({ children, className }: { children: ReactNode; className?: string
 }
 
 export function StatusBar() {
-  const { screen, settings, deployment, openSettings, foundry, project, scanning } = useApp()
+  const { screen, settings, deployment, openSettings, foundry, project, scanning, git, openBranchPicker } = useApp()
   const label = describeFoundry(foundry)
   const tone = label.tone === 'ok' ? '[&_svg]:text-success' : label.tone === 'warn' ? 'text-warning' : ''
   const dep = settings.deployments[deployment] ?? settings.deployments[0]
@@ -27,10 +27,28 @@ export function StatusBar() {
         </>
       ) : (
         <>
-          <Item>
-            <Icon name="branch" />
-            {project?.branch ?? 'no git'}
-          </Item>
+          {git ? (
+            <button
+              type="button"
+              onClick={openBranchPicker}
+              title="Switch branch or create a new one"
+              className="-ml-1.5 inline-flex h-6 cursor-pointer items-center gap-1 px-1.5 hover:bg-surface-hover hover:text-ink [&_svg]:size-3.5"
+            >
+              <Icon name="branch" />
+              {git.branch ?? 'detached'}
+              {git.upstream && (git.ahead > 0 || git.behind > 0) && (
+                <span className="font-mono">
+                  {git.behind > 0 && ` ${git.behind}↓`}
+                  {git.ahead > 0 && ` ${git.ahead}↑`}
+                </span>
+              )}
+            </button>
+          ) : (
+            <Item>
+              <Icon name="branch" />
+              {project?.branch ?? 'no git'}
+            </Item>
+          )}
           <span title={label.detail} className={`inline-flex items-center gap-1 [&_svg]:size-3.5 ${tone}`}>
             <Icon name="cloud" />
             {foundry.state === 'ready' ? `Foundry · ${dep.name}` : label.text}

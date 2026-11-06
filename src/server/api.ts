@@ -19,7 +19,9 @@
 //   POST /api/git/commit     { root, message, all } → commits staged changes (all: stage everything first).
 //   POST /api/git/push       { root } → pushes, publishing the branch if it has no upstream.
 //   POST /api/git/draft-commit { root } → model-written commit message for the staged (or all) changes.
-//   POST /api/pr/compare     { root, base? } → commits and file diffs of base...HEAD, like GitHub's compare.
+//   POST /api/git/branches   { root, fetch? } → local and origin branches.
+//   POST /api/git/switch     { root, name } · /api/git/create-branch { root, name, from? } (records the parent)
+//   POST /api/pr/compare     { root, base?, head? } → commits and file diffs of base...HEAD, like GitHub's compare.
 //   POST /api/pr/draft       { root, base, notes } → model-written { title, body }.
 //   POST /api/pr/create      { root, title, body, base, draft, newBranch? } → pushes and opens the PR.
 
@@ -42,7 +44,21 @@ import { listDirs } from './fs/browse.ts'
 import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
 import { PathError } from './fs/paths.ts'
 import { scanProject, type ScanOptions } from './fs/scan.ts'
-import { commit, commitDiff, compare, createPullRequest, fileDiff, gitStatus, prDiff, push, stage, unstage } from './git.ts'
+import {
+  commit,
+  commitDiff,
+  compare,
+  createBranch,
+  createPullRequest,
+  fileDiff,
+  gitStatus,
+  listBranches,
+  prDiff,
+  push,
+  stage,
+  switchBranch,
+  unstage,
+} from './git.ts'
 import { deleteThread, listThreads, loadThread, saveThread } from './threads.ts'
 
 type Env = Record<string, string | undefined>
@@ -318,6 +334,12 @@ export function createApi(getEnv: () => Env) {
             return sendJson(res, 200, await commit(root, str(body, 'message'), body.all === true))
           case '/api/git/push':
             return sendJson(res, 200, await push(root))
+          case '/api/git/branches':
+            return sendJson(res, 200, await listBranches(root, body.fetch === true))
+          case '/api/git/switch':
+            return sendJson(res, 200, await switchBranch(root, str(body, 'name')))
+          case '/api/git/create-branch':
+            return sendJson(res, 200, await createBranch(root, str(body, 'name'), typeof body.from === 'string' ? body.from : undefined))
           case '/api/git/draft-commit': {
             const cfg = requireConfig()
             const diff = await commitDiff(root)
@@ -325,10 +347,14 @@ export function createApi(getEnv: () => Env) {
             return sendJson(res, 200, { message: await draftCommitMessage(clientsFor(cfg).chat, cfg, diff, abort.signal) })
           }
           case '/api/pr/compare':
-            return sendJson(res, 200, await compare(root, typeof body.base === 'string' ? body.base : undefined))
+            return sendJson(
+              res,
+              200,
+              await compare(root, typeof body.base === 'string' ? body.base : undefined, typeof body.head === 'string' ? body.head : undefined),
+            )
           case '/api/pr/draft': {
             const cfg = requireConfig()
-            const d = await prDiff(root, str(body, 'base'))
+            const d = await prDiff(root, str(body, 'base'), typeof body.head === 'string' ? body.head : undefined)
             const notes = typeof body.notes === 'string' ? body.notes.slice(0, 20_000) : ''
             return sendJson(res, 200, await draftPullRequest(clientsFor(cfg).chat, cfg, { ...d, notes }, abort.signal))
           }
@@ -340,6 +366,7 @@ export function createApi(getEnv: () => Env) {
                 title: str(body, 'title'),
                 body: typeof body.body === 'string' ? body.body : '',
                 base: str(body, 'base'),
+                head: typeof body.head === 'string' && body.head.trim() ? body.head.trim() : undefined,
                 draft: body.draft === true,
                 newBranch: typeof body.newBranch === 'string' && body.newBranch.trim() ? body.newBranch.trim() : undefined,
               }),

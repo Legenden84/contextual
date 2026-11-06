@@ -184,6 +184,8 @@ export interface AppState {
   gitTick: number
   /** Git status of the open folder; null when it isn't a repository (or not loaded yet). */
   git: GitStatus | null
+  /** The VS Code-style branch quick pick is open. */
+  branchPickerOpen: boolean
   toast: ToastState | null
 
   settings: Settings
@@ -248,6 +250,10 @@ export interface AppActions {
   openGitDiff(path: string, staged: boolean): void
   /** Tell views that git state changed (after a commit, push, stage…). */
   gitChanged(): void
+  openBranchPicker(): void
+  closeBranchPicker(): void
+  /** After switching or creating a branch: files on disk changed, so rescan and refresh git. */
+  branchChanged(): void
   closeApply(): void
   /** Writes the selected changes. Resolves to an error message, or null on success. */
   apply(backup: boolean): Promise<string | null>

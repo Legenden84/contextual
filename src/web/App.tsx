@@ -1,6 +1,7 @@
 import { StatusBar } from '@/components/shell/StatusBar'
 import { TitleBar } from '@/components/shell/TitleBar'
 import { FolderDialog } from '@/components/project/FolderDialog'
+import { BranchPicker } from '@/components/scm/BranchPicker'
 import { SettingsScreen } from '@/screens/SettingsScreen'
 import { WelcomeScreen } from '@/screens/WelcomeScreen'
 import { WorkspaceScreen } from '@/screens/WorkspaceScreen'
@@ -8,7 +9,7 @@ import { AppProvider } from '@/state/AppProvider'
 import { useApp } from '@/state/app-context'
 
 function Shell() {
-  const { screen, project, folderDialogOpen } = useApp()
+  const { screen, project, folderDialogOpen, branchPickerOpen } = useApp()
   const title =
     screen === 'settings' ? 'Settings — Contextual' : screen === 'workspace' && project ? `${project.name} — Contextual` : 'Contextual'
   return (
@@ -19,6 +20,7 @@ function Shell() {
         {screen === 'workspace' && project && <WorkspaceScreen />}
         {screen === 'settings' && <SettingsScreen />}
         {folderDialogOpen && <FolderDialog />}
+        {branchPickerOpen && project && <BranchPicker />}
       </div>
       <StatusBar />
     </div>

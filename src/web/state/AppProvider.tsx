@@ -212,6 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files')
   const [gitTick, setGitTick] = useState(0)
   const [git, setGit] = useState<api.GitStatus | null>(null)
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const [settings, setSettings] = useState<Settings>(readSettings)
@@ -1008,6 +1009,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCenterView('chat')
       },
       gitChanged: () => setGitTick((t) => t + 1),
+      openBranchPicker: () => setBranchPickerOpen(true),
+      closeBranchPicker: () => setBranchPickerOpen(false),
+      branchChanged: () => {
+        setBranchPickerOpen(false)
+        setGitTick((t) => t + 1)
+        void rescan()
+      },
       closeApply: () => setApplyOpen(false),
       apply,
       undoApply,
@@ -1055,6 +1063,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sidebarTab,
     gitTick,
     git,
+    branchPickerOpen,
     toast,
     settings,
     totals,
