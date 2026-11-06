@@ -31,62 +31,6 @@
       "branch": "feature/parity",
       "tree": [
         {
-          "name": ".claude",
-          "path": ".claude",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "settings.json",
-              "path": ".claude/settings.json",
-              "kind": "file",
-              "tokens": 1,
-              "mtimeMs": "<mtime>"
-            }
-          ]
-        },
-        {
-          "name": ".cursor",
-          "path": ".cursor",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "rules",
-              "path": ".cursor/rules",
-              "kind": "dir",
-              "children": [
-                {
-                  "name": "ignore.txt",
-                  "path": ".cursor/rules/ignore.txt",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "notes.md",
-                  "path": ".cursor/rules/notes.md",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "style.mdc",
-                  "path": ".cursor/rules/style.mdc",
-                  "kind": "file",
-                  "tokens": 9,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "Zeta.MD",
-                  "path": ".cursor/rules/Zeta.MD",
-                  "kind": "file",
-                  "tokens": 1,
-                  "mtimeMs": "<mtime>"
-                }
-              ]
-            }
-          ]
-        },
-        {
           "name": ".github",
           "path": ".github",
           "kind": "dir",
@@ -596,7 +540,7 @@
           "content": "# deploy (lowercase marker)\n"
         }
       ],
-      "files": 33,
+      "files": 28,
       "truncated": false
     }
   },
@@ -623,63 +567,6 @@
       "root": "<TMP>/basic",
       "branch": "feature/parity",
       "tree": [
-        {
-          "name": ".claude",
-          "path": ".claude",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "settings.json",
-              "path": ".claude/settings.json",
-              "kind": "file",
-              "tokens": 1,
-              "mtimeMs": "<mtime>"
-            }
-          ]
-        },
-        {
-          "name": ".cursor",
-          "path": ".cursor",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "rules",
-              "path": ".cursor/rules",
-              "kind": "dir",
-              "children": [
-                {
-                  "name": "ignore.txt",
-                  "path": ".cursor/rules/ignore.txt",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "notes.md",
-                  "path": ".cursor/rules/notes.md",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "style.mdc",
-                  "path": ".cursor/rules/style.mdc",
-                  "kind": "file",
-                  "tokens": 9,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "Zeta.MD",
-                  "path": ".cursor/rules/Zeta.MD",
-                  "kind": "file",
-                  "tokens": 1,
-                  "excluded": "ignored: *.MD",
-                  "mtimeMs": "<mtime>"
-                }
-              ]
-            }
-          ]
-        },
         {
           "name": ".github",
           "path": ".github",
@@ -1202,7 +1089,7 @@
           "content": "# deploy (lowercase marker)\n"
         }
       ],
-      "files": 42,
+      "files": 38,
       "truncated": false
     }
   },
@@ -1220,62 +1107,6 @@
       "root": "<TMP>/basic",
       "branch": "feature/parity",
       "tree": [
-        {
-          "name": ".claude",
-          "path": ".claude",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "settings.json",
-              "path": ".claude/settings.json",
-              "kind": "file",
-              "tokens": 1,
-              "mtimeMs": "<mtime>"
-            }
-          ]
-        },
-        {
-          "name": ".cursor",
-          "path": ".cursor",
-          "kind": "dir",
-          "children": [
-            {
-              "name": "rules",
-              "path": ".cursor/rules",
-              "kind": "dir",
-              "children": [
-                {
-                  "name": "ignore.txt",
-                  "path": ".cursor/rules/ignore.txt",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "notes.md",
-                  "path": ".cursor/rules/notes.md",
-                  "kind": "file",
-                  "tokens": 3,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "style.mdc",
-                  "path": ".cursor/rules/style.mdc",
-                  "kind": "file",
-                  "tokens": 9,
-                  "mtimeMs": "<mtime>"
-                },
-                {
-                  "name": "Zeta.MD",
-                  "path": ".cursor/rules/Zeta.MD",
-                  "kind": "file",
-                  "tokens": 1,
-                  "mtimeMs": "<mtime>"
-                }
-              ]
-            }
-          ]
-        },
         {
           "name": ".github",
           "path": ".github",
@@ -1832,7 +1663,7 @@
           "content": "# deploy (lowercase marker)\n"
         }
       ],
-      "files": 40,
+      "files": 35,
       "truncated": false
     }
   },

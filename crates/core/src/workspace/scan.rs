@@ -31,8 +31,41 @@ const MAX_CONDENSE_BYTES: u64 = 2 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 20_000;
 /// Never listed or traversed: VCS internals and Contextual's own backups.
 const ALWAYS_SKIP: [&str; 2] = [".git", ".contextual"];
-/// Hidden folders still worth showing: they hold instruction files.
-const HIDDEN_ALLOWED: [&str; 4] = [".github", ".cursor", ".claude", ".gitignore"];
+/// Hidden entries still shown in the explorer.
+const HIDDEN_ALLOWED: [&str; 2] = [".github", ".gitignore"];
+/// AI-tool configuration folders (Claude, OpenAI Codex, Cursor, Gemini, DeepSeek…): never shown
+/// in the explorer or sent as files, but searched for skills and rules, which usually live here.
+pub const AGENT_DIRS: &[&str] = &[
+    ".agents",
+    ".aider",
+    ".amazonq",
+    ".augment",
+    ".claude",
+    ".cline",
+    ".codeium",
+    ".codex",
+    ".continue",
+    ".cursor",
+    ".deepseek",
+    ".gemini",
+    ".junie",
+    ".kilocode",
+    ".kiro",
+    ".openai",
+    ".opencode",
+    ".qwen",
+    ".roo",
+    ".trae",
+    ".windsurf",
+];
+/// Inside agent folders: tool state that is never searched (Claude Code's worktrees are full
+/// copies of the repository).
+const AGENT_STATE: &[&str] = &[".claude/worktrees"];
+
+/// An AI-tool folder (by name, case-insensitive).
+pub fn is_agent_dir(name: &str) -> bool {
+    AGENT_DIRS.iter().any(|d| d.eq_ignore_ascii_case(name))
+}
 const LOCK_FILES: [&str; 10] = [
     "package-lock.json",
     "yarn.lock",
@@ -457,6 +490,9 @@ impl Discovery<'_> {
             }
             let abs = dir.join(&e.name);
             let rel = to_rel(self.root, &abs);
+            if AGENT_STATE.iter().any(|s| rel.eq_ignore_ascii_case(s)) {
+                continue;
+            }
             if !(self.skip_directory)(&rel, &e.name) {
                 self.discover(&abs);
             }
@@ -535,7 +571,7 @@ impl Walker<'_> {
 
         let mut out = Vec::new();
         for e in &entries {
-            if ALWAYS_SKIP.contains(&e.name.as_str()) {
+            if ALWAYS_SKIP.contains(&e.name.as_str()) || (e.is_dir && is_agent_dir(&e.name)) {
                 continue;
             }
             if self.count >= MAX_ENTRIES {
@@ -682,8 +718,9 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
     }
     let exclusions = Exclusions::new(&root, opts);
 
-    // Discovery includes hidden framework folders, but still respects explicit exclusions and
-    // .gitignore. Skill support files are not ordinary selectable project context.
+    // Discovery includes hidden framework folders (and the agent folders the explorer leaves
+    // out), but still respects explicit exclusions and .gitignore. Skill support files are not
+    // ordinary selectable project context.
     let skip = |rel: &str, name: &str| exclusions.reason(rel, name, true, false, true).is_some();
     let discovered = find_rules(&root, &skip);
     let mut skill_parents = HashSet::new();
@@ -731,6 +768,48 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_folders_are_hidden_but_searched_for_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str, text: &str| {
+            let p = root.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, text).unwrap();
+        };
+        write("src/main.rs", "fn main() {}\n");
+        write(".claude/skills/review/SKILL.md", "# Review\n");
+        write(".claude/settings.json", "{}\n");
+        write(
+            ".claude/worktrees/copy/.claude/skills/review/SKILL.md",
+            "# Copy\n",
+        );
+        write(".claude/worktrees/copy/src/main.rs", "fn main() {}\n");
+        write(".codex/skills/ship/SKILL.md", "# Ship\n");
+        write(".gemini/notes.md", "notes\n");
+        write(".cursor/rules/style.mdc", "Use tabs.\n");
+        write(".github/workflows/ci.yml", "on: push\n");
+
+        let scan = scan_project(&root.to_string_lossy(), &ScanOptions::default()).unwrap();
+        let top: Vec<&str> = scan.tree.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(
+            top,
+            vec![".github", "src"],
+            "agent folders stay out of the explorer"
+        );
+        assert_eq!(scan.files, 2);
+        let rules: Vec<&str> = scan.rules.iter().map(|r| r.path.as_str()).collect();
+        assert!(rules.contains(&".cursor/rules/style.mdc"));
+        assert!(rules.contains(&".claude/skills/review/SKILL.md"));
+        assert!(rules.contains(&".codex/skills/ship/SKILL.md"));
+        assert!(
+            !rules.iter().any(|r| r.contains("worktrees")),
+            "Claude Code worktrees aren't searched: {rules:?}"
+        );
+        assert!(!scan.truncated);
+        assert!(is_agent_dir(".Claude") && !is_agent_dir(".github"));
+    }
 
     #[test]
     fn secrets() {
