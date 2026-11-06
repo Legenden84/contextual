@@ -1,0 +1,43 @@
+[package]
+name = "contextual-core"
+description = "Headless Contextual logic: workspace (files, scan, apply, git, PRs), LLM, threads, settings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+contextual-protocol = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+directories = { workspace = true }
+dunce = { workspace = true }
+futures = { workspace = true }
+globset = { workspace = true }
+hex = { workspace = true }
+ignore = { workspace = true }
+image = { workspace = true }
+md-5 = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
