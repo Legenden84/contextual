@@ -10,7 +10,9 @@ use std::sync::Arc;
 use contextual_theme::{
     Appearance, FontFamily, Rgba, Shadow, Theme as Tokens, TypeStyle, radius, space,
 };
-use gpui_kit::component::highlighter::HighlightTheme;
+use gpui_kit::base::text::CodeBlock;
+use gpui_kit::component::Rope;
+use gpui_kit::component::highlighter::{HighlightTheme, SyntaxHighlighter};
 use gpui_kit::component::theme::{Theme as ComponentTheme, ThemeMode};
 use gpui_kit::{
     App, BoxShadow, FontFeatures, FontWeight, Global, Hsla, Pixels, Styled, Window, point, px,
@@ -54,6 +56,22 @@ impl ActiveTheme for App {
     }
 }
 
+/// Registers grammars gpui-component lacks highlight queries for. Call once at startup.
+pub fn register_languages() {
+    use gpui_kit::component::highlighter::{LanguageConfig, LanguageRegistry};
+    LanguageRegistry::singleton().register(
+        "csharp",
+        &LanguageConfig::new(
+            "csharp",
+            tree_sitter_c_sharp::LANGUAGE.into(),
+            vec![],
+            tree_sitter_c_sharp::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+    );
+}
+
 /// Switches the whole app to `appearance`: our tokens, then gpui-component's theme.
 pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) {
     let tokens = Tokens::get(appearance);
@@ -65,6 +83,17 @@ pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) 
     // `change` reloads the component theme's colours, so edit them in a second update.
     ComponentTheme::change(mode, window, cx);
     ComponentTheme::update(cx, |t| configure_components(t, tokens));
+    let highlight = Arc::new(highlight_theme(tokens));
+    cx.set_global(CodeHighlighter(Arc::new(move |block: &CodeBlock| {
+        let Some(lang) = block.lang() else {
+            return Vec::new();
+        };
+        let code = block.code();
+        let rope = Rope::from_str(code.as_ref());
+        let mut h = SyntaxHighlighter::new(lang.as_ref());
+        h.update(None, &rope, None);
+        h.styles(&(0..code.len()), highlight.as_ref())
+    })));
     cx.refresh_windows();
 }
 
@@ -209,6 +238,15 @@ fn highlight_theme(tokens: &Tokens) -> HighlightTheme {
     serde_json::from_value(value).expect("highlight theme JSON matches gpui-component's schema")
 }
 
+type HighlightFn =
+    dyn Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, gpui_kit::HighlightStyle)> + Send + Sync;
+
+/// Highlighter for code blocks in chat, in the `syn-*` colours. One shared `Arc` per theme, so
+/// code blocks keep their highlights between frames.
+pub struct CodeHighlighter(pub Arc<HighlightFn>);
+
+impl Global for CodeHighlighter {}
+
 /// Applies a token type style (size, line height, weight, tracking, family) to an element.
 pub trait TypeExt: Styled + Sized {
     fn type_style(self, s: TypeStyle) -> Self {
@@ -270,5 +308,27 @@ pub fn resolve(pref: contextual_core::settings::ThemePreference, window: &Window
             }
             _ => Appearance::Dark,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlights_code_in_syn_colours() {
+        register_languages();
+        let theme = highlight_theme(&Tokens::DARK);
+        for (lang, code) in [
+            ("rust", "fn main() { let x = 1; }"),
+            ("csharp", "public class A { int x = 1; }"),
+        ] {
+            let rope = Rope::from_str(code);
+            let mut h = SyntaxHighlighter::new(lang);
+            h.update(None, &rope, None);
+            let styles = h.styles(&(0..code.len()), &theme);
+            let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
+            assert!(colored > 0, "{lang}: no coloured ranges in {styles:?}");
+        }
     }
 }

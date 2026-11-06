@@ -1,5 +1,6 @@
 //! Workspace (design spec: ScreenWorkspace): sidebar, centre tabs (Chat plus read-only previews)
-//! and the composer area with the context bar. Chat and the Changes panel arrive in Phase 4.
+//! with the chat and composer, and the Changes panel when a reply proposes changes. The diff view
+//! replaces the centre and right columns.
 
 use std::collections::HashMap;
 
@@ -11,12 +12,20 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
+use crate::state::chat::{CenterView, ChatModel};
 use crate::state::{AppModel, Project, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
-use crate::ui::{Tag, file_glyph};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, file_glyph};
+use crate::views::changes_panel::ChangesPanel;
+use crate::views::chat_panel::ChatPanel;
+use crate::views::chats_menu::ChatsMenu;
 use crate::views::code_preview::CodePreview;
 use crate::views::context_bar::context_bar;
+use crate::views::diff_cache::DiffCache;
+use crate::views::diff_screen::DiffScreen;
+use crate::views::save_dialog::SaveDialog;
 use crate::views::sidebar::Sidebar;
+use crate::views::toast::toast;
 
 /// Centre tab bar height.
 const TABS_H: f32 = 36.0;
@@ -26,6 +35,12 @@ pub struct WorkspaceScreen {
     project: Entity<Project>,
     sidebar: Entity<Sidebar>,
     previews: HashMap<String, Entity<CodePreview>>,
+    chat: Entity<ChatModel>,
+    chat_panel: Entity<ChatPanel>,
+    changes: Entity<ChangesPanel>,
+    diff: Entity<DiffScreen>,
+    chats: Entity<ChatsMenu>,
+    save_dialog: Option<Entity<SaveDialog>>,
     _subs: Vec<Subscription>,
 }
 
@@ -54,8 +69,35 @@ impl WorkspaceScreen {
             }),
             cx.observe(&app, |_, _, cx| cx.notify()),
         ];
+        let host = app.read(cx).host();
+        let chat = cx.new(|cx| ChatModel::new(project.clone(), host, cx));
+        let diffs = DiffCache::default();
+        let mut subs = subs;
+        subs.push(
+            cx.observe_in(&chat, window, |this: &mut Self, chat, window, cx| {
+                // The Save dialog lives while the model says it's open.
+                let open = chat.read(cx).save_dialog_open;
+                if open && this.save_dialog.is_none() {
+                    let (app, chat) = (this.app.clone(), chat.clone());
+                    this.save_dialog = Some(cx.new(|cx| SaveDialog::new(app, chat, window, cx)));
+                } else if !open {
+                    this.save_dialog = None;
+                }
+                cx.notify();
+            }),
+        );
+        let chat_panel =
+            cx.new(|cx| ChatPanel::new(app.clone(), project.clone(), chat.clone(), window, cx));
+        let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
+        crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         Self {
             sidebar: cx.new(|cx| Sidebar::new(app.clone(), project.clone(), window, cx)),
+            chat_panel,
+            changes: cx.new(|cx| ChangesPanel::new(chat.clone(), diffs.clone(), cx)),
+            diff: cx.new(|cx| DiffScreen::new(chat.clone(), diffs, cx)),
+            chats,
+            save_dialog: None,
+            chat,
             app,
             project,
             previews: HashMap::new(),
@@ -154,86 +196,112 @@ impl Render for WorkspaceScreen {
             })
             .collect();
 
+        let chat = self.chat.read(cx);
+        let has_changes = !chat.changes().is_empty();
+        let diff_view = chat.center == CenterView::Diff && has_changes;
+
         let body = match &active {
-            Tab::Preview(path) => match self.previews.get(path) {
-                Some(view) => div().flex().flex_col().flex_1().min_h_0().child(view.clone()),
-                None => div().flex_1(),
-            },
-            Tab::Chat => div()
+            Tab::Preview(path) => {
+                let view = self
+                    .previews
+                    .get(path)
+                    .map(|v| v.clone().into_any_element())
+                    .unwrap_or_else(|| div().into_any_element());
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .child(div().flex().flex_col().flex_1().min_h_0().child(view))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .justify_center()
+                            .px(sp(4))
+                            .pb(sp(2))
+                            .child(div().w_full().max_w(px(layout::CONTENT_MAX_WIDTH)).child(
+                                context_bar(&self.app, &self.project, Some(&self.chat), cx),
+                            )),
+                    )
+                    .into_any_element()
+            }
+            Tab::Chat => self.chat_panel.clone().into_any_element(),
+        };
+
+        let tab_bar = div()
+            .id("center-tabs")
+            .flex()
+            .flex_none()
+            .h(px(TABS_H))
+            .border_b_1()
+            .border_color(hsla(c.border))
+            .bg(hsla(c.surface_000))
+            .type_style(contextual_theme::type_style::UI_BODY)
+            .child(
+                div()
+                    .id("tab-strip")
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_x_scroll()
+                    .child(chat_tab)
+                    .children(preview_tabs),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(sp(1))
+                    .px(sp(2))
+                    .child(
+                        Button::new("chats", "Chats")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .on_click(
+                                cx.listener(|t, _, _, cx| t.chats.update(cx, |m, cx| m.toggle(cx))),
+                            ),
+                    ),
+            );
+
+        let main = if diff_view {
+            div().flex().flex_1().min_w_0().child(self.diff.clone())
+        } else {
+            div()
                 .flex()
                 .flex_1()
-                .min_h_0()
-                .items_center()
-                .justify_center()
+                .min_w_0()
                 .child(
                     div()
+                        .relative()
                         .flex()
                         .flex_col()
-                        .items_center()
-                        .gap(sp(2))
-                        .max_w(px(layout::CONTENT_MAX_WIDTH))
-                        .type_style(contextual_theme::type_style::UI_PROSE)
-                        .text_color(hsla(c.ink_muted))
-                        .child(div().text_color(hsla(c.ink_strong)).type_style(contextual_theme::type_style::UI_TITLE).child("Pick the files the model should see"))
-                        .child("Tick files in the explorer, then ask for a change. Click a file to preview it."),
-                ),
+                        .flex_1()
+                        .min_w_0()
+                        .bg(hsla(c.surface_100))
+                        .child(tab_bar)
+                        .child(body)
+                        .child(
+                            div()
+                                .absolute()
+                                .top(px(TABS_H))
+                                .right_0()
+                                .child(self.chats.clone()),
+                        ),
+                )
+                .when(has_changes, |d| d.child(self.changes.clone()))
         };
 
         div()
+            .relative()
             .flex()
             .flex_1()
             .min_h_0()
             .min_w_0()
             .child(self.sidebar.clone())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .bg(hsla(c.surface_100))
-                    .child(
-                        div()
-                            .id("center-tabs")
-                            .flex()
-                            .flex_none()
-                            .h(px(TABS_H))
-                            .border_b_1()
-                            .border_color(hsla(c.border))
-                            .bg(hsla(c.surface_000))
-                            .type_style(contextual_theme::type_style::UI_BODY)
-                            .overflow_x_scroll()
-                            .child(chat_tab)
-                            .children(preview_tabs),
-                    )
-                    .child(body)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_none()
-                            .items_center()
-                            .px(sp(4))
-                            .pb(sp(3))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .max_w(px(layout::CONTENT_MAX_WIDTH))
-                                    .child(context_bar(&self.app, &self.project, cx))
-                                    .child(
-                                        div()
-                                            .px(sp(3))
-                                            .py(sp(3))
-                                            .rounded(px(contextual_theme::radius::MD))
-                                            .border_1()
-                                            .border_color(hsla(c.border_strong))
-                                            .bg(hsla(c.surface_200))
-                                            .type_style(contextual_theme::type_style::UI_BODY)
-                                            .text_color(hsla(c.ink_faint))
-                                            .child("Chat arrives in the next phase."),
-                                    ),
-                            ),
-                    ),
-            )
+            .child(main)
+            .when_some(toast(&self.app, &self.chat, cx), |d, t| d.child(t))
+            .when_some(self.save_dialog.clone(), |d, s| d.child(s))
     }
 }

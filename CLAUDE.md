@@ -52,6 +52,9 @@ Development is Linux-only (plan §8): `cargo run -p contextual` opens the app th
 Windows `.exe` cross-compiles with `--target x86_64-pc-windows-gnu`. Plain `cargo build`/`test`
 skip `crates/app` (default members); use `--workspace` to include it.
 - `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Checking flows without clicking (debug builds only, see `crates/app/src/dev.rs`):
+  `CONTEXTUAL_DEV_SEND="…" CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats cargo run -p contextual -- <project>`,
+  with `AZURE_OPENAI_*` pointing at a local mock (`http://localhost:<port>/` is allowed) when no key is at hand.
 - App views use only `contextual-theme` values via `crates/app/src/theme.rs` (`hsla(token)`, `TypeExt::type_style`, `sp(n)`); CI rejects literal colours in `crates/app/src`.
 - Windows/macOS type-check from WSL: `cargo clippy -p contextual-core --no-default-features --target x86_64-pc-windows-msvc --target-dir target/xcheck`
   (the `llm` feature needs a C cross-compiler for `ring`).

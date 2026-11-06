@@ -22,10 +22,14 @@ pub fn init(cx: &mut App) {
 
 /// Runs `fut` on the tokio runtime. Await the result from a GPUI task; a panic in `fut` becomes
 /// an internal error rather than taking the UI down.
-pub fn spawn<T: Send + 'static>(
+pub fn spawn<T, F>(
     cx: &App,
-    fut: impl Future<Output = contextual_core::Result<T>> + Send + 'static,
-) -> impl Future<Output = contextual_core::Result<T>> + 'static {
+    fut: F,
+) -> impl Future<Output = contextual_core::Result<T>> + 'static + use<T, F>
+where
+    T: Send + 'static,
+    F: Future<Output = contextual_core::Result<T>> + Send + 'static,
+{
     let handle = cx.global::<Runtime>().0.spawn(fut);
     async move {
         handle.await.unwrap_or_else(|e| {
@@ -34,4 +38,19 @@ pub fn spawn<T: Send + 'static>(
             )))
         })
     }
+}
+
+static LOCAL_OFFSET: std::sync::OnceLock<time::UtcOffset> = std::sync::OnceLock::new();
+
+/// Reads the local UTC offset. Call before any threads start: `time` refuses to read it later
+/// on Unix (the libc call isn't thread-safe), and times would then show in UTC.
+pub fn init_local_offset() {
+    let _ =
+        LOCAL_OFFSET.set(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
+}
+
+/// Now, in local time.
+pub fn now_local() -> time::OffsetDateTime {
+    time::OffsetDateTime::now_utc()
+        .to_offset(LOCAL_OFFSET.get().copied().unwrap_or(time::UtcOffset::UTC))
 }

@@ -10,8 +10,10 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px, relative};
 
+use crate::state::chat::ChatModel;
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use contextual_core::logic::prompt::ApiContent;
 
 const BAR_H: f32 = 28.0;
 const METER_W: f32 = 140.0;
@@ -20,6 +22,7 @@ const METER_H: f32 = 4.0;
 pub fn context_bar(
     app: &Entity<AppModel>,
     project: &Entity<Project>,
+    chat: Option<&Entity<ChatModel>>,
     cx: &App,
 ) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
@@ -27,17 +30,45 @@ pub fn context_bar(
     let p = project.read(cx);
     let deployment = a.deployment();
     let rules_on = p.rules_on();
-    let (versions, stale) = (HashMap::new(), HashSet::new());
+    let chat = chat.map(|c| c.read(cx));
+    let transcript: Vec<ApiContent> = chat
+        .map(|c| {
+            c.thread
+                .transcript
+                .iter()
+                .map(|m| m.content.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    let versions: HashMap<String, String> = chat
+        .map(|c| {
+            c.thread
+                .file_versions
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let stale: HashSet<String> = p
+        .selected
+        .iter()
+        .filter(|s| p.node(s).is_some_and(|n| n.changed_on_disk == Some(true)))
+        .cloned()
+        .collect();
+    let pictures: u64 = chat
+        .map(|c| c.attachments.iter().map(|a| a.tokens).sum())
+        .unwrap_or(0);
+    let resend_all = chat.is_some_and(|c| c.resend_all);
     let t = totals(&ContextInput {
         tree: p.tree(),
         selected: &p.selected,
         rules_on: &rules_on,
         output_format: &a.settings.workspace.output_prompt,
-        transcript: &[],
+        transcript: &transcript,
         file_versions: &versions,
         stale: &stale,
-        resend_all: false,
-        picture_tokens: 0,
+        resend_all,
+        picture_tokens: pictures,
         deployment: &deployment,
     });
     let (fill, ink) = match t.level {

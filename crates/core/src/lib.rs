@@ -9,6 +9,8 @@
 //! - [`threads`], [`settings`]: app-side persistence.
 //! - [`location`], [`wsl`]: where a project lives; WSL distro discovery (Windows app).
 
+#[cfg(feature = "llm")]
+pub mod chat;
 pub mod error;
 pub mod host;
 #[cfg(feature = "llm")]

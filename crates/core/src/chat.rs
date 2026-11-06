@@ -1,0 +1,595 @@
+//! A conversation as the app keeps it, and the pure steps of a turn (ported from `send` in
+//! `AppProvider.tsx`). The JSON shapes match what the old app saved, so saved chats carry over.
+//!
+//! The async parts (reading files through the host, streaming from Foundry, repairing edits)
+//! are orchestrated by the app; everything decidable without I/O lives here and is tested.
+
+use std::collections::{BTreeMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+
+use crate::llm::types::{ApiKind, ChatMessage as LlmMessage, ChatRole, MessageContent};
+use crate::logic::changes::{ChangeContext, parse_changes};
+use crate::logic::format::fmt_k;
+use crate::logic::hash::hash_text;
+use crate::logic::markdown::{Block, parse_markdown};
+use crate::logic::prompt::{ApiContent, ContextFile, ContextImage, TurnInput, build_turn};
+use crate::logic::types::{Change, ChangeStatus, Deployment};
+use contextual_protocol::fs::FileContent;
+
+/// One turn as sent to / received from the model (`ApiMessage` in the old app).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApiMessage {
+    pub role: ChatRole,
+    pub content: ApiContent,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestRef {
+    pub url: String,
+    pub number: Option<u64>,
+    pub branch: String,
+}
+
+/// The conversation as the model has seen it, so each turn sends only what's new.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadState {
+    pub id: String,
+    /// Azure's id for the last reply (Responses API); `None` when the transcript must be sent.
+    pub response_id: Option<String>,
+    pub api: Option<ApiKind>,
+    /// Turns exactly as sent and received (a stable prefix for prompt caching).
+    pub transcript: Vec<ApiMessage>,
+    /// Version (hash) of each file the model has, by path.
+    pub file_versions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Files saved from this chat's replies and not yet in a pull request.
+    #[serde(default)]
+    pub applied: Vec<String>,
+    #[serde(default)]
+    pub pull_requests: Vec<PullRequestRef>,
+}
+
+impl ThreadState {
+    pub fn fresh() -> Self {
+        Self {
+            id: format!("t{}", uuid::Uuid::new_v4().simple()),
+            response_id: None,
+            api: None,
+            transcript: Vec::new(),
+            file_versions: BTreeMap::new(),
+            title: None,
+            applied: Vec::new(),
+            pull_requests: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Assistant,
+    Note,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tone {
+    Warn,
+    Error,
+    Ok,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessageImage {
+    pub name: String,
+    pub url: String,
+}
+
+/// A message as the chat shows it (`ChatMessage` in the old app).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiMessage {
+    pub id: String,
+    pub role: Role,
+    pub text: String,
+    pub time: String,
+    /// User: what was sent with it. Assistant: usage and cost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<Vec<Change>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub streaming: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent: Option<ApiContent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<MessageImage>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<Tone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<ApiKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+}
+
+impl UiMessage {
+    fn new(prefix: &str, role: Role, text: String, time: &str) -> Self {
+        Self {
+            id: new_id(prefix),
+            role,
+            text,
+            time: time.to_string(),
+            meta: None,
+            model: None,
+            changes: None,
+            streaming: false,
+            sent: None,
+            images: None,
+            tone: None,
+            api: None,
+            usage: None,
+            cost: None,
+        }
+    }
+
+    /// A sent message: `meta` says what went with it, `sent` is the content as sent.
+    pub fn user(text: &str, turn: &PreparedTurn, time: &str) -> Self {
+        Self {
+            meta: Some(turn.meta.clone()),
+            sent: Some(turn.input.clone()),
+            images: (!turn.images.is_empty()).then(|| turn.images.clone()),
+            ..Self::new("u", Role::User, text.to_string(), time)
+        }
+    }
+
+    /// An empty reply that is about to stream in.
+    pub fn assistant(model: &str, time: &str) -> Self {
+        Self {
+            model: Some(model.to_string()),
+            streaming: true,
+            ..Self::new("a", Role::Assistant, String::new(), time)
+        }
+    }
+
+    pub fn note(text: impl Into<String>, tone: Tone, time: &str) -> Self {
+        Self {
+            tone: Some(tone),
+            ..Self::new("n", Role::Note, text.into(), time)
+        }
+    }
+}
+
+pub fn new_id(prefix: &str) -> String {
+    format!(
+        "{prefix}{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    )
+}
+
+/// What `threads.rs` stores per conversation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedThread {
+    pub version: u32,
+    #[serde(flatten)]
+    pub thread: ThreadState,
+    pub messages: Vec<UiMessage>,
+}
+
+impl SavedThread {
+    pub fn new(thread: ThreadState, messages: Vec<UiMessage>) -> Self {
+        Self {
+            version: 1,
+            thread,
+            messages,
+        }
+    }
+
+    /// Title for the Chats list: the user's, else the first message (80 chars).
+    pub fn title(&self) -> String {
+        self.thread.title.clone().unwrap_or_else(|| {
+            self.messages
+                .iter()
+                .find(|m| m.role == Role::User)
+                .map(|m| m.text.chars().take(80).collect())
+                .unwrap_or_else(|| "Conversation".into())
+        })
+    }
+
+    pub fn turns(&self) -> usize {
+        self.thread.transcript.len() / 2
+    }
+
+    /// The changes of the latest reply that had any (what the Changes panel shows).
+    pub fn last_changes(messages: &[UiMessage]) -> Vec<Change> {
+        messages
+            .iter()
+            .rev()
+            .find_map(|m| m.changes.clone().filter(|c| !c.is_empty()))
+            .unwrap_or_default()
+    }
+}
+
+/// The next turn, ready to send.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedTurn {
+    pub input: ApiContent,
+    /// `file_versions` after this turn (committed only if the turn completes).
+    pub versions: BTreeMap<String, String>,
+    pub images: Vec<MessageImage>,
+    /// "3 of 5 files sent (2 unchanged) · 1 rules"
+    pub meta: String,
+}
+
+/// Builds the turn from freshly read files: only files the model doesn't have yet (or that
+/// changed since) are attached; dropped files are listed as removed.
+pub fn prepare_turn(
+    thread: &ThreadState,
+    read: &[FileContent],
+    selected: &HashSet<String>,
+    text: &str,
+    attachments: &[MessageImage],
+    rules_on: usize,
+    force_all: bool,
+) -> PreparedTurn {
+    let mut versions = thread.file_versions.clone();
+    let mut changed = Vec::new();
+    let mut unchanged = Vec::new();
+    for f in read {
+        let unavailable = format!("unavailable:{}", f.error.as_deref().unwrap_or(""));
+        let version = hash_text(
+            f.image
+                .as_deref()
+                .or(f.content.as_deref())
+                .unwrap_or(&unavailable),
+        );
+        if !force_all && versions.get(&f.path) == Some(&version) {
+            unchanged.push(f.path.clone());
+        } else {
+            changed.push(ContextFile {
+                path: f.path.clone(),
+                content: f.content.clone(),
+                image: f.image.clone(),
+                condensed: f.condensed_from.is_some(),
+            });
+            versions.insert(f.path.clone(), version);
+        }
+    }
+    let removed: Vec<String> = versions
+        .keys()
+        .filter(|p| !selected.contains(*p))
+        .cloned()
+        .collect();
+    for p in &removed {
+        versions.remove(p);
+    }
+    let input = build_turn(&TurnInput {
+        text: text.to_string(),
+        files: changed.clone(),
+        unchanged: unchanged.clone(),
+        removed,
+        attachments: attachments
+            .iter()
+            .map(|a| ContextImage {
+                name: a.name.clone(),
+                url: a.url.clone(),
+            })
+            .collect(),
+    });
+    let total = read.len();
+    let files = if total == 0 {
+        "no files".to_string()
+    } else {
+        let mut s = format!(
+            "{} of {total} {} sent",
+            changed.len(),
+            if total == 1 { "file" } else { "files" }
+        );
+        if !unchanged.is_empty() {
+            s.push_str(&format!(" ({} unchanged)", unchanged.len()));
+        }
+        s
+    };
+    PreparedTurn {
+        input,
+        versions,
+        images: attachments.to_vec(),
+        meta: format!("{files} · {rules_on} rules"),
+    }
+}
+
+/// The transcript as Foundry request messages.
+pub fn history(thread: &ThreadState) -> Vec<LlmMessage> {
+    thread
+        .transcript
+        .iter()
+        .map(|m| LlmMessage {
+            role: m.role,
+            content: to_message_content(&m.content),
+        })
+        .collect()
+}
+
+/// `ApiContent` (prompt layer) → `MessageContent` (Foundry layer): the same JSON shape.
+pub fn to_message_content(c: &ApiContent) -> MessageContent {
+    serde_json::from_value(serde_json::to_value(c).expect("content serialises"))
+        .expect("same wire shape")
+}
+
+/// Paths of the files a reply proposes to write, edit or delete.
+pub fn touched_paths(reply: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(blocks: &[Block], out: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Code { path: Some(p), .. }
+                | Block::Edit { path: p, .. }
+                | Block::Delete { path: p } => {
+                    if !out.contains(p) {
+                        out.push(p.clone())
+                    }
+                }
+                Block::Quote { blocks } => walk(blocks, out),
+                _ => {}
+            }
+        }
+    }
+    walk(&parse_markdown(reply), &mut out);
+    out
+}
+
+/// Parses a finished reply into proposed changes (none when the reply was cut off).
+pub fn proposed_changes(reply: &str, truncated: bool, ctx: &dyn ChangeContext) -> Vec<Change> {
+    if truncated {
+        Vec::new()
+    } else {
+        parse_changes(reply, ctx)
+    }
+}
+
+/// Drops no-op modifications (same content, no conflict).
+pub fn visible_changes(changes: Vec<Change>) -> Vec<Change> {
+    changes
+        .into_iter()
+        .filter(|c| !(c.status == ChangeStatus::M && c.old == c.new && c.conflict.is_none()))
+        .collect()
+}
+
+/// "12k in (8k cached) / 1.5k out · $0.031" and the cost, when prices are set.
+pub fn usage_meta(usage: &Usage, dep: &Deployment) -> (String, Option<f64>) {
+    let priced = dep.in_price > 0.0 || dep.out_price > 0.0;
+    let cost = priced.then(|| {
+        usage.input_tokens as f64 / 1e6 * dep.in_price
+            + usage.output_tokens as f64 / 1e6 * dep.out_price
+    });
+    let mut meta = format!("{} in", fmt_k(usage.input_tokens));
+    if usage.cached_tokens > 0 {
+        meta.push_str(&format!(" ({} cached)", fmt_k(usage.cached_tokens)));
+    }
+    meta.push_str(&format!(" / {} out", fmt_k(usage.output_tokens)));
+    if let Some(c) = cost {
+        meta.push_str(&format!(" · ${c:.3}"));
+    }
+    (meta, cost)
+}
+
+/// Notices shown after a turn (as the old app did).
+pub fn turn_notes(
+    failure: Option<&str>,
+    chain_reset: bool,
+    api: Option<ApiKind>,
+    previous_api: Option<ApiKind>,
+    truncated: bool,
+) -> Vec<(String, Tone)> {
+    let mut out = Vec::new();
+    if let Some(f) = failure {
+        out.push((
+            f.to_string(),
+            if f == STOPPED {
+                Tone::Warn
+            } else {
+                Tone::Error
+            },
+        ));
+    }
+    if chain_reset && api == Some(ApiKind::Responses) {
+        out.push((
+            "Azure no longer had this conversation stored, so the full conversation was sent once and a new chain started.".into(),
+            Tone::Warn,
+        ));
+    }
+    if api == Some(ApiKind::Chat) && previous_api == Some(ApiKind::Responses) {
+        out.push((
+            "The Responses API is not available for this deployment; the full conversation is now sent with each message.".into(),
+            Tone::Warn,
+        ));
+    }
+    if truncated {
+        out.push((
+            "The reply hit the completion token limit and was cut off, so its file changes were not offered for saving. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.".into(),
+            Tone::Warn,
+        ));
+    }
+    out
+}
+
+/// Failure text when the user pressed Stop.
+pub const STOPPED: &str = "Stopped.";
+
+/// After saving: the model wrote these versions itself, so they needn't be sent back.
+pub fn record_saved(thread: &mut ThreadState, saved: &[Change]) {
+    for c in saved {
+        if c.status == ChangeStatus::D {
+            thread.file_versions.remove(&c.path);
+        } else {
+            thread
+                .file_versions
+                .insert(c.path.clone(), hash_text(&c.new));
+        }
+        if !thread.applied.contains(&c.path) {
+            thread.applied.push(c.path.clone());
+        }
+    }
+}
+
+/// "3 files saved" and "1 deleted, 1 created, 1 overwritten · not committed on main".
+pub fn saved_toast(saved: &[Change], branch: Option<&str>) -> (String, String) {
+    let n = saved.len();
+    let count = |s: ChangeStatus| saved.iter().filter(|c| c.status == s).count();
+    let parts: Vec<String> = [
+        (ChangeStatus::D, "deleted"),
+        (ChangeStatus::A, "created"),
+        (ChangeStatus::M, "overwritten"),
+    ]
+    .into_iter()
+    .filter(|(s, _)| count(*s) > 0)
+    .map(|(s, w)| format!("{} {w}", count(s)))
+    .collect();
+    let title = format!("{n} {} saved", if n == 1 { "file" } else { "files" });
+    let mut detail = format!("{} · not committed", parts.join(", "));
+    if let Some(b) = branch {
+        detail.push_str(&format!(" on {b}"));
+    }
+    (title, detail)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(path: &str, content: &str) -> FileContent {
+        FileContent {
+            path: path.into(),
+            content: Some(content.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_new_or_changed_files_are_attached() {
+        let mut thread = ThreadState::fresh();
+        let selected: HashSet<String> = ["a.rs".into(), "b.rs".into()].into();
+        let read = [file("a.rs", "fn a() {}\n"), file("b.rs", "fn b() {}\n")];
+        let t1 = prepare_turn(&thread, &read, &selected, "hi", &[], 1, false);
+        assert_eq!(t1.meta, "2 of 2 files sent · 1 rules");
+        thread.file_versions = t1.versions;
+
+        let read2 = [
+            file("a.rs", "fn a() {}\n"),
+            file("b.rs", "fn b() { changed }\n"),
+        ];
+        let t2 = prepare_turn(&thread, &read2, &selected, "again", &[], 1, false);
+        assert_eq!(t2.meta, "1 of 2 files sent (1 unchanged) · 1 rules");
+        let text = crate::logic::prompt::content_text(&t2.input);
+        assert!(text.contains("b.rs") && text.contains("changed"));
+        assert!(text.contains("Unchanged files"));
+
+        // Deselected files are dropped from the versions and reported as removed.
+        let only_a: HashSet<String> = ["a.rs".into()].into();
+        let t3 = prepare_turn(&thread, &read2[..1], &only_a, "x", &[], 0, false);
+        assert!(!t3.versions.contains_key("b.rs"));
+        // Force: everything is attached again.
+        let t4 = prepare_turn(&thread, &read2, &selected, "x", &[], 0, true);
+        assert_eq!(t4.meta, "2 of 2 files sent · 0 rules");
+    }
+
+    #[test]
+    fn saved_thread_reads_the_old_format() {
+        let old = serde_json::json!({
+            "version": 1, "id": "t1", "responseId": "resp_1", "api": "responses",
+            "transcript": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
+            "fileVersions": {"a.rs": "abc"}, "applied": [], "pullRequests": [],
+            "messages": [
+                {"id": "u1", "role": "user", "text": "hi", "time": "10:00", "meta": "no files · 0 rules"},
+                {"id": "a1", "role": "assistant", "text": "hello", "time": "10:00", "model": "gpt", "api": "responses",
+                 "usage": {"inputTokens": 10, "outputTokens": 2, "cachedTokens": 0}, "changes": []}
+            ]
+        });
+        let saved: SavedThread = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(saved.title(), "hi");
+        assert_eq!(saved.turns(), 1);
+        assert_eq!(saved.thread.response_id.as_deref(), Some("resp_1"));
+        let again = serde_json::to_value(&saved).unwrap();
+        assert_eq!(again["fileVersions"], old["fileVersions"]);
+        assert_eq!(again["messages"][1]["usage"], old["messages"][1]["usage"]);
+    }
+
+    #[test]
+    fn touched_paths_and_toasts() {
+        let reply = "Sure.\n\n### FILE: src/a.rs\n```rust\nfn a() {}\n```\n\n### DELETE: old.rs\n";
+        assert_eq!(
+            touched_paths(reply),
+            vec!["src/a.rs".to_string(), "old.rs".to_string()]
+        );
+        let c = |p: &str, s| Change {
+            path: p.into(),
+            status: s,
+            old: String::new(),
+            new: "x".into(),
+            conflict: None,
+            edits: None,
+            unplaced: None,
+        };
+        let saved = [
+            c("a", ChangeStatus::A),
+            c("b", ChangeStatus::M),
+            c("d", ChangeStatus::D),
+        ];
+        let (title, detail) = saved_toast(&saved, Some("main"));
+        assert_eq!(title, "3 files saved");
+        assert_eq!(
+            detail,
+            "1 deleted, 1 created, 1 overwritten · not committed on main"
+        );
+        let mut t = ThreadState::fresh();
+        t.file_versions.insert("d".into(), "v".into());
+        record_saved(&mut t, &saved);
+        assert!(t.file_versions.contains_key("a") && !t.file_versions.contains_key("d"));
+        assert_eq!(t.applied.len(), 3);
+    }
+
+    #[test]
+    fn usage_and_notes() {
+        let dep = Deployment {
+            name: "d".into(),
+            limit: 1000,
+            in_price: 1.0,
+            out_price: 2.0,
+        };
+        let (meta, cost) = usage_meta(
+            &Usage {
+                input_tokens: 12_000,
+                output_tokens: 1_500,
+                cached_tokens: 8_000,
+            },
+            &dep,
+        );
+        assert_eq!(meta, "12k in (8k cached) / 1.5k out · $0.015");
+        assert!((cost.unwrap() - 0.015).abs() < 1e-9);
+        let notes = turn_notes(
+            Some(STOPPED),
+            false,
+            Some(ApiKind::Chat),
+            Some(ApiKind::Responses),
+            false,
+        );
+        assert_eq!(notes[0].1, Tone::Warn);
+        assert_eq!(notes.len(), 2);
+    }
+}

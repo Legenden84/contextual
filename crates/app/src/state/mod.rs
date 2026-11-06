@@ -1,6 +1,7 @@
 //! App models (GPUI entities, plan §6.4). `AppModel` owns everything above the open project:
 //! the screen, settings, recents, the Foundry connection and the workspace host.
 
+pub mod chat;
 pub mod project;
 
 use std::sync::Arc;

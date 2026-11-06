@@ -264,6 +264,17 @@ impl Project {
         self.recompute();
     }
 
+    /// Ticks exactly these files (those that can still be picked), e.g. when a saved chat opens.
+    pub fn select_paths(&mut self, paths: &[String]) {
+        let pickable = pickable_files(&self.tree);
+        self.selected = paths
+            .iter()
+            .filter(|p| pickable.contains(*p))
+            .cloned()
+            .collect();
+        self.recompute();
+    }
+
     pub fn clear_selection(&mut self) {
         self.selected.clear();
         self.recompute();

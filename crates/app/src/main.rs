@@ -4,6 +4,7 @@
 //! `--settings` starts on Settings. `contextual --spike` shows the Phase 1 prototypes instead.
 
 mod assets;
+mod dev;
 mod runtime;
 mod screens;
 mod secrets;
@@ -58,12 +59,14 @@ fn args() -> Args {
 }
 
 fn main() {
+    runtime::init_local_offset();
     let args = args();
     gpui_kit::application()
         .with_assets(assets::AppAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             assets::load_fonts(cx);
+            theme::register_languages();
             runtime::init(cx);
             keymap(cx);
 

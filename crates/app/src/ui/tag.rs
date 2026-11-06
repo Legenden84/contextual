@@ -16,6 +16,7 @@ pub enum TagTone {
     #[default]
     Default,
     Warn,
+    Add,
     Skill,
     Excluded,
 }
@@ -50,6 +51,7 @@ impl RenderOnce for Tag {
         let (bg, fg) = match self.tone {
             TagTone::Default => (c.surface_300, c.ink_muted),
             TagTone::Warn => (c.warning_bg, c.warning),
+            TagTone::Add => (c.surface_300, c.success),
             TagTone::Skill => (c.surface_300, c.accent_ink),
             TagTone::Excluded => (clear, c.ink_faint),
         };
