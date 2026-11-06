@@ -40,6 +40,11 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
   `lock file`, `.gitignore` (root `.gitignore` only), `binary`, `too large`, `hidden`, `secrets` (`.env*`, always).
   Images are marked `image` (~765 tokens each). Large HTML/SVG get `condensedFrom`, and `tokens` and the size
   limit use the condensed size. "too large" files can still be ticked one by one in the UI.
+  Skills are discovered by a `SKILL.md` file (case-insensitive), regardless of framework or folder name,
+  including hidden framework folders. Discovery respects explicit exclusions and `.gitignore`, skips
+  symlinks and VCS internals, and is capped at 20,000 entries. Skill directories and their support files
+  are omitted from the explorer; their instructions remain available in Skills & Rules. Parent folders
+  made empty by this omission are hidden too. An opened project that itself contains `SKILL.md` stays visible.
 - `POST /api/project/read` `{ root, paths, condense? }` → contents (text up to 2 MB each, LF line endings,
   no BOM). PNG/JPEG/GIF/WebP files come back as `image` data URLs (up to 20 MB). With `condense`, HTML/SVG
   of 32 KB or more come back condensed, with `condensedFrom` set; the client sends those as read-only

@@ -129,8 +129,14 @@ async function listNames(dir: string): Promise<string[]> {
   }
 }
 
-/** AGENTS.md, CLAUDE.md, .github/copilot-instructions.md, .cursor/rules/*, .claude/skills/x/SKILL.md */
-async function findRules(root: string): Promise<RuleFile[]> {
+/**
+ * Rules use their conventional locations. Skills are discovered by SKILL.md, independently
+ * of the framework or parent folder name. Their directories are kept out of file context.
+ */
+async function findRules(
+  root: string,
+  skipDirectory: (rel: string, name: string) => boolean,
+): Promise<{ rules: RuleFile[]; skillDirs: Set<string>; truncated: boolean }> {
   const candidates: [string, RuleFile['type']][] = [
     ['AGENTS.md', 'Rule'],
     ['CLAUDE.md', 'Rule'],
@@ -138,10 +144,48 @@ async function findRules(root: string): Promise<RuleFile[]> {
   ]
   for (const n of await listNames(path.join(root, '.cursor/rules')))
     if (/\.(md|mdc)$/i.test(n)) candidates.push([`.cursor/rules/${n}`, 'Rule'])
-  for (const n of await listNames(path.join(root, '.claude/skills')))
-    candidates.push([`.claude/skills/${n}/SKILL.md`, 'Skill'])
+
+  const skillDirs = new Set<string>()
+  let visited = 0
+  let truncated = false
+
+  const discover = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    const marker = entries.find((e) => e.isFile() && e.name.toLowerCase() === 'skill.md')
+    if (marker) {
+      candidates.push([toRel(root, path.join(dir, marker.name)), 'Skill'])
+      // An opened project can itself be a skill; never hide the whole project.
+      if (dir !== root) {
+        skillDirs.add(toRel(root, dir))
+        return
+      }
+    }
+
+    for (const e of entries) {
+      if (ALWAYS_SKIP.has(e.name)) continue
+      if (visited >= MAX_ENTRIES) {
+        truncated = true
+        return
+      }
+      visited++
+      // Do not follow symlinks or traverse ignored dependencies/build output.
+      if (!e.isDirectory()) continue
+      const abs = path.join(dir, e.name)
+      const rel = toRel(root, abs)
+      if (!skipDirectory(rel, e.name)) await discover(abs)
+      if (truncated) return
+    }
+  }
+
+  await discover(root)
   const found = await Promise.all(candidates.map(([rel, type]) => readRule(root, rel, type)))
-  return found.filter((r): r is RuleFile => r !== null)
+  return { rules: found.filter((r): r is RuleFile => r !== null), skillDirs, truncated }
 }
 
 export async function scanProject(input: string, opts: ScanOptions): Promise<ScanResult> {
@@ -171,13 +215,26 @@ export async function scanProject(input: string, opts: ScanOptions): Promise<Sca
   let files = 0
   let truncated = false
 
-  const exclusionFor = (rel: string, name: string, isDir: boolean): string | undefined => {
+  const exclusionFor = (rel: string, name: string, isDir: boolean, includeHidden = opts.includeHidden): string | undefined => {
     const hit = globs.find((g) => g.match(rel) || (isDir && g.match(`${rel}/x`)))
     if (hit) return isDir ? `ignored: ${name}` : LOCK_FILES.has(name) ? 'lock file' : `ignored: ${hit.glob}`
     if (gitignore?.ignores(isDir ? `${rel}/` : rel)) return '.gitignore'
     if (!isDir && SECRET_FILE.test(name)) return 'secrets'
-    if (!opts.includeHidden && name.startsWith('.') && !HIDDEN_ALLOWED.has(name)) return 'hidden'
+    if (!includeHidden && name.startsWith('.') && !HIDDEN_ALLOWED.has(name)) return 'hidden'
     return undefined
+  }
+
+  // Discovery includes hidden framework folders, but still respects explicit exclusions
+  // and .gitignore. Skill support files are not ordinary selectable project context.
+  const discovered = await findRules(root, (rel, name) => !!exclusionFor(rel, name, true, true))
+  truncated = discovered.truncated
+  const skillParents = new Set<string>()
+  for (const dir of discovered.skillDirs) {
+    const parts = dir.split('/')
+    while (parts.length > 1) {
+      parts.pop()
+      skillParents.add(parts.join('/'))
+    }
   }
 
   const walk = async (dir: string): Promise<ScanNode[]> => {
@@ -209,8 +266,12 @@ export async function scanProject(input: string, opts: ScanOptions): Promise<Sca
         continue
       }
       if (e.isDirectory()) {
+        if (discovered.skillDirs.has(rel)) continue
         const excluded = exclusionFor(rel, e.name, true)
-        out.push({ name: e.name, path: rel, kind: 'dir', excluded, children: excluded ? [] : await walk(abs) })
+        const children = excluded ? [] : await walk(abs)
+        // Remove wrappers made empty by hiding skills, without hiding unrelated config.
+        if (!excluded && !children.length && skillParents.has(rel)) continue
+        out.push({ name: e.name, path: rel, kind: 'dir', excluded, children })
         continue
       }
       if (!e.isFile()) continue
@@ -263,7 +324,7 @@ export async function scanProject(input: string, opts: ScanOptions): Promise<Sca
     root,
     branch: await gitBranch(root),
     tree,
-    rules: await findRules(root),
+    rules: discovered.rules,
     files,
     truncated,
   }
