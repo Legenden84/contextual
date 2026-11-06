@@ -87,7 +87,6 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                 )
                 .child(div().flex_1())
                 .when(a.scanning, |d| d.child(item(IconName::Loader, "Scanning…")))
-                .when(a.screen == Screen::Settings, |d| d.child("Saved"))
                 .when(a.screen != Screen::Settings, |d| {
                     d.child(
                         div()

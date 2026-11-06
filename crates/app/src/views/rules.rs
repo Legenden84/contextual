@@ -18,6 +18,8 @@ use crate::ui::{Switch, Tag, TagTone, count, file_glyph};
 const PREVIEW_LINES: usize = 9;
 const ROW_H: f32 = 24.0;
 const ROW_INDENT: f32 = 22.0;
+/// Below the explorer, the section scrolls past this height so the tree keeps its room.
+const MAX_H: f32 = 240.0;
 
 pub struct RulesPanel {
     project: Entity<Project>,
@@ -154,6 +156,7 @@ impl Render for RulesPanel {
             })
             .collect();
         let empty = rows.is_empty();
+        let fill = self.fill;
 
         div()
             .flex()
@@ -184,7 +187,14 @@ impl Render for RulesPanel {
                     .child(count(on_count, cx)),
             )
             .when(!self.collapsed, |d| {
-                d.children(rows)
+                d.child(
+                div()
+                    .id("rules-body")
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scroll()
+                    .map(|b| if fill { b.flex_1().min_h_0() } else { b.max_h(px(MAX_H)) })
+                    .children(rows)
                     .when(empty, |d| {
                         d.child(
                             div()
@@ -225,6 +235,7 @@ impl Render for RulesPanel {
                             .text_ellipsis()
                             .child("Detected: AGENTS.md, CLAUDE.md, .github, .cursor/rules, .claude/skills"),
                     )
+            )
             })
     }
 }

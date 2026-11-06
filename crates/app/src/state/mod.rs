@@ -16,7 +16,7 @@ use contextual_core::settings::{
     API_KEY_SECRET, SecretStore, Settings, SettingsStore, resolve_foundry_config_from_env,
 };
 use contextual_protocol::fs::Scan;
-use gpui_kit::{AppContext, Context, Entity, Window};
+use gpui_kit::{AppContext, Context, Entity};
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
@@ -308,14 +308,16 @@ impl AppModel {
         cx.notify();
     }
 
-    /// The project to reopen on start: a CLI argument wins over the last open one.
-    pub fn startup(
-        &mut self,
-        cli_path: Option<String>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let path = cli_path.or_else(|| self.state.last_open.as_ref().map(|r| r.path.clone()));
+    /// The project to open on start: a CLI argument wins over the last open one, which
+    /// `no_restore` skips.
+    pub fn startup(&mut self, cli_path: Option<String>, no_restore: bool, cx: &mut Context<Self>) {
+        let last = self
+            .state
+            .last_open
+            .as_ref()
+            .filter(|_| !no_restore)
+            .map(|r| r.path.clone());
+        let path = cli_path.or(last);
         if let Some(path) = path {
             self.open_folder(path, cx);
         }

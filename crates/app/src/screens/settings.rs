@@ -3,7 +3,7 @@
 
 use contextual_core::settings::{FoundrySettings, Settings, ThemePreference};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::{Icon, IconName, Sizable as _};
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
@@ -257,7 +257,7 @@ impl SettingsScreen {
                             .child(f.hint),
                     ),
             )
-            .child(div().w(px(FIELD_W)).child(Input::new(&f.input).small()))
+            .child(div().w(px(FIELD_W)).child(Input::new(&f.input)))
     }
 
     fn switch_row(
@@ -457,7 +457,7 @@ impl Render for SettingsScreen {
                             .flex()
                             .gap(sp(2))
                             .w(px(FIELD_W))
-                            .child(div().flex_1().child(Input::new(&self.new_exclusion).small()))
+                            .child(div().flex_1().child(Input::new(&self.new_exclusion)))
                             .child(Button::new("add-glob", "Add").on_click(cx.listener(|t, _, w, cx| {
                                 let g = t.new_exclusion.read(cx).value().trim().to_string();
                                 if !g.is_empty() && !t.exclusions.contains(&g) {

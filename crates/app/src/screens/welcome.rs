@@ -116,7 +116,7 @@ impl Render for WelcomeScreen {
                             .text_color(hsla(c.ink_muted))
                             .child(SharedString::from((i + 1).to_string())),
                     )
-                    .child(*s)
+                    .child(div().flex_1().min_w_0().child(*s))
             })
             .collect();
         let recent_rows = recents
@@ -238,25 +238,29 @@ impl Render for WelcomeScreen {
                                     .w(px(LEFT))
                                     .child(caption("START", cx))
                                     .child(
-                                        Button::new(
-                                            "open",
-                                            if opening {
-                                                "Opening…"
-                                            } else {
-                                                "Open folder…"
-                                            },
-                                        )
-                                        .variant(ButtonVariant::Primary)
-                                        .disabled(opening)
-                                        .on_click({
-                                            let app = app.clone();
-                                            move |_, _, cx| {
-                                                app.update(cx, |a, cx| {
-                                                    a.folder_dialog_open = true;
-                                                    cx.notify();
-                                                })
-                                            }
-                                        }),
+                                        div().flex().child(
+                                            Button::new(
+                                                "open",
+                                                if opening {
+                                                    "Opening…"
+                                                } else {
+                                                    "Open folder…"
+                                                },
+                                            )
+                                            .variant(ButtonVariant::Primary)
+                                            .disabled(opening)
+                                            .on_click(
+                                                {
+                                                    let app = app.clone();
+                                                    move |_, _, cx| {
+                                                        app.update(cx, |a, cx| {
+                                                            a.folder_dialog_open = true;
+                                                            cx.notify();
+                                                        })
+                                                    }
+                                                },
+                                            ),
+                                        ),
                                     )
                                     .child(
                                         div()

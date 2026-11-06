@@ -1,7 +1,7 @@
 //! Contextual, the native desktop app (Windows, macOS; developed on Linux).
 //!
-//! `contextual [PATH]` opens PATH (or the last project). `contextual --spike` shows the Phase 1
-//! prototypes instead.
+//! `contextual [PATH]` opens PATH (or the last project; `--no-restore` starts on Welcome).
+//! `--settings` starts on Settings. `contextual --spike` shows the Phase 1 prototypes instead.
 
 mod assets;
 mod runtime;
@@ -26,15 +26,21 @@ gpui_kit::actions!(
 
 struct Args {
     spike: bool,
+    /// Don't reopen the last project.
+    no_restore: bool,
+    /// Start on the Settings screen.
+    settings: bool,
     path: Option<String>,
 }
 
 fn args() -> Args {
-    let mut spike = false;
+    let (mut spike, mut no_restore, mut settings) = (false, false, false);
     let mut path = None;
     for a in std::env::args().skip(1) {
         match a.as_str() {
             "--spike" => spike = true,
+            "--no-restore" => no_restore = true,
+            "--settings" => settings = true,
             "--version" => {
                 println!("contextual {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
@@ -43,7 +49,12 @@ fn args() -> Args {
             _ => {}
         }
     }
-    Args { spike, path }
+    Args {
+        spike,
+        no_restore,
+        settings,
+        path,
+    }
 }
 
 fn main() {
@@ -77,7 +88,13 @@ fn main() {
                 gpui_kit::open_window(options, cx, |window, cx| {
                     let pref = model.read(cx).settings.theme;
                     theme::apply(theme::resolve(pref, window), Some(window), cx);
-                    model.update(cx, |m, cx| m.startup(path, window, cx));
+                    let (no_restore, settings) = (args.no_restore, args.settings);
+                    model.update(cx, |m, cx| {
+                        m.startup(path, no_restore, cx);
+                        if settings {
+                            m.open_settings(cx);
+                        }
+                    });
                     cx.new(|cx| shell::Shell::new(model.clone(), window, cx))
                 })
                 .expect("failed to open the main window");
