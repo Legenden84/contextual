@@ -143,7 +143,7 @@ impl WorkspaceScreen {
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
             cx.new(|cx| Sidebar::new(app.clone(), project.clone(), scm.clone(), window, cx));
-        crate::dev::open(&sidebar, &project, &scm, &chat, cx);
+        crate::dev::open(&app, &sidebar, &project, &scm, &chat, cx);
         Self {
             sidebar,
             scm,

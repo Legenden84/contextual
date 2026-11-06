@@ -1,7 +1,7 @@
 //! Debug-build automation, so a full flow can be checked without clicking (compiled out of
 //! release builds). `CONTEXTUAL_DEV_SEND="text"` selects every file once the project opens and
 //! sends `text`; `CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats` then takes one action after the
-//! reply. `CONTEXTUAL_DEV_OPEN=scm|branches|pr|gitdiff:<path>|commit:<message>|switch:<branch>`
+//! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|gitdiff:<path>|commit:<message>|switch:<branch>`
 //! opens that view, or runs that Source Control action, at startup.
 
 use contextual_core::chat::Role;
@@ -96,6 +96,7 @@ pub fn install(
 
 /// Opens a view at startup (`CONTEXTUAL_DEV_OPEN`), debug builds only.
 pub fn open(
+    app: &Entity<crate::state::AppModel>,
     sidebar: &Entity<crate::views::sidebar::Sidebar>,
     project: &Entity<Project>,
     scm: &Entity<crate::state::scm::ScmModel>,
@@ -110,6 +111,10 @@ pub fn open(
     };
     match what.as_str() {
         "scm" => sidebar.update(cx, |s, cx| s.show_scm(cx)),
+        "settings" => {
+            let app = app.clone();
+            cx.defer(move |cx| app.update(cx, |a, cx| a.open_settings(cx)));
+        }
         "branches" => scm.update(cx, |s, cx| s.open_branch_picker(cx)),
         "pr" => chat.update(cx, |c, cx| {
             c.pr_open = true;

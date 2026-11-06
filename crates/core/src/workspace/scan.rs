@@ -15,7 +15,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use contextual_protocol::fs::{NodeKind, RuleFile, RuleType, ScanNode, ScanOptions, ScanResult};
+use contextual_protocol::fs::{
+    ExclusionPreset, NodeKind, RuleFile, RuleType, ScanNode, ScanOptions, ScanResult,
+};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
@@ -269,19 +271,13 @@ struct Exclusions {
 }
 
 impl Exclusions {
-    fn new(root: &Path, opts: &ScanOptions) -> Self {
-        let globs = opts
-            .exclusions
-            .iter()
+    fn new<'a>(globs: impl IntoIterator<Item = &'a String>, gitignore: Option<Gitignore>) -> Self {
+        let globs = globs
+            .into_iter()
             .map(|g| js_trim(g))
             .filter(|g| !g.is_empty())
             .filter_map(ExclusionGlob::new)
             .collect();
-        let gitignore = if opts.respect_gitignore {
-            load_gitignore(root)
-        } else {
-            None
-        };
         Self { globs, gitignore }
     }
 
@@ -322,6 +318,96 @@ impl Exclusions {
         }
         None
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Framework presets
+// ---------------------------------------------------------------------------------------------
+
+/// How deep below the root markers are looked for (`root/a/b/Cargo.toml` is found: monorepos).
+const DETECT_DEPTH: usize = 2;
+/// Entries looked at while detecting, at most.
+const DETECT_MAX_ENTRIES: usize = 5_000;
+
+/// The enabled presets whose markers occur at the root or up to [`DETECT_DEPTH`] folders below
+/// it; presets without markers always apply. Folders that are excluded anyway (by the general
+/// list, `.gitignore`, any enabled preset, or hidden) are not looked into.
+fn detect_presets<'a>(
+    root: &Path,
+    opts: &'a ScanOptions,
+    gitignore: Option<&Gitignore>,
+) -> Vec<&'a ExclusionPreset> {
+    let enabled: Vec<&ExclusionPreset> = opts.presets.iter().filter(|p| p.enabled).collect();
+    let mut active = vec![false; enabled.len()];
+    let mut markers = Vec::new();
+    for (i, p) in enabled.iter().enumerate() {
+        let mut builder = GlobSetBuilder::new();
+        let mut any = false;
+        for m in p
+            .markers
+            .iter()
+            .map(|m| js_trim(m))
+            .filter(|m| !m.is_empty())
+        {
+            if let Ok(g) = GlobBuilder::new(m)
+                .case_insensitive(true)
+                .literal_separator(true)
+                .build()
+            {
+                builder.add(g);
+                any = true;
+            }
+        }
+        match builder.build() {
+            Ok(set) if any => markers.push((i, set)),
+            _ => active[i] = p.markers.iter().all(|m| js_trim(m).is_empty()),
+        }
+    }
+
+    let probe = Exclusions::new(
+        opts.exclusions
+            .iter()
+            .chain(enabled.iter().flat_map(|p| p.exclusions.iter())),
+        gitignore.cloned(),
+    );
+    let mut queue = vec![(root.to_path_buf(), 0usize)];
+    let mut seen = 0;
+    while let Some((dir, depth)) = queue.pop() {
+        if markers.iter().all(|(i, _)| active[*i]) {
+            break;
+        }
+        let Some(entries) = read_entries(&dir) else {
+            continue;
+        };
+        for e in entries {
+            seen += 1;
+            if seen > DETECT_MAX_ENTRIES {
+                break;
+            }
+            for (i, set) in &markers {
+                if !active[*i] && set.is_match(&e.name) {
+                    active[*i] = true;
+                }
+            }
+            if e.is_dir
+                && depth < DETECT_DEPTH
+                && !ALWAYS_SKIP.contains(&e.name.as_str())
+                && !is_agent_dir(&e.name)
+                && !e.name.starts_with('.')
+            {
+                let abs = dir.join(&e.name);
+                let rel = to_rel(root, &abs);
+                if probe.reason(&rel, &e.name, true, false, true).is_none() {
+                    queue.push((abs, depth + 1));
+                }
+            }
+        }
+    }
+    enabled
+        .into_iter()
+        .zip(active)
+        .filter_map(|(p, on)| on.then_some(p))
+        .collect()
 }
 
 fn load_gitignore(root: &Path) -> Option<Gitignore> {
@@ -716,7 +802,18 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
             path_string(&root)
         )));
     }
-    let exclusions = Exclusions::new(&root, opts);
+    let gitignore = if opts.respect_gitignore {
+        load_gitignore(&root)
+    } else {
+        None
+    };
+    let presets = detect_presets(&root, opts, gitignore.as_ref());
+    let exclusions = Exclusions::new(
+        opts.exclusions
+            .iter()
+            .chain(presets.iter().flat_map(|p| p.exclusions.iter())),
+        gitignore,
+    );
 
     // Discovery includes hidden framework folders (and the agent folders the explorer leaves
     // out), but still respects explicit exclusions and .gitignore. Skill support files are not
@@ -762,12 +859,101 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
         rules: discovered.rules,
         files: walker.files,
         truncated: walker.truncated,
+        frameworks: presets
+            .iter()
+            .filter(|p| !p.markers.is_empty())
+            .map(|p| p.label.clone())
+            .collect(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn find<'a>(nodes: &'a [ScanNode], path: &str) -> Option<&'a ScanNode> {
+        nodes.iter().find_map(|n| {
+            if n.path == path {
+                Some(n)
+            } else {
+                find(n.children.as_deref().unwrap_or_default(), path)
+            }
+        })
+    }
+
+    #[test]
+    fn framework_presets_apply_where_their_markers_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str| {
+            let p = root.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, "x\n").unwrap();
+        };
+        write("Cargo.toml");
+        write("src/main.rs");
+        write("target/debug/out.rs");
+        write("tests/fixtures/case.json");
+        // A Node app two levels down (monorepo), and its own dependencies.
+        write("apps/web/package.json");
+        write("apps/web/src/index.ts");
+        write("apps/web/dist/index.js");
+        write("apps/web/node_modules/dep/package.json");
+        // `bin` is only excluded for .NET (no marker here), so a Rust `src/bin` stays.
+        write("src/bin/tool.rs");
+        // Too deep to count as a marker.
+        write("a/b/c/go.mod");
+        write("a/b/c/vendor/x.go");
+
+        let opts = ScanOptions {
+            exclusions: crate::logic::defaults::DEFAULT_EXCLUSIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            presets: crate::logic::defaults::default_presets(),
+            ..ScanOptions::default()
+        };
+        let scan = scan_project(&root.to_string_lossy(), &opts).unwrap();
+        assert_eq!(scan.frameworks, vec!["Rust", "Node / TypeScript"]);
+        let reason = |p: &str| find(&scan.tree, p).and_then(|n| n.excluded.clone());
+        assert_eq!(reason("target").as_deref(), Some("ignored: target"));
+        assert_eq!(
+            reason("tests/fixtures").as_deref(),
+            Some("ignored: fixtures")
+        );
+        assert_eq!(reason("apps/web/dist").as_deref(), Some("ignored: dist"));
+        assert_eq!(
+            reason("apps/web/node_modules").as_deref(),
+            Some("ignored: node_modules")
+        );
+        assert_eq!(reason("src/bin"), None);
+        assert_eq!(reason("a/b/c/vendor"), None);
+        assert_eq!(reason("apps/web/src/index.ts"), None);
+
+        // Turned off, a preset doesn't apply even with its marker present.
+        let mut off = opts.clone();
+        off.presets
+            .iter_mut()
+            .find(|p| p.id == "rust")
+            .unwrap()
+            .enabled = false;
+        let scan = scan_project(&root.to_string_lossy(), &off).unwrap();
+        assert_eq!(scan.frameworks, vec!["Node / TypeScript"]);
+        assert_eq!(find(&scan.tree, "target").unwrap().excluded, None);
+
+        // A preset without markers always applies.
+        let mut always = opts.clone();
+        always.presets.push(ExclusionPreset {
+            id: "mine".into(),
+            label: "Mine".into(),
+            enabled: true,
+            markers: vec![],
+            exclusions: vec!["src/bin/**".into()],
+        });
+        let scan = scan_project(&root.to_string_lossy(), &always).unwrap();
+        assert!(find(&scan.tree, "src/bin").unwrap().excluded.is_some());
+        assert!(!scan.frameworks.contains(&"Mine".to_string()));
+    }
 
     #[test]
     fn agent_folders_are_hidden_but_searched_for_skills() {

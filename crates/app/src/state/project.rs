@@ -35,6 +35,8 @@ pub struct Project {
     pub branch: Option<String>,
     /// The scan stopped at the entry cap.
     pub truncated: bool,
+    /// Framework presets the scan detected and applied (labels).
+    pub frameworks: Vec<String>,
     tree: Vec<TreeNode>,
     /// Node lookup by path in `tree`: indices from the root.
     index: HashMap<String, Vec<usize>>,
@@ -96,6 +98,7 @@ impl Project {
             name: scan.name,
             branch: scan.branch,
             truncated: scan.truncated,
+            frameworks: scan.frameworks,
             tree,
             index,
             selected: Selection::new(),
@@ -134,6 +137,7 @@ impl Project {
         self.index = fresh.index;
         self.branch = fresh.branch;
         self.truncated = fresh.truncated;
+        self.frameworks = fresh.frameworks;
         self.rules = fresh.rules;
         self.rules_on = rules_on;
         self.selected.retain(|p| pickable.contains(p));

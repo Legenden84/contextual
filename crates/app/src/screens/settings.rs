@@ -13,6 +13,7 @@ use gpui_kit::{
 use crate::state::{AppModel, ConnectionTest};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, LinkButton, Switch};
+use crate::views::presets_editor::PresetsEditor;
 
 const LABEL_W: f32 = 200.0;
 const FIELD_W: f32 = 420.0;
@@ -38,6 +39,7 @@ pub struct SettingsScreen {
     new_exclusion: Entity<InputState>,
     output_prompt: Entity<TextareaState>,
     exclusions: Vec<String>,
+    presets: Entity<PresetsEditor>,
     respect_gitignore: bool,
     skip_binary: bool,
     include_hidden: bool,
@@ -151,6 +153,13 @@ impl SettingsScreen {
                 .placeholder("/path/to/old/contextual/.env.local")
                 .default_value(env_guess)
         });
+        let detected = app
+            .read(cx)
+            .project
+            .as_ref()
+            .map(|p| p.read(cx).frameworks.clone())
+            .unwrap_or_default();
+        let presets = cx.new(|_| PresetsEditor::new(s.workspace.presets.clone(), detected));
         let sub = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             endpoint,
@@ -166,6 +175,7 @@ impl SettingsScreen {
             new_exclusion,
             output_prompt,
             exclusions: s.workspace.exclusions.clone(),
+            presets,
             respect_gitignore: s.workspace.respect_gitignore,
             skip_binary: s.workspace.skip_binary,
             include_hidden: s.workspace.include_hidden,
@@ -205,6 +215,7 @@ impl SettingsScreen {
             output_price_per_1m: num(self.text(&self.out_price, cx), self.out_price.label)?,
         };
         s.workspace.exclusions = self.exclusions.clone();
+        s.workspace.presets = self.presets.read(cx).presets(cx);
         s.workspace.max_file_size_kb =
             num(self.text(&self.max_kb, cx), self.max_kb.label)?.unwrap_or(256.0);
         s.workspace.respect_gitignore = self.respect_gitignore;
@@ -291,6 +302,15 @@ impl SettingsScreen {
         cx.notify();
     }
 
+    /// The general list and the framework presets back to the defaults (saved on Save).
+    fn reset_exclusions(&mut self, cx: &mut Context<Self>) {
+        let mut w = contextual_core::settings::WorkspaceSettings::default();
+        w.reset_exclusions();
+        self.exclusions = w.exclusions;
+        self.presets.update(cx, |p, cx| p.set(w.presets, cx));
+        cx.notify();
+    }
+
     fn set_theme(&mut self, theme: ThemePreference, window: &mut Window, cx: &mut Context<Self>) {
         self.theme = theme;
         crate::theme::apply(crate::theme::resolve(theme, window), Some(window), cx);
@@ -361,6 +381,23 @@ fn section(title: &'static str, cx: &gpui_kit::App) -> impl IntoElement + use<> 
         .child(title)
 }
 
+fn subsection(
+    title: &'static str,
+    hint: &'static str,
+    cx: &gpui_kit::App,
+) -> impl IntoElement + use<> {
+    let c = &cx.tokens().colors;
+    div()
+        .pt(sp(3))
+        .child(div().text_color(hsla(c.ink_strong)).child(title))
+        .child(
+            div()
+                .type_style(contextual_theme::type_style::UI_SMALL)
+                .text_color(hsla(c.ink_muted))
+                .child(hint),
+        )
+}
+
 impl Render for SettingsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &cx.tokens().colors;
@@ -383,6 +420,14 @@ impl Render for SettingsScreen {
             }
             ConnectionTest::Failed(e) => Some((e.clone(), c.danger)),
         };
+        let frameworks_note = a.project.as_ref().map(|p| {
+            let p = p.read(cx);
+            if p.frameworks.is_empty() {
+                format!("No framework detected in {}.", p.name)
+            } else {
+                format!("Detected in {}: {}.", p.name, p.frameworks.join(", "))
+            }
+        });
         let chips = self
             .exclusions
             .iter()
@@ -537,6 +582,7 @@ impl Render for SettingsScreen {
                             .child("Test uses the saved settings: save first."),
                     )
                     .child(section("Exclusions", cx))
+                    .child(subsection("All projects", "Left out of every project.", cx))
                     .child(div().flex().flex_wrap().gap(sp(1)).py(sp(2)).children(chips))
                     .child(
                         div()
@@ -552,6 +598,18 @@ impl Render for SettingsScreen {
                                     cx.notify();
                                 }
                             }))),
+                    )
+                    .child(subsection("Frameworks", "Applied to a project that contains one of the marker files.", cx))
+                    .when_some(frameworks_note, |d, n| {
+                        d.child(div().pb(sp(1)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child(SharedString::from(n)))
+                    })
+                    .child(self.presets.clone())
+                    .child(
+                        div().pt(sp(2)).pb(sp(2)).type_style(contextual_theme::type_style::UI_SMALL).child(LinkButton::new(
+                            "reset-exclusions",
+                            "Reset exclusions to defaults",
+                            cx.listener(|t, _, _, cx| t.reset_exclusions(cx)),
+                        )),
                     )
                     .child(self.field_row(&self.max_kb, cx))
                     .child(self.switch_row("respect", "Respect .gitignore", self.respect_gitignore, |t| t.respect_gitignore = !t.respect_gitignore, cx))

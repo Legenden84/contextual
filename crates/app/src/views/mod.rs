@@ -14,6 +14,7 @@ pub mod folder_dialog;
 pub mod git_diff;
 pub mod markdown;
 pub mod pr_dialog;
+pub mod presets_editor;
 pub mod rules;
 pub mod save_dialog;
 pub mod sidebar;

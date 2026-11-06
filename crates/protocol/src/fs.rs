@@ -71,6 +71,27 @@ pub struct ScanOptions {
     pub skip_binary: bool,
     #[serde(default)]
     pub include_hidden: bool,
+    /// Framework exclusions: each applies only when the project contains one of its markers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<ExclusionPreset>,
+}
+
+/// Exclusions for one framework or ecosystem (Rust, Node, .NET…), applied to a project that
+/// contains one of its marker files near the root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExclusionPreset {
+    /// Stable id; built-in presets use theirs to pick up new defaults.
+    pub id: String,
+    pub label: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// File or folder names (globs like `*.csproj`) that mark the framework. Empty: always on.
+    #[serde(default)]
+    pub markers: Vec<String>,
+    /// Globs excluded when the framework is detected (same syntax as `exclusions`).
+    #[serde(default)]
+    pub exclusions: Vec<String>,
 }
 
 fn default_max_file_size_kb() -> f64 {
@@ -89,6 +110,7 @@ impl Default for ScanOptions {
             respect_gitignore: true,
             skip_binary: true,
             include_hidden: false,
+            presets: Vec::new(),
         }
     }
 }
@@ -163,6 +185,9 @@ pub struct ScanResult {
     pub files: u64,
     /// The scan stopped at the entry cap.
     pub truncated: bool,
+    /// Labels of the framework presets detected and applied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frameworks: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------------------------

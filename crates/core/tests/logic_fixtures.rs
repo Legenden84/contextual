@@ -489,7 +489,7 @@ fn defaults_fixtures() {
         match case.name.as_str() {
             "outputPrompt" => check(&case, defaults::OUTPUT_PROMPT),
             "LEGACY_OUTPUT_PROMPTS" => check(&case, defaults::LEGACY_OUTPUT_PROMPTS),
-            "defaultExclusions" => check(&case, defaults::DEFAULT_EXCLUSIONS),
+            "defaultExclusions" => check(&case, defaults::LEGACY_EXCLUSIONS),
             "PLACEHOLDER_DEPLOYMENT" => check(&case, defaults::placeholder_deployment()),
             "USER_MESSAGE_TOKENS" => check(&case, defaults::USER_MESSAGE_TOKENS),
             "EST_OUTPUT_TOKENS" => check(&case, defaults::EST_OUTPUT_TOKENS),

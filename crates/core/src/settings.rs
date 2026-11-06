@@ -6,11 +6,12 @@
 use crate::llm::config::{self, ConfigProblems, FoundryConfig, read_foundry_config};
 use crate::logic::context::FALLBACK_CONTEXT_LIMIT;
 use crate::logic::defaults::{
-    DEFAULT_EXCLUSIONS, LEGACY_OUTPUT_PROMPTS, OUTPUT_PROMPT, placeholder_deployment,
+    BUILTIN_PRESETS, DEFAULT_EXCLUSIONS, LEGACY_EXCLUSIONS, LEGACY_OUTPUT_PROMPTS, OUTPUT_PROMPT,
+    default_presets, placeholder_deployment,
 };
 use crate::logic::types::Deployment;
 use crate::{Error, Result};
-use contextual_protocol::fs::ScanOptions;
+use contextual_protocol::fs::{ExclusionPreset, ScanOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -80,6 +81,8 @@ pub struct WorkspaceSettings {
     pub respect_gitignore: bool,
     pub skip_binary: bool,
     pub include_hidden: bool,
+    /// Framework exclusions, applied to projects that contain one of a preset's markers.
+    pub presets: Vec<ExclusionPreset>,
     /// The user's output-format prompt (the built-in edit format is appended separately).
     pub output_prompt: String,
 }
@@ -92,6 +95,7 @@ impl Default for WorkspaceSettings {
             respect_gitignore: true,
             skip_binary: true,
             include_hidden: false,
+            presets: default_presets(),
             output_prompt: OUTPUT_PROMPT.to_string(),
         }
     }
@@ -105,11 +109,35 @@ impl WorkspaceSettings {
             respect_gitignore: self.respect_gitignore,
             skip_binary: self.skip_binary,
             include_hidden: self.include_hidden,
+            presets: self.presets.clone(),
         }
+    }
+
+    /// The exclusion defaults (general list and framework presets); the rest is kept.
+    pub fn reset_exclusions(&mut self) {
+        let d = Self::default();
+        self.exclusions = d.exclusions;
+        self.presets = d.presets;
     }
 
     /// Fixes values an older version or a hand edit may have left (like `readSettings` did).
     fn normalise(&mut self) {
+        // The old app's unedited list becomes the general list; its framework globs are presets.
+        if self
+            .exclusions
+            .iter()
+            .map(String::as_str)
+            .eq(LEGACY_EXCLUSIONS.iter().copied())
+        {
+            self.exclusions = DEFAULT_EXCLUSIONS.iter().map(|s| s.to_string()).collect();
+        }
+        // Built-in presets added since the file was saved (built-ins can be turned off, not
+        // removed).
+        for b in BUILTIN_PRESETS {
+            if !self.presets.iter().any(|p| p.id == b.id) {
+                self.presets.push(b.to_preset());
+            }
+        }
         // Also catches NaN.
         if self.max_file_size_kb.is_nan() || self.max_file_size_kb <= 0.0 {
             self.max_file_size_kb = 256.0;
@@ -323,6 +351,43 @@ pub fn resolve_foundry_config_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_exclusions_are_upgraded_and_new_presets_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        // Saved by an older version: the old single list, no presets.
+        let old = serde_json::json!({
+            "workspace": { "exclusions": LEGACY_EXCLUSIONS }
+        });
+        std::fs::write(store.path(), old.to_string()).unwrap();
+        let s = store.load().unwrap();
+        assert_eq!(s.workspace, WorkspaceSettings::default());
+
+        // Edited lists and presets are kept; missing built-ins are added back.
+        let mut edited = WorkspaceSettings {
+            exclusions: vec!["docs/**".into()],
+            ..WorkspaceSettings::default()
+        };
+        edited.presets.retain(|p| p.id == "rust");
+        edited.presets[0].enabled = false;
+        edited.presets[0]
+            .exclusions
+            .push("**/benches/data/**".into());
+        let saved = Settings {
+            workspace: edited.clone(),
+            ..Settings::default()
+        };
+        store.save(&saved).unwrap();
+        let s = store.load().unwrap().workspace;
+        assert_eq!(s.exclusions, edited.exclusions);
+        assert_eq!(s.presets[0], edited.presets[0]);
+        assert_eq!(s.presets.len(), BUILTIN_PRESETS.len());
+
+        let mut reset = s.clone();
+        reset.reset_exclusions();
+        assert_eq!(reset.presets, default_presets());
+    }
 
     fn settings() -> Settings {
         Settings {
