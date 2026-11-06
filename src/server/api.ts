@@ -12,6 +12,7 @@
 //   GET  /api/threads/<id>   ?root= → one saved conversation.
 //   POST /api/threads/save   { root, id, summary, thread } → saves a conversation.
 //   POST /api/threads/delete { root, id } → deletes one.
+//   POST /api/edit/repair    { path, original, edits } → whole file when edit blocks couldn't be placed.
 //   POST /api/git/status     { root } → branch, upstream, ahead/behind, staged / changes / conflicts.
 //   POST /api/git/stage      { root, paths } · /api/git/unstage { root, paths }
 //   POST /api/git/diff       { root, path, staged } → { old, new } (HEAD→index or index→working tree).
@@ -29,6 +30,7 @@ import {
   describeError,
   draftCommitMessage,
   draftPullRequest,
+  repairFile,
   streamConversation,
   testConnection,
   type ChatMessage,
@@ -289,6 +291,13 @@ export function createApi(getEnv: () => Env) {
           body.thread,
         )
         return sendJson(res, 200, { ok: true })
+      }
+
+      if (route === 'POST /api/edit/repair') {
+        const cfg = requireConfig()
+        const body = await readObject(req)
+        const original = typeof body.original === 'string' ? body.original : ''
+        return sendJson(res, 200, await repairFile(clientsFor(cfg).chat, cfg, { path: str(body, 'path'), original, edits: str(body, 'edits') }, abort.signal))
       }
 
       if (route.startsWith('POST /api/git/') || route.startsWith('POST /api/pr/')) {

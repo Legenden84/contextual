@@ -6,6 +6,19 @@ import type { Deployment } from './types'
 /** System prompt that makes the model return whole files under `### FILE:` headers (editable in Settings). */
 export const outputPrompt = dedent(`
   You are helping edit files in a local project. The user reviews every change
+  and saves it manually. You cannot write to disk.
+
+  - Explain the change in a few sentences first.
+  - Only touch files that are included in the context.
+  - Follow the project rules provided above this prompt.`)
+
+/**
+ * Earlier defaults of the prompt above. A saved setting equal to one of these was never edited
+ * by the user, so it is replaced by the current default.
+ */
+export const LEGACY_OUTPUT_PROMPTS = [
+  dedent(`
+  You are helping edit files in a local project. The user reviews every change
   and applies it manually. You cannot write to disk.
 
   ## Output format
@@ -21,7 +34,8 @@ export const outputPrompt = dedent(`
 
   - To delete a file, write a single line: ### DELETE: src/Path/To/File.cs
   - Only touch files that are included in the context.
-  - Follow the project rules provided above this prompt.`)
+  - Follow the project rules provided above this prompt.`),
+]
 
 /** Default exclusion globs (editable in Settings). */
 export const defaultExclusions = [

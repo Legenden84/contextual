@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { defaultExclusions, EST_OUTPUT_TOKENS, outputPrompt, PLACEHOLDER_DEPLOYMENT, USER_MESSAGE_TOKENS } from '@/data/defaults'
+import { defaultExclusions, EST_OUTPUT_TOKENS, LEGACY_OUTPUT_PROMPTS, outputPrompt, PLACEHOLDER_DEPLOYMENT, USER_MESSAGE_TOKENS } from '@/data/defaults'
 import type { Change, Rule, TreeNode } from '@/data/types'
 import * as api from '@/lib/api'
 import { parseChanges } from '@/lib/changes'
+import { formatEdits } from '@/lib/edits'
 import { estimateTokens, fmtK } from '@/lib/format'
 import { parseMarkdown } from '@/lib/markdown'
 import { toAttachment, type Attachment } from '@/lib/images'
@@ -118,7 +119,9 @@ function readSettings(): Settings {
     if (Array.isArray(saved.exclusions) && saved.exclusions.every((x) => typeof x === 'string')) s.exclusions = saved.exclusions
     if (typeof saved.maxFileSizeKb === 'number' && saved.maxFileSizeKb > 0) s.maxFileSizeKb = saved.maxFileSizeKb
     for (const k of ['respectGitignore', 'skipBinary', 'includeHidden'] as const) if (typeof saved[k] === 'boolean') s[k] = saved[k]
-    if (typeof saved.outputPrompt === 'string' && saved.outputPrompt.trim()) s.outputPrompt = saved.outputPrompt
+    // Keep the user's own prompt; an unedited old default is replaced by the current one.
+    if (typeof saved.outputPrompt === 'string' && saved.outputPrompt.trim() && !LEGACY_OUTPUT_PROMPTS.includes(saved.outputPrompt))
+      s.outputPrompt = saved.outputPrompt
     return s
   } catch {
     return initialSettings
@@ -481,6 +484,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const streaming = messages.some((m) => m.streaming)
 
+  const outputFormat = settings.outputPrompt
+  const deploymentList = settings.deployments
   const totals = useMemo<Totals>(() => {
     let files = 0
     let fileTokens = 0
@@ -501,9 +506,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     for (const p of selected) if (resendAll || !thread.fileVersions[p] || stale.has(p)) newFileTokens += sizes.get(p) ?? 0
     const pictures = attachments.reduce((a, x) => a + x.tokens, 0)
     const newTokens = newFileTokens + pictures + USER_MESSAGE_TOKENS
-    const raw = ruleTokens + estimateTokens(settings.outputPrompt) + conversationTokens + newTokens
+    // The system prompt as sent: rules, the user's output prompt and the built-in file format.
+    const raw = estimateTokens(systemPrompt(onRules, outputFormat)) + conversationTokens + newTokens
     const tokens = Math.round(raw / 100) * 100
-    const dep = settings.deployments[deployment] ?? settings.deployments[0]
+    const dep = deploymentList[deployment] ?? deploymentList[0]
     const share = tokens / dep.limit
     const level = share >= 0.95 ? 'danger' : share >= 0.75 ? 'warn' : 'ok'
     const cost = (tokens / 1e6) * dep.inPrice + (EST_OUTPUT_TOKENS / 1e6) * dep.outPrice
@@ -540,7 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cost,
       hint: big ? `${big.name}: ${fmtK(big.tokens)}` : null,
     }
-  }, [tree, selected, rules, rulesOn, thread, resendAll, stale, attachments, messages, settings.deployments, settings.outputPrompt, deployment])
+  }, [tree, selected, rules, rulesOn, thread, resendAll, stale, attachments, messages, deploymentList, outputFormat, deployment])
 
   const toggleSet = useCallback(
     <T,>(setter: (fn: (s: ReadonlySet<T>) => ReadonlySet<T>) => void, value: T) =>
@@ -676,7 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // Originals for every file the reply touches, so diffs compare against disk.
         const touched = parseMarkdown(reply)
-          .map((b) => (b.kind === 'code' ? b.path : b.kind === 'delete' ? b.path : undefined))
+          .map((b) => (b.kind === 'code' || b.kind === 'delete' || b.kind === 'edit' ? b.path : undefined))
           .filter((p): p is string => !!p && !!findNode(tree, p))
         const missing = touched.filter((p) => !contents.current.has(p))
         if (missing.length) {
@@ -696,10 +702,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
               readOnly: (p) => referenceOnly.current.has(p),
             })
 
+        // Edit blocks that couldn't be placed: quietly ask for those files in full.
+        const usage = u ? { ...u } : null
+        await Promise.all(
+          proposed.map(async (c, idx) => {
+            if (!c.unplaced?.length) return
+            try {
+              const r = await api.repairEdits(c.path, c.old, formatEdits(c.edits ?? c.unplaced))
+              proposed[idx] = { ...c, new: r.content, unplaced: undefined }
+              if (usage) {
+                usage.inputTokens += r.inputTokens
+                usage.outputTokens += r.outputTokens
+              }
+            } catch {
+              proposed[idx] = {
+                ...c,
+                conflict: c.conflict ?? 'The proposed changes could not be matched to the current file. Ask again to get them.',
+              }
+            }
+          }),
+        )
+        const changesOut = proposed.filter((c) => !(c.status === 'M' && c.old === c.new && !c.conflict))
+
         const priced = dep.inPrice > 0 || dep.outPrice > 0
-        const cost = u && priced ? (u.inputTokens / 1e6) * dep.inPrice + (u.outputTokens / 1e6) * dep.outPrice : undefined
-        const meta = u
-          ? `${fmtK(u.inputTokens)} in${u.cachedTokens ? ` (${fmtK(u.cachedTokens)} cached)` : ''} / ${fmtK(u.outputTokens)} out` +
+        const cost = usage && priced ? (usage.inputTokens / 1e6) * dep.inPrice + (usage.outputTokens / 1e6) * dep.outPrice : undefined
+        const meta = usage
+          ? `${fmtK(usage.inputTokens)} in${usage.cachedTokens ? ` (${fmtK(usage.cachedTokens)} cached)` : ''} / ${fmtK(usage.outputTokens)} out` +
             (cost != null ? ` · $${cost.toFixed(3)}` : '')
           : undefined
 
@@ -707,7 +735,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const next = ms.flatMap<ChatMessage>((m) => {
             if (m.id !== aiId) return [m]
             if (!reply) return []
-            return [{ ...m, streaming: false, meta, changes: proposed, api: done?.api, usage: u ?? undefined, cost }]
+            return [{ ...m, streaming: false, meta, changes: changesOut, api: done?.api, usage: usage ?? undefined, cost }]
           })
           const note = (t: string, tone: 'warn' | 'error') => next.push({ id: newId('n'), role: 'note', text: t, time: now(), tone })
           if (failure) note(failure, failure === 'Stopped.' ? 'warn' : 'error')
@@ -722,7 +750,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             )
           return next
         })
-        if (proposed.length) setInclude(includeFor(proposed))
+        if (changesOut.length) setInclude(includeFor(changesOut))
       })()
     },
     [project, settings, deployment, resendAll, thread, attachments, selected, rules, rulesOn, stale, tree, updateMessage, addNote],

@@ -4,6 +4,7 @@
 // `### FILE:` / `### DELETE:` headers the output-format prompt asks for, which drive the
 // Changes panel. Anything unrecognised renders as a paragraph.
 
+import type { EditBlock } from './edits'
 import { langFromFence, langFromPath, type Lang } from './syntax'
 
 export type Inline =
@@ -36,6 +37,8 @@ export type Block =
   | { kind: 'table'; head: Inline[][]; align: Align[]; rows: Inline[][][] }
   | { kind: 'hr' }
   | { kind: 'file'; path: string }
+  /** Changed regions of an existing file (`### EDIT:` + SEARCH/REPLACE blocks); `partial` while still streaming. */
+  | { kind: 'edit'; path: string; edits: EditBlock[]; partial: boolean }
   | { kind: 'delete'; path: string }
   | { kind: 'code'; code: string; lang: Lang; path?: string }
 
@@ -86,6 +89,11 @@ export function inlineText(nodes: Inline[]): string {
 // ------------------------------------------------------------------ blocks
 
 const FENCE = /^\s*(`{3,}|~{3,})(.*)$/
+const SEARCH_MARK = /^\s*<{5,9}\s*SEARCH\s*$/
+const DIVIDER_MARK = /^\s*={5,9}\s*$/
+const REPLACE_MARK = /^\s*>{5,9}\s*REPLACE\s*$/
+/** A header path without backticks or a trailing note such as "(condensed reference, …)". */
+const cleanPath = (raw: string) => raw.trim().replace(/\s+\(.*\)$/, '').replace(/^`|`$/g, '')
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
 const HR = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/
 const LIST_ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
@@ -135,6 +143,7 @@ export function parseMarkdown(src: string): Block[] {
     const fence = FENCE.exec(line)
     const file = /^\s*#{2,4} FILE:\s*(.+)$/.exec(line)
     const del = /^\s*#{2,4} DELETE:\s*(.+)$/.exec(line)
+    const edit = /^\s*#{2,4} EDIT:\s*(.+)$/.exec(line)
 
     if (fence) {
       flushPara()
@@ -146,6 +155,46 @@ export function parseMarkdown(src: string): Block[] {
       const lang = info ? langFromFence(info) : langFromPath(filePath)
       blocks.push({ kind: 'code', code: code.join('\n'), lang, path: filePath })
       filePath = undefined
+    } else if (edit) {
+      flushPara()
+      const path = cleanPath(edit[1])
+      const edits: EditBlock[] = []
+      let partial = false
+      let state: 'idle' | 'search' | 'replace' = 'idle'
+      let search: string[] = []
+      let replace: string[] = []
+      let asFile = false
+      for (i++; i < lines.length; i++) {
+        const l = lines[i]
+        if (state === 'idle') {
+          if (SEARCH_MARK.test(l)) {
+            state = 'search'
+            search = []
+            replace = []
+          } else if (!l.trim()) continue
+          else if (FENCE.test(l)) {
+            // A fence that doesn't wrap SEARCH/REPLACE blocks is a whole file under an EDIT header.
+            let k = i + 1
+            while (k < lines.length && !lines[k].trim()) k++
+            if (!edits.length && !SEARCH_MARK.test(lines[k] ?? '') && k < lines.length) {
+              asFile = true
+              break
+            }
+          } else break // Anything else ends the edit section.
+        } else if (state === 'search') {
+          if (DIVIDER_MARK.test(l)) state = 'replace'
+          else search.push(l)
+        } else if (REPLACE_MARK.test(l)) {
+          edits.push({ search: search.join('\n'), replace: replace.join('\n') })
+          state = 'idle'
+        } else replace.push(l)
+      }
+      if (state !== 'idle') partial = true
+      i--
+      if (asFile) {
+        filePath = path
+        blocks.push({ kind: 'file', path })
+      } else blocks.push({ kind: 'edit', path, edits, partial })
     } else if (file) {
       flushPara()
       // Strip a trailing note such as "(condensed reference, read-only…)".

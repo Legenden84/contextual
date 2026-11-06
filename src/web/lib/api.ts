@@ -279,3 +279,7 @@ export const draftPr = (root: string, base: string, notes: string) =>
   postJson<{ title: string; body: string }>('/api/pr/draft', { root, base, notes })
 export const createPr = (root: string, req: { title: string; body: string; base: string; draft: boolean; newBranch?: string }) =>
   postJson<PrResult>('/api/pr/create', { root, ...req })
+
+/** Rebuilds a whole file when the reply's edit blocks couldn't be placed (internal fallback). */
+export const repairEdits = (path: string, original: string, edits: string) =>
+  postJson<{ content: string; inputTokens: number; outputTokens: number }>('/api/edit/repair', { path, original, edits })

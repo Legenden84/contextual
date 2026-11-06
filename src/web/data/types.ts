@@ -43,4 +43,8 @@ export interface Change {
   new: string
   /** Set when the file changed on disk after it was sent to the model. */
   conflict?: string
+  /** Internal: the edit blocks this change was built from (existing files). */
+  edits?: { search: string; replace: string }[]
+  /** Internal: edit blocks that couldn't be placed in the file; resolved before the change is shown. */
+  unplaced?: { search: string; replace: string }[]
 }

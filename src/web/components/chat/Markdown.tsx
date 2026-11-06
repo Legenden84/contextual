@@ -108,6 +108,7 @@ function List({ items }: { items: ListItem[] }) {
 }
 
 function Blocks({ blocks, byPath }: { blocks: Block[]; byPath: Map<string, Change> }): ReactNode {
+  const shownEdits = new Set<string>()
   return blocks.map((b, i) => {
     switch (b.kind) {
       case 'p':
@@ -169,6 +170,28 @@ function Blocks({ blocks, byPath }: { blocks: Block[]; byPath: Map<string, Chang
             ### {b.kind === 'file' ? 'FILE' : 'DELETE'}: {b.path}
           </p>
         )
+      case 'edit': {
+        // Shown like a whole-file reply: the header and the rebuilt file, once per file.
+        if (shownEdits.has(b.path)) return null
+        shownEdits.add(b.path)
+        const change = byPath.get(b.path)
+        const ready = change && change.status !== 'D' && !change.unplaced?.length
+        return (
+          <div key={i}>
+            <p className="mt-4 font-mono text-[12px] text-ink-muted">### FILE: {b.path}</p>
+            {ready ? (
+              <CodeBlock code={change.new} path={b.path} maxLines={9} badge={<FileBadge change={change} />} />
+            ) : change?.conflict && !b.partial ? (
+              <p className="mt-2 mb-3 text-ui-small text-ink-muted">{change.conflict}</p>
+            ) : (
+              <p className="mt-2 mb-3 inline-flex items-center gap-2 text-ui-small text-ink-muted">
+                <span className="size-2 animate-pulse rounded-full bg-accent" />
+                Writing changes to {b.path.split('/').pop()}…
+              </p>
+            )}
+          </div>
+        )
+      }
       case 'code': {
         const change = b.path ? byPath.get(b.path) : undefined
         return (

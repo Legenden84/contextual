@@ -317,8 +317,7 @@ export function SettingsScreen() {
           title="Output format"
           intro={
             <>
-              Sent as the system prompt after your enabled rules. The parser reads <InlineCode>### FILE:</InlineCode> and{' '}
-              <InlineCode>### DELETE:</InlineCode> headers to build diffs.
+              Sent as the system prompt after your enabled rules.
             </>
           }
         >
@@ -332,10 +331,6 @@ export function SettingsScreen() {
               </Button>
             </div>
             <CodeEditor label="Output format system prompt" lang="markdown" value={s.outputPrompt} onChange={(v) => update({ outputPrompt: v })} />
-          </div>
-          <div className="inline-flex items-center gap-1 text-ui-small text-success">
-            <Icon name="check" className="size-3.5" />
-            Parser test on last response: 5 files, 0 errors
           </div>
         </Section>
 

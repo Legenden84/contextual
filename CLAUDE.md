@@ -21,7 +21,11 @@ proposed changes. The model never writes to disk; applying is an explicit user a
     format as system prompt; only files new to the conversation or changed since, tracked by hash in
     `ThreadState.fileVersions`); conversations continue via the Responses API's `previous_response_id`
     and are saved per project through `/api/threads`; `lib/changes.ts` turns a reply's
-    `### FILE:` / `### DELETE:` blocks into the Changes panel; `lib/images.ts` reads pasted/dropped
+    `### FILE:` / `### EDIT:` / `### DELETE:` blocks into the Changes panel. To save output tokens the
+    model returns existing files as SEARCH/REPLACE edit blocks (format in `FILE_FORMAT`, `lib/prompt.ts`,
+    appended to the system prompt and deliberately not shown in Settings); `lib/edits.ts` rebuilds the
+    whole file locally, and unplaceable edits are quietly re-requested in full (`/api/edit/repair`).
+    The UI always shows whole files, never the edit format; `lib/images.ts` reads pasted/dropped
     pictures (scaled to 2048px, vision token estimate). Saving proposed changes is "Save" in the UI
     (code still calls it apply). `components/scm/` is a VS Code-style Source Control tab (stage, commit,
     push); `components/pr/` opens pull requests as a GitHub-style compare of the branch with its base;

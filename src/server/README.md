@@ -52,6 +52,8 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 - `POST /api/project/undo` `{ root, backupId }` → restores that snapshot and removes files and folders
   the save created. Refused if any of those files was edited after the save.
 
+- `POST /api/edit/repair` `{ path, original, edits }` → `{ content, inputTokens, outputTokens }`: the whole file,
+  when a reply's edit blocks couldn't be placed locally (one non-streaming request, not part of the conversation).
 - **Source Control** (`git.ts`): `POST /api/git/status { root }` (branch, upstream, ahead/behind, staged / changes /
   conflicts, VS Code letters M A D R U C) · `/api/git/stage` and `/api/git/unstage { root, paths }` · `/api/git/diff
   { root, path, staged }` (staged: HEAD→index, else index→working tree) · `/api/git/commit { root, message, all }`

@@ -36,9 +36,48 @@ const FENCE_LANG: Partial<Record<ReturnType<typeof langFromPath>, string>> = {
 /** Header used for condensed references; lib/changes.ts never turns these into changes. */
 export const REFERENCE_NOTE = '(condensed reference, read-only: do not return this file)'
 
+/**
+ * How the model must return file changes. Built in and not shown in Settings: existing files come
+ * back as small edit blocks (only the changed region plus a little context), which Contextual
+ * rebuilds into whole files locally (lib/edits.ts). That keeps expensive output tokens low.
+ */
+const FILE_FORMAT = `# How to return file changes
+
+These rules take precedence over any earlier instruction about how to return files. Never write file contents outside the blocks below.
+
+## Changing an existing file
+Return only the parts that change, as one or more edit blocks after a header line:
+
+### EDIT: src/path/to/File.cs
+<<<<<<< SEARCH
+exact existing lines, copied verbatim with their indentation
+=======
+the lines that replace them
+>>>>>>> REPLACE
+
+- SEARCH must match the current file exactly, character for character, including indentation, comments and blank lines.
+- Include 2–3 unchanged lines around the change so SEARCH occurs only once in the file. Keep blocks small; never repeat a whole file in SEARCH.
+- To insert lines, SEARCH for the lines next to the insertion point and repeat them in REPLACE together with the new lines.
+- To remove lines, leave them out of REPLACE.
+- Use several blocks for separate changes in the same file, in file order, without overlapping. One header per file.
+- Do not put edit blocks in a code fence.
+
+## New files, or rewriting most of a small file
+### FILE: src/path/to/NewFile.cs
+\`\`\`csharp
+complete file contents
+\`\`\`
+
+## Deleting a file
+### DELETE: src/path/to/Old.cs
+
+Never return a file marked as a condensed reference.`
+
 export function systemPrompt(rules: Rule[], outputFormat: string): string {
   const parts = rules.map((r) => `## ${r.path}\n\n${r.content.trim()}`)
-  return [parts.length ? `# Project rules\n\n${parts.join('\n\n')}` : '', outputFormat.trim()].filter(Boolean).join('\n\n')
+  return [parts.length ? `# Project rules\n\n${parts.join('\n\n')}` : '', outputFormat.trim(), FILE_FORMAT]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 /** The files block prepended to a user message when the full context is (re)sent. */

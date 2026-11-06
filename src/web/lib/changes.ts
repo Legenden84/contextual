@@ -1,7 +1,8 @@
-// Turns an assistant response into proposed file changes, from the `### FILE:` and
-// `### DELETE:` headers the output-format prompt asks for.
+// Turns an assistant response into proposed file changes: whole files (`### FILE:`), edit
+// blocks applied to the local copy (`### EDIT:`, see lib/edits.ts) and deletions (`### DELETE:`).
 
 import type { Change } from '@/data/types'
+import { applyEdits } from './edits'
 import { parseMarkdown } from './markdown'
 
 export interface ChangeContext {
@@ -30,6 +31,22 @@ export function parseChanges(response: string, ctx: ChangeContext): Change[] {
         new: b.code,
         conflict: ctx.changedOnDisk(b.path) ? CONFLICT : undefined,
       })
+    } else if (b.kind === 'edit') {
+      if (b.partial || ctx.readOnly?.(b.path)) continue
+      // Several EDIT sections for one file apply on top of each other.
+      const prev = byPath.get(b.path)
+      const original = ctx.original(b.path)
+      const base = prev && prev.status !== 'D' ? prev.new : original
+      const result = base != null ? applyEdits(base, b.edits) : { content: '', failed: b.edits }
+      byPath.set(b.path, {
+        path: b.path,
+        status: ctx.exists(b.path) ? 'M' : 'A',
+        old: prev?.old ?? original ?? '',
+        new: result.content,
+        conflict: ctx.changedOnDisk(b.path) ? CONFLICT : undefined,
+        edits: [...(prev?.edits ?? []), ...b.edits],
+        unplaced: [...(prev?.unplaced ?? []), ...result.failed],
+      })
     } else if (b.kind === 'delete') {
       byPath.set(b.path, {
         path: b.path,
@@ -40,6 +57,6 @@ export function parseChanges(response: string, ctx: ChangeContext): Change[] {
       })
     }
   }
-  // A "modified" file whose new content equals the old one isn't a change.
-  return [...byPath.values()].filter((c) => !(c.status === 'M' && c.old === c.new))
+  // A "modified" file whose new content equals the old one isn't a change (unless edits still need placing).
+  return [...byPath.values()].filter((c) => !(c.status === 'M' && c.old === c.new && !c.unplaced?.length))
 }

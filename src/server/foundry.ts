@@ -278,3 +278,39 @@ export async function draftCommitMessage(client: AzureOpenAI, cfg: FoundryConfig
   )
   return (res.choices[0]?.message?.content ?? '').replace(/^```\w*\n?|```$/g, '').trim()
 }
+
+/**
+ * Fallback when edit blocks from a reply can't be placed in the file: asks for the whole file
+ * with the intended edits applied. Not part of any conversation.
+ */
+export async function repairFile(
+  client: AzureOpenAI,
+  cfg: FoundryConfig,
+  input: { path: string; original: string; edits: string },
+  signal: AbortSignal,
+): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
+  const res = await client.chat.completions.create(
+    {
+      model: cfg.deployment,
+      max_completion_tokens: cfg.maxCompletionTokens,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You apply edits to a file. The SEARCH parts of the edit blocks may not match the file exactly; work out where each edit belongs and apply its intent. Reply with the complete updated file only: no explanation, no code fence.',
+        },
+        {
+          role: 'user',
+          content: `File: ${input.path}\n\n# Current file\n\n${input.original}\n\n# Edits to apply\n\n${input.edits}`,
+        },
+      ],
+    },
+    { signal },
+  )
+  let content = res.choices[0]?.message?.content ?? ''
+  // Strip a code fence if the model added one anyway.
+  const fenced = /^\s*```[^\n]*\n([\s\S]*?)\n```\s*$/.exec(content)
+  if (fenced) content = fenced[1] + '\n'
+  if (res.choices[0]?.finish_reason === 'length') throw new Error('The rebuilt file was cut off.')
+  return { content, inputTokens: res.usage?.prompt_tokens ?? 0, outputTokens: res.usage?.completion_tokens ?? 0 }
+}
