@@ -6,6 +6,7 @@ import { Segmented } from '@/components/ui/Segmented'
 import { Chip, Tag } from '@/components/ui/Tag'
 import { computeDiff } from '@/lib/diff'
 import { parseInline } from '@/lib/markdown'
+import { cn } from '@/lib/utils'
 import { useApp, type ChatMessage } from '@/state/app-context'
 import { InlineText, Markdown } from './Markdown'
 
@@ -155,10 +156,17 @@ function AssistantMessage({ msg }: { msg: ChatMessage }) {
 
 function NoteMessage({ msg }: { msg: ChatMessage }) {
   const error = msg.tone === 'error'
+  const ok = msg.tone === 'ok'
   return (
     <div role="status" className="mb-6 ml-[30px] flex items-start gap-2 text-ui-small text-ink-muted">
-      <Icon name="warning" className={error ? 'mt-px size-3.5 text-danger' : 'mt-px size-3.5 text-warning'} />
-      <span className={error ? 'text-ink' : undefined}>{msg.text}</span>
+      <Icon
+        name={ok ? 'check' : 'warning'}
+        className={cn('mt-px size-3.5', error ? 'text-danger' : ok ? 'text-success' : 'text-warning')}
+      />
+      {/* Notes may contain a link (e.g. a pull request URL). */}
+      <span className={error || ok ? 'text-ink' : undefined}>
+        <InlineText inline={parseInline(msg.text)} />
+      </span>
     </div>
   )
 }

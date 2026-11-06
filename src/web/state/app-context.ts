@@ -26,7 +26,7 @@ export interface ChatMessage {
   /** User: pictures attached to the message. */
   images?: { name: string; url: string }[]
   /** Note: colour of the notice. */
-  tone?: 'warn' | 'error'
+  tone?: 'warn' | 'error' | 'ok'
   /** Assistant: which Azure API answered (Responses keeps the conversation on Azure's side). */
   api?: ApiKind
   /** Assistant: tokens reported by Azure for this reply. */
@@ -56,6 +56,8 @@ export interface ToastState {
   tone?: 'error'
   /** Backup to restore on Undo (real folders). */
   backupId?: string
+  /** Offer "Create pull request" next to Undo. */
+  offerPr?: boolean
 }
 
 /** The opened project: a folder on this machine. */
@@ -97,6 +99,10 @@ export interface ThreadState {
   transcript: ApiMessage[]
   /** Version (hash) of each file the model has, by path. */
   fileVersions: Record<string, string>
+  /** Files saved by Apply in this chat and not yet in a pull request. */
+  applied: string[]
+  /** Pull requests created from this chat. */
+  pullRequests: { url: string; number: number | null; branch: string }[]
 }
 
 export interface Totals {
@@ -170,6 +176,7 @@ export interface AppState {
   response: ResponseInfo | null
   include: Readonly<Record<string, boolean>>
   applyOpen: boolean
+  prOpen: boolean
   toast: ToastState | null
 
   settings: Settings
@@ -225,6 +232,10 @@ export interface AppActions {
   toggleInclude(path: string): void
   setIncludeAll(on: boolean): void
   openApply(): void
+  openPr(): void
+  closePr(): void
+  /** Records a created PR: the files are committed, so they leave `thread.applied`. */
+  recordPr(pr: { url: string; number: number | null; branch: string; updatedExisting: boolean }, paths: string[]): void
   closeApply(): void
   /** Writes the selected changes. Resolves to an error message, or null on success. */
   apply(backup: boolean): Promise<string | null>

@@ -1,4 +1,5 @@
 import { ApplyDialog } from '@/components/apply/ApplyDialog'
+import { PullRequestDialog } from '@/components/pr/PullRequestDialog'
 import { Toast } from '@/components/apply/Toast'
 import { ChangesPanel } from '@/components/changes/ChangesPanel'
 import { ChatThread } from '@/components/chat/ChatThread'
@@ -11,7 +12,7 @@ import { DiffScreen } from './DiffScreen'
 
 /** Three columns: explorer, chat (or a preview tab), Changes. The diff view replaces the last two. */
 export function WorkspaceScreen() {
-  const { centerView, activeTab, applyOpen, changes } = useApp()
+  const { centerView, activeTab, applyOpen, prOpen, changes } = useApp()
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -29,6 +30,7 @@ export function WorkspaceScreen() {
         </>
       )}
       {applyOpen && <ApplyDialog />}
+      {prOpen && <PullRequestDialog />}
       <Toast />
     </div>
   )

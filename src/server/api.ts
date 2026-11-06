@@ -12,12 +12,16 @@
 //   GET  /api/threads/<id>   ?root= → one saved conversation.
 //   POST /api/threads/save   { root, id, summary, thread } → saves a conversation.
 //   POST /api/threads/delete { root, id } → deletes one.
+//   POST /api/git/info       { root, paths } → branch, default branch, GitHub access, file states, open PR.
+//   POST /api/pr/draft       { root, paths, notes } → model-written { title, body }.
+//   POST /api/pr/create      { root, paths, title, body, base, draft, newBranch? } → commits, pushes, opens the PR.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFoundryConfig, type ConfigResult, type FoundryConfig } from './config.ts'
 import {
   createFoundryClients,
   describeError,
+  draftPullRequest,
   streamConversation,
   testConnection,
   type ChatMessage,
@@ -29,6 +33,7 @@ import { listDirs } from './fs/browse.ts'
 import { applyChanges, readFiles, undoApply, type ApplyChange } from './fs/files.ts'
 import { PathError } from './fs/paths.ts'
 import { scanProject, type ScanOptions } from './fs/scan.ts'
+import { createPullRequest, diffFor, gitInfo } from './git.ts'
 import { deleteThread, listThreads, loadThread, saveThread } from './threads.ts'
 
 type Env = Record<string, string | undefined>
@@ -277,6 +282,43 @@ export function createApi(getEnv: () => Env) {
           body.thread,
         )
         return sendJson(res, 200, { ok: true })
+      }
+
+      if (route === 'POST /api/git/info') {
+        const body = await readObject(req)
+        return sendJson(res, 200, await gitInfo(str(body, 'root'), strList(body, 'paths', 2000)))
+      }
+
+      if (route === 'POST /api/pr/draft') {
+        const cfg = requireConfig()
+        const body = await readObject(req)
+        const root = str(body, 'root')
+        const paths = strList(body, 'paths', 2000)
+        const info = await gitInfo(root, paths)
+        const notes = typeof body.notes === 'string' ? body.notes.slice(0, 20_000) : ''
+        const draft = await draftPullRequest(
+          clientsFor(cfg).chat,
+          cfg,
+          { notes, diff: await diffFor(root, paths), branch: info.branch ?? '' },
+          abort.signal,
+        )
+        return sendJson(res, 200, draft)
+      }
+
+      if (route === 'POST /api/pr/create') {
+        const body = await readObject(req)
+        return sendJson(
+          res,
+          200,
+          await createPullRequest(str(body, 'root'), {
+            paths: strList(body, 'paths', 2000),
+            title: str(body, 'title'),
+            body: typeof body.body === 'string' ? body.body : '',
+            base: str(body, 'base'),
+            draft: body.draft === true,
+            newBranch: typeof body.newBranch === 'string' && body.newBranch.trim() ? body.newBranch.trim() : undefined,
+          }),
+        )
       }
 
       if (route === 'POST /api/threads/delete') {

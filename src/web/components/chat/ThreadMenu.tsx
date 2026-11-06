@@ -14,7 +14,7 @@ function when(iso: string): string {
 
 /** "New chat" and the saved conversations of the open folder. */
 export function ThreadMenu() {
-  const { threads, thread, newChat, openThread, streaming, project, messages } = useApp()
+  const { threads, thread, newChat, openThread, streaming, project, messages, openPr } = useApp()
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
 
@@ -32,6 +32,19 @@ export function ThreadMenu() {
 
   return (
     <div ref={root} className="relative flex items-center gap-1 pr-2">
+      {project && thread.applied.length > 0 && (
+        <Button
+          variant="ghost"
+          size="xs"
+          icon="branch"
+          disabled={streaming}
+          onClick={openPr}
+          title={`Commit the ${thread.applied.length} ${thread.applied.length === 1 ? 'file' : 'files'} applied in this chat and open a pull request`}
+        >
+          Pull request
+          <span className="ml-0.5 rounded-full bg-surface-300 px-1.5 text-[11px] text-ink-muted">{thread.applied.length}</span>
+        </Button>
+      )}
       <Button variant="ghost" size="xs" icon="plus" disabled={streaming || !messages.length} onClick={newChat}>
         New chat
       </Button>

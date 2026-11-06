@@ -9,6 +9,7 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
 | `config.ts` | Reads and validates the Azure AI Foundry variables |
 | `foundry.ts` | Conversation turns: Responses API (`previous_response_id`) with fallback to chat completions; connection test |
 | `threads.ts` | Saved conversations per project (`~/.cache/contextual/threads/`) |
+| `git.ts` | Pull requests: repo info, diff of the applied files, commit only those files, push, `gh pr create` |
 | `api.ts` | Routes, body parsing, same-origin check |
 | `fs/paths.ts` | Path normalising (`C:\x` → `/mnt/c/x`, `\\wsl$\Ubuntu\…` → `/…`, `~`) and keeping paths inside the project |
 | `fs/browse.ts` | Folder listing for the Open folder dialog |
@@ -50,6 +51,16 @@ mounts these routes on the local dev/preview server (`npm run dev` / `npm run pr
   (`~/.cache/contextual/undo/<project hash>/<id>/`, last 20 kept).
 - `POST /api/project/undo` `{ root, backupId }` → restores that snapshot and removes files and folders
   the save created. Refused if any of those files was edited after the save.
+
+- `POST /api/git/info` `{ root, paths }` → branch, default branch, `origin`, whether `gh` can reach the repo,
+  each path's status vs HEAD, and an open PR for the current branch.
+- `POST /api/pr/draft` `{ root, paths, notes }` → `{ title, body }` written by the model from the chat notes and
+  `git diff HEAD` of the paths (one non-streaming request, not part of the conversation).
+- `POST /api/pr/create` `{ root, paths, title, body, base, draft, newBranch? }` → stages and commits **only** `paths`
+  (`git commit --only`; other staged/unstaged changes are untouched) on the current branch, or on `newBranch`
+  (required when on the default branch; switched back and deleted if the commit fails), pushes with
+  `git push -u origin HEAD`, then `gh pr create` (or just pushes if the branch already has an open PR).
+  Needs the GitHub CLI logged in (`gh auth login`); git never prompts for credentials.
 
 Requests must be `Content-Type: application/json` and same-origin, so other websites can't use
 the local server to spend tokens.

@@ -115,7 +115,15 @@ function readSettings(): Settings {
 let nextId = 0
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${(nextId++).toString(36)}`
 
-const freshThread = (): ThreadState => ({ id: newId('t'), responseId: null, api: null, transcript: [], fileVersions: {} })
+const freshThread = (): ThreadState => ({
+  id: newId('t'),
+  responseId: null,
+  api: null,
+  transcript: [],
+  fileVersions: {},
+  applied: [],
+  pullRequests: [],
+})
 
 /** What is saved per conversation (in ~/.cache/contextual/threads via the local server). */
 interface SavedThread extends ThreadState {
@@ -184,6 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [include, setInclude] = useState<Record<string, boolean>>({})
   const [applyOpen, setApplyOpen] = useState(false)
+  const [prOpen, setPrOpen] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const [settings, setSettings] = useState<Settings>(readSettings)
@@ -273,7 +282,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** Shows a saved conversation and re-ticks the files the model has from it. */
   const applySaved = useCallback((saved: SavedThread, pickable?: Set<string>) => {
-    setThread({ id: saved.id, responseId: saved.responseId, api: saved.api, transcript: saved.transcript, fileVersions: saved.fileVersions })
+    setThread({
+      id: saved.id,
+      responseId: saved.responseId,
+      api: saved.api,
+      transcript: saved.transcript,
+      fileVersions: saved.fileVersions,
+      applied: saved.applied ?? [],
+      pullRequests: saved.pullRequests ?? [],
+    })
     setMessages(saved.messages.map((m) => ({ ...m, streaming: false })))
     setInclude(includeFor(lastChanges(saved.messages)))
     if (pickable) setSelected(new Set(Object.keys(saved.fileVersions).filter((p) => pickable.has(p))))
@@ -729,7 +746,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (c.status === 'D') delete fileVersions[c.path]
             else fileVersions[c.path] = hashText(c.new)
           }
-          return { ...t, fileVersions }
+          // Remember what this chat saved, for "Create pull request".
+          const applied = [...new Set([...t.applied, ...picked.map((c) => c.path)])]
+          return { ...t, fileVersions, applied }
         })
         setApplyOpen(false)
         setToast({
@@ -737,6 +756,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           detail: `${parts.join(', ')} · not committed${project.branch ? ` on ${project.branch}` : ''}`,
           undoable: !!r.backupId,
           backupId: r.backupId ?? undefined,
+          offerPr: true,
         })
         void rescan()
         return null
@@ -880,6 +900,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleInclude: (path) => setInclude((i) => ({ ...i, [path]: !i[path] })),
       setIncludeAll: (on) => setInclude(Object.fromEntries(changes.map((c) => [c.path, on && !c.conflict]))),
       openApply: () => setApplyOpen(true),
+      openPr: () => {
+        setToast(null)
+        setPrOpen(true)
+      },
+      closePr: () => setPrOpen(false),
+      recordPr: (pr, paths) => {
+        setThread((t) => ({
+          ...t,
+          applied: t.applied.filter((p) => !paths.includes(p)),
+          pullRequests: [...t.pullRequests, { url: pr.url, number: pr.number, branch: pr.branch }],
+        }))
+        const label = pr.number ? `#${pr.number}` : ''
+        setMessages((ms) => [
+          ...ms,
+          {
+            id: newId('n'),
+            role: 'note',
+            tone: 'ok',
+            time: now(),
+            text: pr.updatedExisting
+              ? `Pushed ${paths.length} ${paths.length === 1 ? 'file' : 'files'} to ${pr.branch}; pull request ${label} updated: ${pr.url}`
+              : `Pull request ${label} opened from ${pr.branch} (${paths.length} ${paths.length === 1 ? 'file' : 'files'}): ${pr.url}`,
+          },
+        ])
+        setPrOpen(false)
+        void rescan()
+      },
       closeApply: () => setApplyOpen(false),
       apply,
       undoApply,
@@ -887,7 +934,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       updateSettings: (patch) => setSettings((s) => ({ ...s, ...patch })),
     }),
-    [openFolder, rescan, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
+    [rescan, openFolder, loadFile, screen, settingsReturn, toggleSet, tree, stale, send, refreshHealth, changes, apply, undoApply, project, rawTree, applySaved],
   )
 
   const value: AppContextValue = {
@@ -923,6 +970,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     response,
     include,
     applyOpen,
+    prOpen,
     toast,
     settings,
     totals,

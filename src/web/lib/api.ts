@@ -215,3 +215,40 @@ export const saveThread = (root: string, id: string, summary: { title: string; t
   postJson<{ ok: true }>('/api/threads/save', { root, id, summary, thread })
 
 export const deleteThread = (root: string, id: string) => postJson<{ ok: true }>('/api/threads/delete', { root, id })
+
+// ------------------------------------------------------------------ git and pull requests
+
+export interface GitFileState {
+  path: string
+  /** M modified, A new, D deleted, '' unchanged vs HEAD. */
+  status: 'M' | 'A' | 'D' | ''
+}
+
+export interface GitInfo {
+  isRepo: boolean
+  branch: string | null
+  defaultBranch: string | null
+  remote: string | null
+  github: boolean
+  problem: string | null
+  files: GitFileState[]
+  existingPr: { url: string; number: number } | null
+}
+
+export interface PrResult {
+  url: string
+  number: number | null
+  branch: string
+  commit: string
+  updatedExisting: boolean
+}
+
+export const gitInfo = (root: string, paths: string[]) => postJson<GitInfo>('/api/git/info', { root, paths })
+
+export const draftPr = (root: string, paths: string[], notes: string) =>
+  postJson<{ title: string; body: string }>('/api/pr/draft', { root, paths, notes })
+
+export const createPr = (
+  root: string,
+  req: { paths: string[]; title: string; body: string; base: string; draft: boolean; newBranch?: string },
+) => postJson<PrResult>('/api/pr/create', { root, ...req })

@@ -4,7 +4,7 @@ import { useApp } from '@/state/app-context'
 
 /** Confirmation after an apply. Stays until dismissed or the next apply. */
 export function Toast() {
-  const { toast, undoApply, dismissToast } = useApp()
+  const { toast, undoApply, dismissToast, openPr } = useApp()
   if (!toast) return null
   return (
     <div
@@ -21,6 +21,11 @@ export function Toast() {
         <div className="text-ui-small text-ink-muted">{toast.detail}</div>
       </div>
       <span className="flex-1" />
+      {toast.offerPr && (
+        <Button size="xs" icon="branch" onClick={openPr}>
+          Pull request…
+        </Button>
+      )}
       {toast.undoable && (
         <Button size="xs" icon="undo" onClick={undoApply}>
           Undo

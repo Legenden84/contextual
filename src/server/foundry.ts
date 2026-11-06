@@ -221,3 +221,40 @@ export function describeError(err: unknown): { status: number; message: string }
   if (err instanceof Error) return { status: 502, message: `Could not reach Foundry: ${err.message}` }
   return { status: 502, message: 'Could not reach Foundry.' }
 }
+
+/** Writes a PR title and description from the chat and the diff. One small request, not part of any conversation. */
+export async function draftPullRequest(
+  client: AzureOpenAI,
+  cfg: FoundryConfig,
+  input: { notes: string; diff: string; branch: string },
+  signal: AbortSignal,
+): Promise<{ title: string; body: string }> {
+  const res = await client.chat.completions.create(
+    {
+      model: cfg.deployment,
+      max_completion_tokens: 2000,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You write GitHub pull request titles and descriptions.',
+            'Reply in exactly this format:',
+            'TITLE: <imperative summary, at most 72 characters, no trailing period>',
+            '---',
+            '<markdown description: a short paragraph on what changed and why, then a "Changes" list of the notable edits per file. No headings above level 2. Do not invent testing that was not mentioned.>',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: `Branch: ${input.branch}\n\n# What was asked and explained in the chat\n\n${input.notes}\n\n# Diff\n\n\`\`\`diff\n${input.diff}\n\`\`\``,
+        },
+      ],
+    },
+    { signal },
+  )
+  const text = res.choices[0]?.message?.content ?? ''
+  const m = /^\s*TITLE:\s*(.+)\n+-{3,}\n?([\s\S]*)$/i.exec(text)
+  if (m) return { title: m[1].trim().slice(0, 120), body: m[2].trim() }
+  const [first, ...rest] = text.trim().split('\n')
+  return { title: (first ?? '').replace(/^#+\s*|^TITLE:\s*/i, '').trim().slice(0, 120), body: rest.join('\n').trim() }
+}
