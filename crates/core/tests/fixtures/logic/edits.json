@@ -1,0 +1,424 @@
+[
+ {
+  "name": "exact",
+  "fn": "applyEdits",
+  "input": {
+   "original": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "edits": [
+    {
+     "search": "        _repo = repo;\n",
+     "replace": "        _repo = repo ?? throw new ArgumentNullException(nameof(repo));\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo ?? throw new ArgumentNullException(nameof(repo));\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "trailing whitespace",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a  \nb\t\nc\n",
+   "edits": [
+    {
+     "search": "a\nb",
+     "replace": "A\nB"
+    }
+   ]
+  },
+  "output": {
+   "content": "A\nB\nc\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "indent differs (deeper in file)",
+  "fn": "applyEdits",
+  "input": {
+   "original": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "edits": [
+    {
+     "search": "public void Cancel(Order order)\n{\n    order.Status = OrderStatus.Cancelled;",
+     "replace": "public void Cancel(Order order, string reason)\n{\n    order.Status = OrderStatus.Cancelled;\n    order.Reason = reason;"
+    }
+   ]
+  },
+  "output": {
+   "content": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order, string reason)\n    {\n        order.Status = OrderStatus.Cancelled;\n        order.Reason = reason;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "indent differs (shallower in file)",
+  "fn": "applyEdits",
+  "input": {
+   "original": "if x:\n  y = 1\n  z = 2\n",
+   "edits": [
+    {
+     "search": "        y = 1\n        z = 2",
+     "replace": "        y = 10\n        z = 20\n            w = 3"
+    }
+   ]
+  },
+  "output": {
+   "content": "if x:\n  y = 10\n  z = 20\n      w = 3\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "blank edges",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nb\nc\n",
+   "edits": [
+    {
+     "search": "\n\nb\n\n",
+     "replace": "\nB\n\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\nB\nc\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "not found",
+  "fn": "applyEdits",
+  "input": {
+   "original": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "edits": [
+    {
+     "search": "does not exist",
+     "replace": "x"
+    }
+   ]
+  },
+  "output": {
+   "content": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "failed": [
+    {
+     "search": "does not exist",
+     "replace": "x"
+    }
+   ]
+  }
+ },
+ {
+  "name": "multiple in order",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x\ny\nx\ny\n",
+   "edits": [
+    {
+     "search": "x",
+     "replace": "X1"
+    },
+    {
+     "search": "x",
+     "replace": "X2"
+    }
+   ]
+  },
+  "output": {
+   "content": "X1\ny\nX2\ny\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "cursor wraps to first",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x\ny\nx\n",
+   "edits": [
+    {
+     "search": "x\ny\nx",
+     "replace": "z"
+    },
+    {
+     "search": "y",
+     "replace": "Y"
+    }
+   ]
+  },
+  "output": {
+   "content": "z\n",
+   "failed": [
+    {
+     "search": "y",
+     "replace": "Y"
+    }
+   ]
+  }
+ },
+ {
+  "name": "empty search on empty file",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "",
+     "replace": "new content\nline 2\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "new content\nline 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "empty search on blank file",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  \n\n",
+   "edits": [
+    {
+     "search": "\n",
+     "replace": "filled"
+    }
+   ]
+  },
+  "output": {
+   "content": "filled\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "empty search on nonempty",
+  "fn": "applyEdits",
+  "input": {
+   "original": "abc\n",
+   "edits": [
+    {
+     "search": "  ",
+     "replace": "x"
+    }
+   ]
+  },
+  "output": {
+   "content": "abc\n",
+   "failed": [
+    {
+     "search": "  ",
+     "replace": "x"
+    }
+   ]
+  }
+ },
+ {
+  "name": "delete lines",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nb\nc\n",
+   "edits": [
+    {
+     "search": "b\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a\nc\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "crlf original",
+  "fn": "applyEdits",
+  "input": {
+   "original": "one\r\ntwo\r\nthree\r\n",
+   "edits": [
+    {
+     "search": "two",
+     "replace": "TWO"
+    }
+   ]
+  },
+  "output": {
+   "content": "one\nTWO\nthree\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "crlf search",
+  "fn": "applyEdits",
+  "input": {
+   "original": "one\ntwo\nthree",
+   "edits": [
+    {
+     "search": "one\r\ntwo\r\n",
+     "replace": "1\r\n2\r\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "1\n2\nthree",
+   "failed": []
+  }
+ },
+ {
+  "name": "no final newline kept",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nb",
+   "edits": [
+    {
+     "search": "b",
+     "replace": "B"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\nB",
+   "failed": []
+  }
+ },
+ {
+  "name": "all lines removed",
+  "fn": "applyEdits",
+  "input": {
+   "original": "only\n",
+   "edits": [
+    {
+     "search": "only",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "unicode",
+  "fn": "applyEdits",
+  "input": {
+   "original": "grüße 👋\nwelt\n",
+   "edits": [
+    {
+     "search": "grüße 👋",
+     "replace": "hallo 🌍"
+    }
+   ]
+  },
+  "output": {
+   "content": "hallo 🌍\nwelt\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "mixed success",
+  "fn": "applyEdits",
+  "input": {
+   "original": "def greet(name):\n    print(\"Hello, \" + name)\n\n\ndef main():\n    greet(\"world\")\n    greet(\"émilie 👋\")\n",
+   "edits": [
+    {
+     "search": "greet(\"world\")",
+     "replace": "greet(\"you\")"
+    },
+    {
+     "search": "missing()",
+     "replace": "x"
+    },
+    {
+     "search": "    print(\"Hello, \" + name)",
+     "replace": "    print(f\"Hello, {name}\")"
+    }
+   ]
+  },
+  "output": {
+   "content": "def greet(name):\n    print(f\"Hello, {name}\")\n\n\ndef main():\n    greet(\"you\")\n    greet(\"émilie 👋\")\n",
+   "failed": [
+    {
+     "search": "missing()",
+     "replace": "x"
+    }
+   ]
+  }
+ },
+ {
+  "name": "nbsp indent",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  x = 1\n",
+   "edits": [
+    {
+     "search": "x = 1",
+     "replace": "x = 2\ny = 3"
+    }
+   ]
+  },
+  "output": {
+   "content": "  x = 2\n  y = 3\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "tab vs spaces",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\tfoo()\n\tbar()\n",
+   "edits": [
+    {
+     "search": "    foo()\n    bar()",
+     "replace": "    foo(1)\n      bar(2)"
+    }
+   ]
+  },
+  "output": {
+   "content": "    foo(1)\n      bar(2)\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "replace with blank lines",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nb\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": "\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "\nb\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "format",
+  "fn": "formatEdits",
+  "input": {
+   "edits": [
+    {
+     "search": "greet(\"world\")",
+     "replace": "greet(\"you\")"
+    },
+    {
+     "search": "missing()",
+     "replace": "x"
+    },
+    {
+     "search": "    print(\"Hello, \" + name)",
+     "replace": "    print(f\"Hello, {name}\")"
+    }
+   ]
+  },
+  "output": "<<<<<<< SEARCH\ngreet(\"world\")\n=======\ngreet(\"you\")\n>>>>>>> REPLACE\n\n<<<<<<< SEARCH\nmissing()\n=======\nx\n>>>>>>> REPLACE\n\n<<<<<<< SEARCH\n    print(\"Hello, \" + name)\n=======\n    print(f\"Hello, {name}\")\n>>>>>>> REPLACE"
+ },
+ {
+  "name": "format empty",
+  "fn": "formatEdits",
+  "input": {
+   "edits": []
+  },
+  "output": ""
+ }
+]

@@ -1,0 +1,61 @@
+[
+ {
+  "name": "outputPrompt",
+  "input": null,
+  "output": "You are helping edit files in a local project. The user reviews every change\nand saves it manually. You cannot write to disk.\n\n- Explain the change in a few sentences first.\n- Only touch files that are included in the context.\n- Follow the project rules provided above this prompt."
+ },
+ {
+  "name": "LEGACY_OUTPUT_PROMPTS",
+  "input": null,
+  "output": [
+   "You are helping edit files in a local project. The user reviews every change\nand applies it manually. You cannot write to disk.\n\n## Output format\n- Explain the change in a few sentences first.\n- For every file you add or change, return its COMPLETE new contents.\n  Never return partial snippets, \"...\" or \"unchanged\" placeholders.\n- Put each file in its own fenced block, directly after a header line:\n\n### FILE: src/Path/Relative/To/Root.cs\n```csharp\n<full file contents>\n```\n\n- To delete a file, write a single line: ### DELETE: src/Path/To/File.cs\n- Only touch files that are included in the context.\n- Follow the project rules provided above this prompt."
+  ]
+ },
+ {
+  "name": "defaultExclusions",
+  "input": null,
+  "output": [
+   "**/node_modules/**",
+   "**/.venv/**",
+   "**/venv/**",
+   "**/__pycache__/**",
+   "**/bin/**",
+   "**/obj/**",
+   "**/dist/**",
+   "**/build/**",
+   "**/.git/**",
+   "package-lock.json",
+   "yarn.lock",
+   "pnpm-lock.yaml",
+   "poetry.lock",
+   "Pipfile.lock",
+   "packages.lock.json",
+   "Cargo.lock"
+  ]
+ },
+ {
+  "name": "PLACEHOLDER_DEPLOYMENT",
+  "input": null,
+  "output": {
+   "name": "not configured",
+   "limit": 128000,
+   "inPrice": 0,
+   "outPrice": 0
+  }
+ },
+ {
+  "name": "USER_MESSAGE_TOKENS",
+  "input": null,
+  "output": 96
+ },
+ {
+  "name": "EST_OUTPUT_TOKENS",
+  "input": null,
+  "output": 1800
+ },
+ {
+  "name": "systemPrompt default",
+  "input": null,
+  "output": "You are helping edit files in a local project. The user reviews every change\nand saves it manually. You cannot write to disk.\n\n- Explain the change in a few sentences first.\n- Only touch files that are included in the context.\n- Follow the project rules provided above this prompt.\n\n# How to return file changes\n\nThese rules take precedence over any earlier instruction about how to return files. Never write file contents outside the blocks below.\n\n## Changing an existing file\nReturn only the parts that change, as one or more edit blocks after a header line:\n\n### EDIT: src/path/to/File.cs\n<<<<<<< SEARCH\nexact existing lines, copied verbatim with their indentation\n=======\nthe lines that replace them\n>>>>>>> REPLACE\n\n- SEARCH must match the current file exactly, character for character, including indentation, comments and blank lines.\n- Include 2–3 unchanged lines around the change so SEARCH occurs only once in the file. Keep blocks small; never repeat a whole file in SEARCH.\n- To insert lines, SEARCH for the lines next to the insertion point and repeat them in REPLACE together with the new lines.\n- To remove lines, leave them out of REPLACE.\n- Use several blocks for separate changes in the same file, in file order, without overlapping. One header per file.\n- Do not put edit blocks in a code fence.\n\n## New files, or rewriting most of a small file\n### FILE: src/path/to/NewFile.cs\n```csharp\ncomplete file contents\n```\n\n## Deleting a file\n### DELETE: src/path/to/Old.cs\n\nNever return a file marked as a condensed reference."
+ }
+]

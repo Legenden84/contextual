@@ -1,0 +1,5335 @@
+[
+ {
+  "name": "identical",
+  "input": {
+   "old": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "new": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "using System;"
+     },
+     {
+      "k": " ",
+      "a": 2,
+      "b": 2,
+      "t": "using System.Threading.Tasks;"
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 3,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 4,
+      "b": 4,
+      "t": "namespace Shop.Orders;"
+     },
+     {
+      "k": " ",
+      "a": 5,
+      "b": 5,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 6,
+      "b": 6,
+      "t": "public class OrderService"
+     },
+     {
+      "k": " ",
+      "a": 7,
+      "b": 7,
+      "t": "{"
+     },
+     {
+      "k": " ",
+      "a": 8,
+      "b": 8,
+      "t": "    private readonly IOrderRepository _repo;"
+     },
+     {
+      "k": " ",
+      "a": 9,
+      "b": 9,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 10,
+      "b": 10,
+      "t": "    public OrderService(IOrderRepository repo)"
+     },
+     {
+      "k": " ",
+      "a": 11,
+      "b": 11,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 12,
+      "b": 12,
+      "t": "        _repo = repo;"
+     },
+     {
+      "k": " ",
+      "a": 13,
+      "b": 13,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 14,
+      "b": 14,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 15,
+      "b": 15,
+      "t": "    public async Task<Order> GetAsync(int id)"
+     },
+     {
+      "k": " ",
+      "a": 16,
+      "b": 16,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 17,
+      "b": 17,
+      "t": "        var order = await _repo.FindAsync(id);"
+     },
+     {
+      "k": " ",
+      "a": 18,
+      "b": 18,
+      "t": "        if (order is null) throw new NotFoundException(id);"
+     },
+     {
+      "k": " ",
+      "a": 19,
+      "b": 19,
+      "t": "        return order;"
+     },
+     {
+      "k": " ",
+      "a": 20,
+      "b": 20,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 21,
+      "b": 21,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 22,
+      "b": 22,
+      "t": "    public void Cancel(Order order)"
+     },
+     {
+      "k": " ",
+      "a": 23,
+      "b": 23,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 24,
+      "b": 24,
+      "t": "        order.Status = OrderStatus.Cancelled;"
+     },
+     {
+      "k": " ",
+      "a": 25,
+      "b": 25,
+      "t": "        _repo.Save(order);"
+     },
+     {
+      "k": " ",
+      "a": 26,
+      "b": 26,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 27,
+      "b": 27,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 28,
+      "b": 28,
+      "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);"
+     },
+     {
+      "k": " ",
+      "a": 29,
+      "b": 29,
+      "t": "}"
+     }
+    ],
+    "adds": 0,
+    "dels": 0,
+    "oldLines": [
+     "using System;",
+     "using System.Threading.Tasks;",
+     "",
+     "namespace Shop.Orders;",
+     "",
+     "public class OrderService",
+     "{",
+     "    private readonly IOrderRepository _repo;",
+     "",
+     "    public OrderService(IOrderRepository repo)",
+     "    {",
+     "        _repo = repo;",
+     "    }",
+     "",
+     "    public async Task<Order> GetAsync(int id)",
+     "    {",
+     "        var order = await _repo.FindAsync(id);",
+     "        if (order is null) throw new NotFoundException(id);",
+     "        return order;",
+     "    }",
+     "",
+     "    public void Cancel(Order order)",
+     "    {",
+     "        order.Status = OrderStatus.Cancelled;",
+     "        _repo.Save(order);",
+     "    }",
+     "",
+     "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+     "}"
+    ],
+    "newLines": [
+     "using System;",
+     "using System.Threading.Tasks;",
+     "",
+     "namespace Shop.Orders;",
+     "",
+     "public class OrderService",
+     "{",
+     "    private readonly IOrderRepository _repo;",
+     "",
+     "    public OrderService(IOrderRepository repo)",
+     "    {",
+     "        _repo = repo;",
+     "    }",
+     "",
+     "    public async Task<Order> GetAsync(int id)",
+     "    {",
+     "        var order = await _repo.FindAsync(id);",
+     "        if (order is null) throw new NotFoundException(id);",
+     "        return order;",
+     "    }",
+     "",
+     "    public void Cancel(Order order)",
+     "    {",
+     "        order.Status = OrderStatus.Cancelled;",
+     "        _repo.Save(order);",
+     "    }",
+     "",
+     "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+     "}"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "using System.Threading.Tasks;"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "namespace Shop.Orders;"
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "        var order = await _repo.FindAsync(id);"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "        return order;"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "        _repo.Save(order);"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);"
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "using System.Threading.Tasks;"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "namespace Shop.Orders;"
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "        var order = await _repo.FindAsync(id);"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "        return order;"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "        _repo.Save(order);"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);"
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "using System.Threading.Tasks;"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "namespace Shop.Orders;"
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "        var order = await _repo.FindAsync(id);"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "        return order;"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "        _repo.Save(order);"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);"
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "headers": [],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null"
+  }
+ },
+ {
+  "name": "csharp edits",
+  "input": {
+   "old": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n",
+   "new": "using System;\nusing System.Linq;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new OrderNotFoundException(id, \"missing\");\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        order.CancelledAt = DateTime.UtcNow;\n        _repo.Save(order);\n    }\n\n    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "using System;"
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "using System.Linq;"
+     },
+     {
+      "k": " ",
+      "a": 2,
+      "b": 3,
+      "t": "using System.Threading.Tasks;"
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 4,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 4,
+      "b": 5,
+      "t": "namespace Shop.Orders;"
+     },
+     {
+      "k": " ",
+      "a": 5,
+      "b": 6,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 6,
+      "b": 7,
+      "t": "public class OrderService"
+     },
+     {
+      "k": " ",
+      "a": 7,
+      "b": 8,
+      "t": "{"
+     },
+     {
+      "k": " ",
+      "a": 8,
+      "b": 9,
+      "t": "    private readonly IOrderRepository _repo;"
+     },
+     {
+      "k": " ",
+      "a": 9,
+      "b": 10,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 10,
+      "b": 11,
+      "t": "    public OrderService(IOrderRepository repo)"
+     },
+     {
+      "k": " ",
+      "a": 11,
+      "b": 12,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 12,
+      "b": 13,
+      "t": "        _repo = repo;"
+     },
+     {
+      "k": " ",
+      "a": 13,
+      "b": 14,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 14,
+      "b": 15,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 15,
+      "b": 16,
+      "t": "    public async Task<Order> GetAsync(int id)"
+     },
+     {
+      "k": " ",
+      "a": 16,
+      "b": 17,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 17,
+      "b": 18,
+      "t": "        var order = await _repo.FindAsync(id);"
+     },
+     {
+      "k": "-",
+      "a": 18,
+      "t": "        if (order is null) throw new NotFoundException(id);",
+      "r": [
+       37,
+       57
+      ]
+     },
+     {
+      "k": "+",
+      "b": 19,
+      "t": "        if (order is null) throw new OrderNotFoundException(id, \"missing\");",
+      "r": [
+       37,
+       73
+      ]
+     },
+     {
+      "k": " ",
+      "a": 19,
+      "b": 20,
+      "t": "        return order;"
+     },
+     {
+      "k": " ",
+      "a": 20,
+      "b": 21,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 21,
+      "b": 22,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 22,
+      "b": 23,
+      "t": "    public void Cancel(Order order)"
+     },
+     {
+      "k": " ",
+      "a": 23,
+      "b": 24,
+      "t": "    {"
+     },
+     {
+      "k": " ",
+      "a": 24,
+      "b": 25,
+      "t": "        order.Status = OrderStatus.Cancelled;"
+     },
+     {
+      "k": "+",
+      "b": 26,
+      "t": "        order.CancelledAt = DateTime.UtcNow;"
+     },
+     {
+      "k": " ",
+      "a": 25,
+      "b": 27,
+      "t": "        _repo.Save(order);"
+     },
+     {
+      "k": " ",
+      "a": 26,
+      "b": 28,
+      "t": "    }"
+     },
+     {
+      "k": " ",
+      "a": 27,
+      "b": 29,
+      "t": ""
+     },
+     {
+      "k": "-",
+      "a": 28,
+      "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+      "r": [
+       4,
+       12
+      ]
+     },
+     {
+      "k": "+",
+      "b": 30,
+      "t": "    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+      "r": [
+       4,
+       10
+      ]
+     },
+     {
+      "k": " ",
+      "a": 29,
+      "b": 31,
+      "t": "}"
+     }
+    ],
+    "adds": 4,
+    "dels": 2,
+    "oldLines": [
+     "using System;",
+     "using System.Threading.Tasks;",
+     "",
+     "namespace Shop.Orders;",
+     "",
+     "public class OrderService",
+     "{",
+     "    private readonly IOrderRepository _repo;",
+     "",
+     "    public OrderService(IOrderRepository repo)",
+     "    {",
+     "        _repo = repo;",
+     "    }",
+     "",
+     "    public async Task<Order> GetAsync(int id)",
+     "    {",
+     "        var order = await _repo.FindAsync(id);",
+     "        if (order is null) throw new NotFoundException(id);",
+     "        return order;",
+     "    }",
+     "",
+     "    public void Cancel(Order order)",
+     "    {",
+     "        order.Status = OrderStatus.Cancelled;",
+     "        _repo.Save(order);",
+     "    }",
+     "",
+     "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+     "}"
+    ],
+    "newLines": [
+     "using System;",
+     "using System.Linq;",
+     "using System.Threading.Tasks;",
+     "",
+     "namespace Shop.Orders;",
+     "",
+     "public class OrderService",
+     "{",
+     "    private readonly IOrderRepository _repo;",
+     "",
+     "    public OrderService(IOrderRepository repo)",
+     "    {",
+     "        _repo = repo;",
+     "    }",
+     "",
+     "    public async Task<Order> GetAsync(int id)",
+     "    {",
+     "        var order = await _repo.FindAsync(id);",
+     "        if (order is null) throw new OrderNotFoundException(id, \"missing\");",
+     "        return order;",
+     "    }",
+     "",
+     "    public void Cancel(Order order)",
+     "    {",
+     "        order.Status = OrderStatus.Cancelled;",
+     "        order.CancelledAt = DateTime.UtcNow;",
+     "        _repo.Save(order);",
+     "    }",
+     "",
+     "    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+     "}"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "using System.Linq;"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 3,
+       "t": "using System.Threading.Tasks;"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 4,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 5,
+       "t": "namespace Shop.Orders;"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 5,
+       "b": 6,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 7,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 8,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 9,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 10,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 11,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 12,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 13,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 14,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 15,
+       "t": ""
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 15,
+       "b": 16,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 17,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 18,
+       "t": "        var order = await _repo.FindAsync(id);"
+      },
+      {
+       "k": "-",
+       "a": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);",
+       "r": [
+        37,
+        57
+       ]
+      },
+      {
+       "k": "+",
+       "b": 19,
+       "t": "        if (order is null) throw new OrderNotFoundException(id, \"missing\");",
+       "r": [
+        37,
+        73
+       ]
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 20,
+       "t": "        return order;"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 21,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 22,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 23,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 24,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 25,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      },
+      {
+       "k": "+",
+       "b": 26,
+       "t": "        order.CancelledAt = DateTime.UtcNow;"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 27,
+       "t": "        _repo.Save(order);"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 28,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 29,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        12
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        10
+       ]
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 31,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "using System.Linq;"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 3,
+       "t": "using System.Threading.Tasks;"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 3,
+       "b": 4,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 5,
+       "t": "namespace Shop.Orders;"
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 6,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 7,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 8,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 9,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 10,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 11,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 12,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 13,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 14,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 15,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 16,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 17,
+       "t": "    {"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 17,
+       "b": 18,
+       "t": "        var order = await _repo.FindAsync(id);"
+      },
+      {
+       "k": "-",
+       "a": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);",
+       "r": [
+        37,
+        57
+       ]
+      },
+      {
+       "k": "+",
+       "b": 19,
+       "t": "        if (order is null) throw new OrderNotFoundException(id, \"missing\");",
+       "r": [
+        37,
+        73
+       ]
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 20,
+       "t": "        return order;"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 20,
+       "b": 21,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 22,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 23,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 24,
+       "t": "    {"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 24,
+       "b": 25,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      },
+      {
+       "k": "+",
+       "b": 26,
+       "t": "        order.CancelledAt = DateTime.UtcNow;"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 27,
+       "t": "        _repo.Save(order);"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 26,
+       "b": 28,
+       "t": "    }"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 27,
+       "b": 29,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        12
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        10
+       ]
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 31,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "using System;"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 2,
+       "t": "using System.Linq;"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 2,
+       "b": 3,
+       "t": "using System.Threading.Tasks;"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 4,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 5,
+       "t": "namespace Shop.Orders;"
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 6,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 7,
+       "t": "public class OrderService"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 8,
+       "t": "{"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 9,
+       "t": "    private readonly IOrderRepository _repo;"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 10,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 11,
+       "t": "    public OrderService(IOrderRepository repo)"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 12,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 13,
+       "t": "        _repo = repo;"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 14,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 15,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 16,
+       "t": "    public async Task<Order> GetAsync(int id)"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 17,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 18,
+       "t": "        var order = await _repo.FindAsync(id);"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 18,
+       "t": "        if (order is null) throw new NotFoundException(id);",
+       "r": [
+        37,
+        57
+       ]
+      },
+      {
+       "k": "+",
+       "b": 19,
+       "t": "        if (order is null) throw new OrderNotFoundException(id, \"missing\");",
+       "r": [
+        37,
+        73
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 19,
+       "b": 20,
+       "t": "        return order;"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 21,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 22,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 23,
+       "t": "    public void Cancel(Order order)"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 24,
+       "t": "    {"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 25,
+       "t": "        order.Status = OrderStatus.Cancelled;"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 26,
+       "t": "        order.CancelledAt = DateTime.UtcNow;"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 25,
+       "b": 27,
+       "t": "        _repo.Save(order);"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 28,
+       "t": "    }"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 29,
+       "t": ""
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 28,
+       "t": "    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        12
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);",
+       "r": [
+        4,
+        10
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 29,
+       "b": 31,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,4 +1,5 @@",
+    "@@ -15,15 +16,16 @@ public class OrderService"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,4 +1,5 @@\n using System;\n+using System.Linq;\n using System.Threading.Tasks;\n \n namespace Shop.Orders;\n@@ -15,15 +16,16 @@ public class OrderService\n     public async Task<Order> GetAsync(int id)\n     {\n         var order = await _repo.FindAsync(id);\n-        if (order is null) throw new NotFoundException(id);\n+        if (order is null) throw new OrderNotFoundException(id, \"missing\");\n         return order;\n     }\n \n     public void Cancel(Order order)\n     {\n         order.Status = OrderStatus.Cancelled;\n+        order.CancelledAt = DateTime.UtcNow;\n         _repo.Save(order);\n     }\n \n-    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n+    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n }",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,4 +1,5 @@\n using System;\n+using System.Linq;\n using System.Threading.Tasks;\n \n namespace Shop.Orders;\n@@ -15,15 +16,16 @@ public class OrderService\n     public async Task<Order> GetAsync(int id)\n     {\n         var order = await _repo.FindAsync(id);\n-        if (order is null) throw new NotFoundException(id);\n+        if (order is null) throw new OrderNotFoundException(id, \"missing\");\n         return order;\n     }\n \n     public void Cancel(Order order)\n     {\n         order.Status = OrderStatus.Cancelled;\n+        order.CancelledAt = DateTime.UtcNow;\n         _repo.Save(order);\n     }\n \n-    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n+    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n }",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,4 +1,5 @@\n using System;\n+using System.Linq;\n using System.Threading.Tasks;\n \n namespace Shop.Orders;\n@@ -15,15 +16,16 @@ public class OrderService\n     public async Task<Order> GetAsync(int id)\n     {\n         var order = await _repo.FindAsync(id);\n-        if (order is null) throw new NotFoundException(id);\n+        if (order is null) throw new OrderNotFoundException(id, \"missing\");\n         return order;\n     }\n \n     public void Cancel(Order order)\n     {\n         order.Status = OrderStatus.Cancelled;\n+        order.CancelledAt = DateTime.UtcNow;\n         _repo.Save(order);\n     }\n \n-    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n+    public static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n }"
+  }
+ },
+ {
+  "name": "add file",
+  "input": {
+   "old": "",
+   "new": "import { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "+",
+      "b": 1,
+      "t": "import { useState } from 'react'"
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": ""
+     },
+     {
+      "k": "+",
+      "b": 3,
+      "t": "export function Counter({ start = 0 }: { start?: number }) {"
+     },
+     {
+      "k": "+",
+      "b": 4,
+      "t": "  const [n, setN] = useState(start)"
+     },
+     {
+      "k": "+",
+      "b": 5,
+      "t": "  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>"
+     },
+     {
+      "k": "+",
+      "b": 6,
+      "t": "}"
+     }
+    ],
+    "adds": 6,
+    "dels": 0,
+    "oldLines": [],
+    "newLines": [
+     "import { useState } from 'react'",
+     "",
+     "export function Counter({ start = 0 }: { start?: number }) {",
+     "  const [n, setN] = useState(start)",
+     "  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>",
+     "}"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "import { useState } from 'react'"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "export function Counter({ start = 0 }: { start?: number }) {"
+      },
+      {
+       "k": "+",
+       "b": 4,
+       "t": "  const [n, setN] = useState(start)"
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>"
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "import { useState } from 'react'"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "export function Counter({ start = 0 }: { start?: number }) {"
+      },
+      {
+       "k": "+",
+       "b": 4,
+       "t": "  const [n, setN] = useState(start)"
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>"
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "import { useState } from 'react'"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "export function Counter({ start = 0 }: { start?: number }) {"
+      },
+      {
+       "k": "+",
+       "b": 4,
+       "t": "  const [n, setN] = useState(start)"
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>"
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "}"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -0,0 +1,6 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -0,0 +1,6 @@\n+import { useState } from 'react'\n+\n+export function Counter({ start = 0 }: { start?: number }) {\n+  const [n, setN] = useState(start)\n+  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n+}",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -0,0 +1,6 @@\n+import { useState } from 'react'\n+\n+export function Counter({ start = 0 }: { start?: number }) {\n+  const [n, setN] = useState(start)\n+  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n+}",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -0,0 +1,6 @@\n+import { useState } from 'react'\n+\n+export function Counter({ start = 0 }: { start?: number }) {\n+  const [n, setN] = useState(start)\n+  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n+}"
+  }
+ },
+ {
+  "name": "delete file",
+  "input": {
+   "old": "def greet(name):\n    print(\"Hello, \" + name)\n\n\ndef main():\n    greet(\"world\")\n    greet(\"émilie 👋\")\n",
+   "new": ""
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "def greet(name):"
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "    print(\"Hello, \" + name)"
+     },
+     {
+      "k": "-",
+      "a": 3,
+      "t": ""
+     },
+     {
+      "k": "-",
+      "a": 4,
+      "t": ""
+     },
+     {
+      "k": "-",
+      "a": 5,
+      "t": "def main():"
+     },
+     {
+      "k": "-",
+      "a": 6,
+      "t": "    greet(\"world\")"
+     },
+     {
+      "k": "-",
+      "a": 7,
+      "t": "    greet(\"émilie 👋\")"
+     }
+    ],
+    "adds": 0,
+    "dels": 7,
+    "oldLines": [
+     "def greet(name):",
+     "    print(\"Hello, \" + name)",
+     "",
+     "",
+     "def main():",
+     "    greet(\"world\")",
+     "    greet(\"émilie 👋\")"
+    ],
+    "newLines": []
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "    print(\"Hello, \" + name)"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 5,
+       "t": "def main():"
+      },
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")"
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "    print(\"Hello, \" + name)"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 5,
+       "t": "def main():"
+      },
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")"
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "    print(\"Hello, \" + name)"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": ""
+      },
+      {
+       "k": "-",
+       "a": 5,
+       "t": "def main():"
+      },
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")"
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,7 +0,0 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,7 +0,0 @@\n-def greet(name):\n-    print(\"Hello, \" + name)\n-\n-\n-def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,7 +0,0 @@\n-def greet(name):\n-    print(\"Hello, \" + name)\n-\n-\n-def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-def greet(name):\n-    print(\"Hello, \" + name)\n-\n-\n-def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")"
+  }
+ },
+ {
+  "name": "both empty",
+  "input": {
+   "old": "",
+   "new": ""
+  },
+  "output": {
+   "diff": {
+    "ops": [],
+    "adds": 0,
+    "dels": 0,
+    "oldLines": [],
+    "newLines": []
+   },
+   "hunks": [],
+   "hunks1": [],
+   "hunks0": [],
+   "headers": [],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null"
+  }
+ },
+ {
+  "name": "no final newline",
+  "input": {
+   "old": "a\nb\nc",
+   "new": "a\nB\nc"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "a"
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "b"
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "B"
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 3,
+      "t": "c"
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "a",
+     "b",
+     "c"
+    ],
+    "newLines": [
+     "a",
+     "B",
+     "c"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "B"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "c"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "B"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "c"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "B"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "c"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,3 +1,3 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c"
+  }
+ },
+ {
+  "name": "final newline added",
+  "input": {
+   "old": "a\nb",
+   "new": "a\nb\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "a"
+     },
+     {
+      "k": " ",
+      "a": 2,
+      "b": 2,
+      "t": "b"
+     }
+    ],
+    "adds": 0,
+    "dels": 0,
+    "oldLines": [
+     "a",
+     "b"
+    ],
+    "newLines": [
+     "a",
+     "b"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "b"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "b"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "a"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "b"
+      }
+     ]
+    }
+   ],
+   "headers": [],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null"
+  }
+ },
+ {
+  "name": "only newline",
+  "input": {
+   "old": "\n",
+   "new": "\n\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": ""
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": ""
+     }
+    ],
+    "adds": 1,
+    "dels": 0,
+    "oldLines": [
+     ""
+    ],
+    "newLines": [
+     "",
+     ""
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": ""
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": ""
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": ""
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 2,
+       "t": ""
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,1 +1,2 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,1 +1,2 @@\n \n+",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,1 +1,2 @@\n \n+",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,1 +1,2 @@\n \n+"
+  }
+ },
+ {
+  "name": "crlf lines",
+  "input": {
+   "old": "one\r\ntwo\r\nthree\r\n",
+   "new": "one\r\ntwo 2\r\nthree\r\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "one\r"
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "two\r",
+      "r": [
+       3,
+       3
+      ]
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "two 2\r",
+      "r": [
+       3,
+       5
+      ]
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 3,
+      "t": "three\r"
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "one\r",
+     "two\r",
+     "three\r"
+    ],
+    "newLines": [
+     "one\r",
+     "two 2\r",
+     "three\r"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "one\r"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "two\r",
+       "r": [
+        3,
+        3
+       ]
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "two 2\r",
+       "r": [
+        3,
+        5
+       ]
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "three\r"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "one\r"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "two\r",
+       "r": [
+        3,
+        3
+       ]
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "two 2\r",
+       "r": [
+        3,
+        5
+       ]
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "three\r"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "one\r"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 2,
+       "t": "two\r",
+       "r": [
+        3,
+        3
+       ]
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "two 2\r",
+       "r": [
+        3,
+        5
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "three\r"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,3 +1,3 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,3 +1,3 @@\n one\r\n-two\r\n+two 2\r\n three\r",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,3 +1,3 @@\n one\r\n-two\r\n+two 2\r\n three\r",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,3 +1,3 @@\n one\r\n-two\r\n+two 2\r\n three\r"
+  }
+ },
+ {
+  "name": "unicode word change",
+  "input": {
+   "old": "const greeting = \"héllo wörld\"\n",
+   "new": "const greeting = \"héllo wörld 👋\"\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "const greeting = \"héllo wörld\"",
+      "r": [
+       29,
+       29
+      ]
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "const greeting = \"héllo wörld 👋\"",
+      "r": [
+       29,
+       32
+      ]
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "const greeting = \"héllo wörld\""
+    ],
+    "newLines": [
+     "const greeting = \"héllo wörld 👋\""
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "const greeting = \"héllo wörld\"",
+       "r": [
+        29,
+        29
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "const greeting = \"héllo wörld 👋\"",
+       "r": [
+        29,
+        32
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "const greeting = \"héllo wörld\"",
+       "r": [
+        29,
+        29
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "const greeting = \"héllo wörld 👋\"",
+       "r": [
+        29,
+        32
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "const greeting = \"héllo wörld\"",
+       "r": [
+        29,
+        29
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "const greeting = \"héllo wörld 👋\"",
+       "r": [
+        29,
+        32
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,1 +1,1 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-const greeting = \"héllo wörld\"\n+const greeting = \"héllo wörld 👋\"",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-const greeting = \"héllo wörld\"\n+const greeting = \"héllo wörld 👋\"",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,1 +1,1 @@\n-const greeting = \"héllo wörld\"\n+const greeting = \"héllo wörld 👋\""
+  }
+ },
+ {
+  "name": "emoji inside",
+  "input": {
+   "old": "x = \"😀 smile\"\n",
+   "new": "x = \"😀 grin\"\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "x = \"😀 smile\"",
+      "r": [
+       8,
+       13
+      ]
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "x = \"😀 grin\"",
+      "r": [
+       8,
+       12
+      ]
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "x = \"😀 smile\""
+    ],
+    "newLines": [
+     "x = \"😀 grin\""
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "x = \"😀 smile\"",
+       "r": [
+        8,
+        13
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "x = \"😀 grin\"",
+       "r": [
+        8,
+        12
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "x = \"😀 smile\"",
+       "r": [
+        8,
+        13
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "x = \"😀 grin\"",
+       "r": [
+        8,
+        12
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "x = \"😀 smile\"",
+       "r": [
+        8,
+        13
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "x = \"😀 grin\"",
+       "r": [
+        8,
+        12
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,1 +1,1 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-x = \"😀 smile\"\n+x = \"😀 grin\"",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-x = \"😀 smile\"\n+x = \"😀 grin\"",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,1 +1,1 @@\n-x = \"😀 smile\"\n+x = \"😀 grin\""
+  }
+ },
+ {
+  "name": "emoji swap shares surrogate",
+  "input": {
+   "old": "face 😀 end\n",
+   "new": "face 😁 end\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "face 😀 end",
+      "r": [
+       6,
+       7
+      ]
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "face 😁 end",
+      "r": [
+       6,
+       7
+      ]
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "face 😀 end"
+    ],
+    "newLines": [
+     "face 😁 end"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "face 😀 end",
+       "r": [
+        6,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "face 😁 end",
+       "r": [
+        6,
+        7
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "face 😀 end",
+       "r": [
+        6,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "face 😁 end",
+       "r": [
+        6,
+        7
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "face 😀 end",
+       "r": [
+        6,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "face 😁 end",
+       "r": [
+        6,
+        7
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,1 +1,1 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-face 😀 end\n+face 😁 end",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-face 😀 end\n+face 😁 end",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,1 +1,1 @@\n-face 😀 end\n+face 😁 end"
+  }
+ },
+ {
+  "name": "indent change",
+  "input": {
+   "old": "    return order;\n",
+   "new": "        return order;\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "    return order;",
+      "r": [
+       4,
+       4
+      ]
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "        return order;",
+      "r": [
+       4,
+       8
+      ]
+     }
+    ],
+    "adds": 1,
+    "dels": 1,
+    "oldLines": [
+     "    return order;"
+    ],
+    "newLines": [
+     "        return order;"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "    return order;",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "        return order;",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "    return order;",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "        return order;",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "    return order;",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "        return order;",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,1 +1,1 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-    return order;\n+        return order;",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,1 +1,1 @@\n-    return order;\n+        return order;",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,1 +1,1 @@\n-    return order;\n+        return order;"
+  }
+ },
+ {
+  "name": "dissimilar lines",
+  "input": {
+   "old": "alpha beta\ngamma\n",
+   "new": "completely different\nzzz\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "alpha beta"
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "gamma"
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "completely different"
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "zzz"
+     }
+    ],
+    "adds": 2,
+    "dels": 2,
+    "oldLines": [
+     "alpha beta",
+     "gamma"
+    ],
+    "newLines": [
+     "completely different",
+     "zzz"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "alpha beta"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "gamma"
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "completely different"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "zzz"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "alpha beta"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "gamma"
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "completely different"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "zzz"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "alpha beta"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "gamma"
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "completely different"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "zzz"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,2 +1,2 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,2 +1,2 @@\n-alpha beta\n-gamma\n+completely different\n+zzz",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,2 +1,2 @@\n-alpha beta\n-gamma\n+completely different\n+zzz",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,2 +1,2 @@\n-alpha beta\n-gamma\n+completely different\n+zzz"
+  }
+ },
+ {
+  "name": "long file two regions",
+  "input": {
+   "old": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\nline 30\nline 31\nline 32\nline 33\nline 34\nline 35\nline 36\nline 37\nline 38\nline 39\nline 40\n",
+   "new": "line 1\nline 2\nline 3\nline 4\nline five\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\nline 30 changed\nextra line\nline 31\nline 32\nline 33\nline 34\nline 35\nline 36\nline 37\nline 39\nline 40\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "line 1"
+     },
+     {
+      "k": " ",
+      "a": 2,
+      "b": 2,
+      "t": "line 2"
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 3,
+      "t": "line 3"
+     },
+     {
+      "k": " ",
+      "a": 4,
+      "b": 4,
+      "t": "line 4"
+     },
+     {
+      "k": "-",
+      "a": 5,
+      "t": "line 5",
+      "r": [
+       5,
+       6
+      ]
+     },
+     {
+      "k": "+",
+      "b": 5,
+      "t": "line five",
+      "r": [
+       5,
+       9
+      ]
+     },
+     {
+      "k": " ",
+      "a": 6,
+      "b": 6,
+      "t": "line 6"
+     },
+     {
+      "k": " ",
+      "a": 7,
+      "b": 7,
+      "t": "line 7"
+     },
+     {
+      "k": " ",
+      "a": 8,
+      "b": 8,
+      "t": "line 8"
+     },
+     {
+      "k": " ",
+      "a": 9,
+      "b": 9,
+      "t": "line 9"
+     },
+     {
+      "k": " ",
+      "a": 10,
+      "b": 10,
+      "t": "line 10"
+     },
+     {
+      "k": " ",
+      "a": 11,
+      "b": 11,
+      "t": "line 11"
+     },
+     {
+      "k": " ",
+      "a": 12,
+      "b": 12,
+      "t": "line 12"
+     },
+     {
+      "k": " ",
+      "a": 13,
+      "b": 13,
+      "t": "line 13"
+     },
+     {
+      "k": " ",
+      "a": 14,
+      "b": 14,
+      "t": "line 14"
+     },
+     {
+      "k": " ",
+      "a": 15,
+      "b": 15,
+      "t": "line 15"
+     },
+     {
+      "k": " ",
+      "a": 16,
+      "b": 16,
+      "t": "line 16"
+     },
+     {
+      "k": " ",
+      "a": 17,
+      "b": 17,
+      "t": "line 17"
+     },
+     {
+      "k": " ",
+      "a": 18,
+      "b": 18,
+      "t": "line 18"
+     },
+     {
+      "k": " ",
+      "a": 19,
+      "b": 19,
+      "t": "line 19"
+     },
+     {
+      "k": " ",
+      "a": 20,
+      "b": 20,
+      "t": "line 20"
+     },
+     {
+      "k": " ",
+      "a": 21,
+      "b": 21,
+      "t": "line 21"
+     },
+     {
+      "k": " ",
+      "a": 22,
+      "b": 22,
+      "t": "line 22"
+     },
+     {
+      "k": " ",
+      "a": 23,
+      "b": 23,
+      "t": "line 23"
+     },
+     {
+      "k": " ",
+      "a": 24,
+      "b": 24,
+      "t": "line 24"
+     },
+     {
+      "k": " ",
+      "a": 25,
+      "b": 25,
+      "t": "line 25"
+     },
+     {
+      "k": " ",
+      "a": 26,
+      "b": 26,
+      "t": "line 26"
+     },
+     {
+      "k": " ",
+      "a": 27,
+      "b": 27,
+      "t": "line 27"
+     },
+     {
+      "k": " ",
+      "a": 28,
+      "b": 28,
+      "t": "line 28"
+     },
+     {
+      "k": " ",
+      "a": 29,
+      "b": 29,
+      "t": "line 29"
+     },
+     {
+      "k": "-",
+      "a": 30,
+      "t": "line 30",
+      "r": [
+       7,
+       7
+      ]
+     },
+     {
+      "k": "+",
+      "b": 30,
+      "t": "line 30 changed",
+      "r": [
+       7,
+       15
+      ]
+     },
+     {
+      "k": "+",
+      "b": 31,
+      "t": "extra line"
+     },
+     {
+      "k": " ",
+      "a": 31,
+      "b": 32,
+      "t": "line 31"
+     },
+     {
+      "k": " ",
+      "a": 32,
+      "b": 33,
+      "t": "line 32"
+     },
+     {
+      "k": " ",
+      "a": 33,
+      "b": 34,
+      "t": "line 33"
+     },
+     {
+      "k": " ",
+      "a": 34,
+      "b": 35,
+      "t": "line 34"
+     },
+     {
+      "k": " ",
+      "a": 35,
+      "b": 36,
+      "t": "line 35"
+     },
+     {
+      "k": " ",
+      "a": 36,
+      "b": 37,
+      "t": "line 36"
+     },
+     {
+      "k": " ",
+      "a": 37,
+      "b": 38,
+      "t": "line 37"
+     },
+     {
+      "k": "-",
+      "a": 38,
+      "t": "line 38"
+     },
+     {
+      "k": " ",
+      "a": 39,
+      "b": 39,
+      "t": "line 39"
+     },
+     {
+      "k": " ",
+      "a": 40,
+      "b": 40,
+      "t": "line 40"
+     }
+    ],
+    "adds": 3,
+    "dels": 3,
+    "oldLines": [
+     "line 1",
+     "line 2",
+     "line 3",
+     "line 4",
+     "line 5",
+     "line 6",
+     "line 7",
+     "line 8",
+     "line 9",
+     "line 10",
+     "line 11",
+     "line 12",
+     "line 13",
+     "line 14",
+     "line 15",
+     "line 16",
+     "line 17",
+     "line 18",
+     "line 19",
+     "line 20",
+     "line 21",
+     "line 22",
+     "line 23",
+     "line 24",
+     "line 25",
+     "line 26",
+     "line 27",
+     "line 28",
+     "line 29",
+     "line 30",
+     "line 31",
+     "line 32",
+     "line 33",
+     "line 34",
+     "line 35",
+     "line 36",
+     "line 37",
+     "line 38",
+     "line 39",
+     "line 40"
+    ],
+    "newLines": [
+     "line 1",
+     "line 2",
+     "line 3",
+     "line 4",
+     "line five",
+     "line 6",
+     "line 7",
+     "line 8",
+     "line 9",
+     "line 10",
+     "line 11",
+     "line 12",
+     "line 13",
+     "line 14",
+     "line 15",
+     "line 16",
+     "line 17",
+     "line 18",
+     "line 19",
+     "line 20",
+     "line 21",
+     "line 22",
+     "line 23",
+     "line 24",
+     "line 25",
+     "line 26",
+     "line 27",
+     "line 28",
+     "line 29",
+     "line 30 changed",
+     "extra line",
+     "line 31",
+     "line 32",
+     "line 33",
+     "line 34",
+     "line 35",
+     "line 36",
+     "line 37",
+     "line 39",
+     "line 40"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "line 1"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "line 2"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "line 3"
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "line 4"
+      },
+      {
+       "k": "-",
+       "a": 5,
+       "t": "line 5",
+       "r": [
+        5,
+        6
+       ]
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "line five",
+       "r": [
+        5,
+        9
+       ]
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "line 6"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "line 7"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "line 8"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": "line 9"
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "line 10"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "line 11"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "line 12"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "line 13"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": "line 14"
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "line 15"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "line 16"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "line 17"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "line 18"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "line 19"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "line 20"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": "line 21"
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "line 22"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "line 23"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "line 24"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "line 25"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "line 26"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": "line 27"
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "line 28"
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "line 29"
+      },
+      {
+       "k": "-",
+       "a": 30,
+       "t": "line 30",
+       "r": [
+        7,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "line 30 changed",
+       "r": [
+        7,
+        15
+       ]
+      },
+      {
+       "k": "+",
+       "b": 31,
+       "t": "extra line"
+      },
+      {
+       "k": " ",
+       "a": 31,
+       "b": 32,
+       "t": "line 31"
+      },
+      {
+       "k": " ",
+       "a": 32,
+       "b": 33,
+       "t": "line 32"
+      },
+      {
+       "k": " ",
+       "a": 33,
+       "b": 34,
+       "t": "line 33"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 34,
+       "b": 35,
+       "t": "line 34"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 35,
+       "b": 36,
+       "t": "line 35"
+      },
+      {
+       "k": " ",
+       "a": 36,
+       "b": 37,
+       "t": "line 36"
+      },
+      {
+       "k": " ",
+       "a": 37,
+       "b": 38,
+       "t": "line 37"
+      },
+      {
+       "k": "-",
+       "a": 38,
+       "t": "line 38"
+      },
+      {
+       "k": " ",
+       "a": 39,
+       "b": 39,
+       "t": "line 39"
+      },
+      {
+       "k": " ",
+       "a": 40,
+       "b": 40,
+       "t": "line 40"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "line 1"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "line 2"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "line 3"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "line 4"
+      },
+      {
+       "k": "-",
+       "a": 5,
+       "t": "line 5",
+       "r": [
+        5,
+        6
+       ]
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "line five",
+       "r": [
+        5,
+        9
+       ]
+      },
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "line 6"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "line 7"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "line 8"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": "line 9"
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "line 10"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "line 11"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "line 12"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "line 13"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": "line 14"
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "line 15"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "line 16"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "line 17"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "line 18"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "line 19"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "line 20"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": "line 21"
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "line 22"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "line 23"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "line 24"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "line 25"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "line 26"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": "line 27"
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "line 28"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "line 29"
+      },
+      {
+       "k": "-",
+       "a": 30,
+       "t": "line 30",
+       "r": [
+        7,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "line 30 changed",
+       "r": [
+        7,
+        15
+       ]
+      },
+      {
+       "k": "+",
+       "b": 31,
+       "t": "extra line"
+      },
+      {
+       "k": " ",
+       "a": 31,
+       "b": 32,
+       "t": "line 31"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 32,
+       "b": 33,
+       "t": "line 32"
+      },
+      {
+       "k": " ",
+       "a": 33,
+       "b": 34,
+       "t": "line 33"
+      },
+      {
+       "k": " ",
+       "a": 34,
+       "b": 35,
+       "t": "line 34"
+      },
+      {
+       "k": " ",
+       "a": 35,
+       "b": 36,
+       "t": "line 35"
+      },
+      {
+       "k": " ",
+       "a": 36,
+       "b": 37,
+       "t": "line 36"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 37,
+       "b": 38,
+       "t": "line 37"
+      },
+      {
+       "k": "-",
+       "a": 38,
+       "t": "line 38"
+      },
+      {
+       "k": " ",
+       "a": 39,
+       "b": 39,
+       "t": "line 39"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 40,
+       "b": 40,
+       "t": "line 40"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "line 1"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "line 2"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": "line 3"
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": "line 4"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 5,
+       "t": "line 5",
+       "r": [
+        5,
+        6
+       ]
+      },
+      {
+       "k": "+",
+       "b": 5,
+       "t": "line five",
+       "r": [
+        5,
+        9
+       ]
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 6,
+       "b": 6,
+       "t": "line 6"
+      },
+      {
+       "k": " ",
+       "a": 7,
+       "b": 7,
+       "t": "line 7"
+      },
+      {
+       "k": " ",
+       "a": 8,
+       "b": 8,
+       "t": "line 8"
+      },
+      {
+       "k": " ",
+       "a": 9,
+       "b": 9,
+       "t": "line 9"
+      },
+      {
+       "k": " ",
+       "a": 10,
+       "b": 10,
+       "t": "line 10"
+      },
+      {
+       "k": " ",
+       "a": 11,
+       "b": 11,
+       "t": "line 11"
+      },
+      {
+       "k": " ",
+       "a": 12,
+       "b": 12,
+       "t": "line 12"
+      },
+      {
+       "k": " ",
+       "a": 13,
+       "b": 13,
+       "t": "line 13"
+      },
+      {
+       "k": " ",
+       "a": 14,
+       "b": 14,
+       "t": "line 14"
+      },
+      {
+       "k": " ",
+       "a": 15,
+       "b": 15,
+       "t": "line 15"
+      },
+      {
+       "k": " ",
+       "a": 16,
+       "b": 16,
+       "t": "line 16"
+      },
+      {
+       "k": " ",
+       "a": 17,
+       "b": 17,
+       "t": "line 17"
+      },
+      {
+       "k": " ",
+       "a": 18,
+       "b": 18,
+       "t": "line 18"
+      },
+      {
+       "k": " ",
+       "a": 19,
+       "b": 19,
+       "t": "line 19"
+      },
+      {
+       "k": " ",
+       "a": 20,
+       "b": 20,
+       "t": "line 20"
+      },
+      {
+       "k": " ",
+       "a": 21,
+       "b": 21,
+       "t": "line 21"
+      },
+      {
+       "k": " ",
+       "a": 22,
+       "b": 22,
+       "t": "line 22"
+      },
+      {
+       "k": " ",
+       "a": 23,
+       "b": 23,
+       "t": "line 23"
+      },
+      {
+       "k": " ",
+       "a": 24,
+       "b": 24,
+       "t": "line 24"
+      },
+      {
+       "k": " ",
+       "a": 25,
+       "b": 25,
+       "t": "line 25"
+      },
+      {
+       "k": " ",
+       "a": 26,
+       "b": 26,
+       "t": "line 26"
+      },
+      {
+       "k": " ",
+       "a": 27,
+       "b": 27,
+       "t": "line 27"
+      },
+      {
+       "k": " ",
+       "a": 28,
+       "b": 28,
+       "t": "line 28"
+      },
+      {
+       "k": " ",
+       "a": 29,
+       "b": 29,
+       "t": "line 29"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 30,
+       "t": "line 30",
+       "r": [
+        7,
+        7
+       ]
+      },
+      {
+       "k": "+",
+       "b": 30,
+       "t": "line 30 changed",
+       "r": [
+        7,
+        15
+       ]
+      },
+      {
+       "k": "+",
+       "b": 31,
+       "t": "extra line"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 31,
+       "b": 32,
+       "t": "line 31"
+      },
+      {
+       "k": " ",
+       "a": 32,
+       "b": 33,
+       "t": "line 32"
+      },
+      {
+       "k": " ",
+       "a": 33,
+       "b": 34,
+       "t": "line 33"
+      },
+      {
+       "k": " ",
+       "a": 34,
+       "b": 35,
+       "t": "line 34"
+      },
+      {
+       "k": " ",
+       "a": 35,
+       "b": 36,
+       "t": "line 35"
+      },
+      {
+       "k": " ",
+       "a": 36,
+       "b": 37,
+       "t": "line 36"
+      },
+      {
+       "k": " ",
+       "a": 37,
+       "b": 38,
+       "t": "line 37"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 38,
+       "t": "line 38"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 39,
+       "b": 39,
+       "t": "line 39"
+      },
+      {
+       "k": " ",
+       "a": 40,
+       "b": 40,
+       "t": "line 40"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -2,7 +2,7 @@",
+    "@@ -27,7 +27,8 @@",
+    "@@ -35,6 +36,5 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -2,7 +2,7 @@\n line 2\n line 3\n line 4\n-line 5\n+line five\n line 6\n line 7\n line 8\n@@ -27,7 +27,8 @@\n line 27\n line 28\n line 29\n-line 30\n+line 30 changed\n+extra line\n line 31\n line 32\n line 33\n@@ -35,6 +36,5 @@\n line 35\n line 36\n line 37\n-line 38\n line 39\n line 40",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -2,7 +2,7 @@\n line 2\n line 3\n line 4\n-line 5\n+line five\n line 6\n line 7\n line 8\n@@ -27,7 +27,8 @@\n line 27\n line 28\n line 29\n-line 30\n+line 30 changed\n+extra line\n line 31\n line 32\n line 33\n@@ -35,6 +36,5 @@\n line 35\n line 36\n line 37\n-line 38\n line 39\n line 40",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -2,7 +2,7 @@\n line 2\n line 3\n line 4\n-line 5\n+line five\n line 6\n line 7\n line 8\n@@ -27,7 +27,8 @@\n line 27\n line 28\n line 29\n-line 30\n+line 30 changed\n+extra line\n line 31\n line 32\n line 33\n@@ -35,6 +36,5 @@\n line 35\n line 36\n line 37\n-line 38\n line 39\n line 40"
+  }
+ },
+ {
+  "name": "python unicode",
+  "input": {
+   "old": "def greet(name):\n    print(\"Hello, \" + name)\n\n\ndef main():\n    greet(\"world\")\n    greet(\"émilie 👋\")\n",
+   "new": "def greet(name):\n    print(\"Hello, \" + name)\n\n\ndef main():\n    greet(\"there\")\n    greet(\"émilie 🌍\")\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": " ",
+      "a": 1,
+      "b": 1,
+      "t": "def greet(name):"
+     },
+     {
+      "k": " ",
+      "a": 2,
+      "b": 2,
+      "t": "    print(\"Hello, \" + name)"
+     },
+     {
+      "k": " ",
+      "a": 3,
+      "b": 3,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 4,
+      "b": 4,
+      "t": ""
+     },
+     {
+      "k": " ",
+      "a": 5,
+      "b": 5,
+      "t": "def main():"
+     },
+     {
+      "k": "-",
+      "a": 6,
+      "t": "    greet(\"world\")",
+      "r": [
+       11,
+       16
+      ]
+     },
+     {
+      "k": "-",
+      "a": 7,
+      "t": "    greet(\"émilie 👋\")",
+      "r": [
+       18,
+       20
+      ]
+     },
+     {
+      "k": "+",
+      "b": 6,
+      "t": "    greet(\"there\")",
+      "r": [
+       11,
+       16
+      ]
+     },
+     {
+      "k": "+",
+      "b": 7,
+      "t": "    greet(\"émilie 🌍\")",
+      "r": [
+       18,
+       20
+      ]
+     }
+    ],
+    "adds": 2,
+    "dels": 2,
+    "oldLines": [
+     "def greet(name):",
+     "    print(\"Hello, \" + name)",
+     "",
+     "",
+     "def main():",
+     "    greet(\"world\")",
+     "    greet(\"émilie 👋\")"
+    ],
+    "newLines": [
+     "def greet(name):",
+     "    print(\"Hello, \" + name)",
+     "",
+     "",
+     "def main():",
+     "    greet(\"there\")",
+     "    greet(\"émilie 🌍\")"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "    print(\"Hello, \" + name)"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": "def main():"
+      },
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")",
+       "r": [
+        18,
+        20
+       ]
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "    greet(\"there\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "+",
+       "b": 7,
+       "t": "    greet(\"émilie 🌍\")",
+       "r": [
+        18,
+        20
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "    print(\"Hello, \" + name)"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": ""
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": "def main():"
+      },
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")",
+       "r": [
+        18,
+        20
+       ]
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "    greet(\"there\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "+",
+       "b": 7,
+       "t": "    greet(\"émilie 🌍\")",
+       "r": [
+        18,
+        20
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 1,
+       "t": "def greet(name):"
+      },
+      {
+       "k": " ",
+       "a": 2,
+       "b": 2,
+       "t": "    print(\"Hello, \" + name)"
+      },
+      {
+       "k": " ",
+       "a": 3,
+       "b": 3,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 4,
+       "b": 4,
+       "t": ""
+      },
+      {
+       "k": " ",
+       "a": 5,
+       "b": 5,
+       "t": "def main():"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 6,
+       "t": "    greet(\"world\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "-",
+       "a": 7,
+       "t": "    greet(\"émilie 👋\")",
+       "r": [
+        18,
+        20
+       ]
+      },
+      {
+       "k": "+",
+       "b": 6,
+       "t": "    greet(\"there\")",
+       "r": [
+        11,
+        16
+       ]
+      },
+      {
+       "k": "+",
+       "b": 7,
+       "t": "    greet(\"émilie 🌍\")",
+       "r": [
+        18,
+        20
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -3,5 +3,5 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -3,5 +3,5 @@\n \n \n def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")\n+    greet(\"there\")\n+    greet(\"émilie 🌍\")",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -3,5 +3,5 @@\n \n \n def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")\n+    greet(\"there\")\n+    greet(\"émilie 🌍\")",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -3,5 +3,5 @@\n \n \n def main():\n-    greet(\"world\")\n-    greet(\"émilie 👋\")\n+    greet(\"there\")\n+    greet(\"émilie 🌍\")"
+  }
+ },
+ {
+  "name": "whitespace only line",
+  "input": {
+   "old": "  \n\tfoo\n",
+   "new": "   \n\tfoo bar\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "-",
+      "a": 1,
+      "t": "  "
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "\tfoo",
+      "r": [
+       4,
+       4
+      ]
+     },
+     {
+      "k": "+",
+      "b": 1,
+      "t": "   "
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "\tfoo bar",
+      "r": [
+       4,
+       8
+      ]
+     }
+    ],
+    "adds": 2,
+    "dels": 2,
+    "oldLines": [
+     "  ",
+     "\tfoo"
+    ],
+    "newLines": [
+     "   ",
+     "\tfoo bar"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "  "
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "\tfoo",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "   "
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "\tfoo bar",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "  "
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "\tfoo",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "   "
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "\tfoo bar",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 1,
+       "t": "  "
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "\tfoo",
+       "r": [
+        4,
+        4
+       ]
+      },
+      {
+       "k": "+",
+       "b": 1,
+       "t": "   "
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "\tfoo bar",
+       "r": [
+        4,
+        8
+       ]
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,2 +1,2 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,2 +1,2 @@\n-  \n-\tfoo\n+   \n+\tfoo bar",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,2 +1,2 @@\n-  \n-\tfoo\n+   \n+\tfoo bar",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,2 +1,2 @@\n-  \n-\tfoo\n+   \n+\tfoo bar"
+  }
+ },
+ {
+  "name": "reorder",
+  "input": {
+   "old": "a\nb\nc\nd\n",
+   "new": "d\nc\nb\na\n"
+  },
+  "output": {
+   "diff": {
+    "ops": [
+     {
+      "k": "+",
+      "b": 1,
+      "t": "d"
+     },
+     {
+      "k": "+",
+      "b": 2,
+      "t": "c"
+     },
+     {
+      "k": "+",
+      "b": 3,
+      "t": "b"
+     },
+     {
+      "k": " ",
+      "a": 1,
+      "b": 4,
+      "t": "a"
+     },
+     {
+      "k": "-",
+      "a": 2,
+      "t": "b"
+     },
+     {
+      "k": "-",
+      "a": 3,
+      "t": "c"
+     },
+     {
+      "k": "-",
+      "a": 4,
+      "t": "d"
+     }
+    ],
+    "adds": 3,
+    "dels": 3,
+    "oldLines": [
+     "a",
+     "b",
+     "c",
+     "d"
+    ],
+    "newLines": [
+     "d",
+     "c",
+     "b",
+     "a"
+    ]
+   },
+   "hunks": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "d"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "c"
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "b"
+      },
+      {
+       "k": " ",
+       "a": 1,
+       "b": 4,
+       "t": "a"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": "c"
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": "d"
+      }
+     ]
+    }
+   ],
+   "hunks1": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "d"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "c"
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "b"
+      },
+      {
+       "k": " ",
+       "a": 1,
+       "b": 4,
+       "t": "a"
+      },
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": "c"
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": "d"
+      }
+     ]
+    }
+   ],
+   "hunks0": [
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "+",
+       "b": 1,
+       "t": "d"
+      },
+      {
+       "k": "+",
+       "b": 2,
+       "t": "c"
+      },
+      {
+       "k": "+",
+       "b": 3,
+       "t": "b"
+      }
+     ]
+    },
+    {
+     "kind": "gap",
+     "lines": [
+      {
+       "k": " ",
+       "a": 1,
+       "b": 4,
+       "t": "a"
+      }
+     ]
+    },
+    {
+     "kind": "hunk",
+     "lines": [
+      {
+       "k": "-",
+       "a": 2,
+       "t": "b"
+      },
+      {
+       "k": "-",
+       "a": 3,
+       "t": "c"
+      },
+      {
+       "k": "-",
+       "a": 4,
+       "t": "d"
+      }
+     ]
+    }
+   ],
+   "headers": [
+    "@@ -1,4 +1,4 @@"
+   ],
+   "patchM": "--- a/src/File.cs\n+++ b/src/File.cs\n@@ -1,4 +1,4 @@\n+d\n+c\n+b\n a\n-b\n-c\n-d",
+   "patchA": "--- /dev/null\n+++ b/src/File.cs\n@@ -1,4 +1,4 @@\n+d\n+c\n+b\n a\n-b\n-c\n-d",
+   "patchD": "--- a/src/File.cs\n+++ /dev/null\n@@ -1,4 +1,4 @@\n+d\n+c\n+b\n a\n-b\n-c\n-d"
+  }
+ }
+]

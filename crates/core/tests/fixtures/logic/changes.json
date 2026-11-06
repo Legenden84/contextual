@@ -1,0 +1,339 @@
+[
+ {
+  "name": "file delete edit mix",
+  "input": {
+   "name": "file delete edit mix",
+   "response": "I updated the service and removed the old helper.\n\n### FILE: src/New.cs\n```csharp\npublic class New {}\n```\n\n### FILE: `src/Quoted.ts`\n```\nexport const x = 1\n```\n\n### FILE: docs/Ref.html (condensed reference, read-only: do not return this file)\n```html\n<p>ref</p>\n```\n\n## DELETE: src/Old.cs\n#### DELETE: `src/Older.cs` (no longer used)\n\n### EDIT: src/Service.cs\n<<<<<<< SEARCH\n    public void Run()\n    {\n=======\n    public void Run(int times)\n    {\n>>>>>>> REPLACE\n\n<<<<<<< SEARCH\n        Console.WriteLine(\"hi\");\n=======\n        Console.WriteLine(\"hello\");\n>>>>>>> REPLACE\nThat's all.",
+   "exists": [
+    "src/Service.cs",
+    "src/Old.cs",
+    "src/Older.cs",
+    "docs/Ref.html"
+   ],
+   "originals": {
+    "src/Service.cs": "class S\n{\n    public void Run()\n    {\n        Console.WriteLine(\"hi\");\n    }\n}\n",
+    "src/Old.cs": "old\n"
+   },
+   "changedOnDisk": [
+    "src/Service.cs"
+   ],
+   "readOnly": [
+    "docs/Ref.html"
+   ]
+  },
+  "output": [
+   {
+    "path": "src/New.cs",
+    "status": "A",
+    "old": "",
+    "new": "public class New {}"
+   },
+   {
+    "path": "src/Quoted.ts",
+    "status": "A",
+    "old": "",
+    "new": "export const x = 1"
+   },
+   {
+    "path": "src/Old.cs",
+    "status": "D",
+    "old": "old\n",
+    "new": ""
+   },
+   {
+    "path": "src/Older.cs",
+    "status": "D",
+    "old": "",
+    "new": ""
+   },
+   {
+    "path": "src/Service.cs",
+    "status": "M",
+    "old": "class S\n{\n    public void Run()\n    {\n        Console.WriteLine(\"hi\");\n    }\n}\n",
+    "new": "class S\n{\n    public void Run(int times)\n    {\n        Console.WriteLine(\"hello\");\n    }\n}\n",
+    "conflict": "Changed on disk after it was sent. The proposal was made against the older version.",
+    "edits": [
+     {
+      "search": "    public void Run()\n    {",
+      "replace": "    public void Run(int times)\n    {"
+     },
+     {
+      "search": "        Console.WriteLine(\"hi\");",
+      "replace": "        Console.WriteLine(\"hello\");"
+     }
+    ],
+    "unplaced": []
+   }
+  ]
+ },
+ {
+  "name": "two edits same file stack",
+  "input": {
+   "name": "two edits same file stack",
+   "response": "### EDIT: a.txt\n<<<<<<< SEARCH\none\n=======\nONE\n>>>>>>> REPLACE\n\n### EDIT: a.txt\n<<<<<<< SEARCH\nONE\ntwo\n=======\nONE\nTWO\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nmissing\n=======\nx\n>>>>>>> REPLACE",
+   "exists": [
+    "a.txt"
+   ],
+   "originals": {
+    "a.txt": "one\ntwo\n"
+   },
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "a.txt",
+    "status": "M",
+    "old": "one\ntwo\n",
+    "new": "ONE\nTWO\n",
+    "edits": [
+     {
+      "search": "one",
+      "replace": "ONE"
+     },
+     {
+      "search": "ONE\ntwo",
+      "replace": "ONE\nTWO"
+     },
+     {
+      "search": "missing",
+      "replace": "x"
+     }
+    ],
+    "unplaced": [
+     {
+      "search": "missing",
+      "replace": "x"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "edit unknown original",
+  "input": {
+   "name": "edit unknown original",
+   "response": "### EDIT: new.txt\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n",
+   "exists": [],
+   "originals": {},
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "new.txt",
+    "status": "A",
+    "old": "",
+    "new": "",
+    "edits": [
+     {
+      "search": "x",
+      "replace": "y"
+     }
+    ],
+    "unplaced": [
+     {
+      "search": "x",
+      "replace": "y"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unchanged file dropped",
+  "input": {
+   "name": "unchanged file dropped",
+   "response": "### FILE: same.txt\n```\nsame\n```\n### FILE: added.txt\n```\nnew\n```\n",
+   "exists": [
+    "same.txt"
+   ],
+   "originals": {
+    "same.txt": "same"
+   },
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "added.txt",
+    "status": "A",
+    "old": "",
+    "new": "new"
+   }
+  ]
+ },
+ {
+  "name": "delete then file keeps order",
+  "input": {
+   "name": "delete then file keeps order",
+   "response": "### FILE: b.txt\n```\nb\n```\n### DELETE: a.txt\n### FILE: a.txt\n```\nagain\n```\n",
+   "exists": [
+    "a.txt"
+   ],
+   "originals": {
+    "a.txt": "orig\n"
+   },
+   "changedOnDisk": [
+    "a.txt"
+   ],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "b.txt",
+    "status": "A",
+    "old": "",
+    "new": "b"
+   },
+   {
+    "path": "a.txt",
+    "status": "M",
+    "old": "orig\n",
+    "new": "again",
+    "conflict": "Changed on disk after it was sent. The proposal was made against the older version."
+   }
+  ]
+ },
+ {
+  "name": "edit after delete uses original",
+  "input": {
+   "name": "edit after delete uses original",
+   "response": "### DELETE: a.txt\n### EDIT: a.txt\n<<<<<<< SEARCH\norig\n=======\nedited\n>>>>>>> REPLACE\n",
+   "exists": [
+    "a.txt"
+   ],
+   "originals": {
+    "a.txt": "orig\n"
+   },
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "a.txt",
+    "status": "M",
+    "old": "orig\n",
+    "new": "edited\n",
+    "edits": [
+     {
+      "search": "orig",
+      "replace": "edited"
+     }
+    ],
+    "unplaced": []
+   }
+  ]
+ },
+ {
+  "name": "partial and read-only edits skipped",
+  "input": {
+   "name": "partial and read-only edits skipped",
+   "response": "### EDIT: ro.txt\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n### EDIT: p.txt\n<<<<<<< SEARCH\na\n",
+   "exists": [
+    "ro.txt",
+    "p.txt"
+   ],
+   "originals": {
+    "ro.txt": "a\n",
+    "p.txt": "a\n"
+   },
+   "changedOnDisk": [],
+   "readOnly": [
+    "ro.txt"
+   ]
+  },
+  "output": []
+ },
+ {
+  "name": "edit no-op is dropped, failed edit kept",
+  "input": {
+   "name": "edit no-op is dropped, failed edit kept",
+   "response": "### EDIT: x.txt\n<<<<<<< SEARCH\na\n=======\na\n>>>>>>> REPLACE\n### EDIT: y.txt\n<<<<<<< SEARCH\nzzz\n=======\na\n>>>>>>> REPLACE\n",
+   "exists": [
+    "x.txt",
+    "y.txt"
+   ],
+   "originals": {
+    "x.txt": "a\n",
+    "y.txt": "a\n"
+   },
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "y.txt",
+    "status": "M",
+    "old": "a\n",
+    "new": "a\n",
+    "edits": [
+     {
+      "search": "zzz",
+      "replace": "a"
+     }
+    ],
+    "unplaced": [
+     {
+      "search": "zzz",
+      "replace": "a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "edit as whole file",
+  "input": {
+   "name": "edit as whole file",
+   "response": "### EDIT: src/Small.py\n```python\nprint(\"whole file\")\n```\n",
+   "exists": [
+    "src/Small.py"
+   ],
+   "originals": {
+    "src/Small.py": "print(\"old\")\n"
+   },
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "src/Small.py",
+    "status": "M",
+    "old": "print(\"old\")\n",
+    "new": "print(\"whole file\")"
+   }
+  ]
+ },
+ {
+  "name": "empty response",
+  "input": {
+   "name": "empty response",
+   "response": "",
+   "exists": [],
+   "originals": {},
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": []
+ },
+ {
+  "name": "crlf response",
+  "input": {
+   "name": "crlf response",
+   "response": "### FILE: w.txt\r\n```\r\nwin\r\nlines\r\n```\r\n",
+   "exists": [],
+   "originals": {},
+   "changedOnDisk": [],
+   "readOnly": []
+  },
+  "output": [
+   {
+    "path": "w.txt",
+    "status": "A",
+    "old": "",
+    "new": "win\nlines"
+   }
+  ]
+ }
+]

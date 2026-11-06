@@ -1,0 +1,242 @@
+[
+ {
+  "name": "1x1",
+  "input": {
+   "width": 1,
+   "height": 1
+  },
+  "output": {
+   "tokens": 255,
+   "scaled": [
+    1,
+    1
+   ],
+   "scaledTokens": 255
+  }
+ },
+ {
+  "name": "512x512",
+  "input": {
+   "width": 512,
+   "height": 512
+  },
+  "output": {
+   "tokens": 255,
+   "scaled": [
+    512,
+    512
+   ],
+   "scaledTokens": 255
+  }
+ },
+ {
+  "name": "513x512",
+  "input": {
+   "width": 513,
+   "height": 512
+  },
+  "output": {
+   "tokens": 425,
+   "scaled": [
+    513,
+    512
+   ],
+   "scaledTokens": 425
+  }
+ },
+ {
+  "name": "768x768",
+  "input": {
+   "width": 768,
+   "height": 768
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    768,
+    768
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "1024x768",
+  "input": {
+   "width": 1024,
+   "height": 768
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    1024,
+    768
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "1920x1080",
+  "input": {
+   "width": 1920,
+   "height": 1080
+  },
+  "output": {
+   "tokens": 1105,
+   "scaled": [
+    1920,
+    1080
+   ],
+   "scaledTokens": 1105
+  }
+ },
+ {
+  "name": "2048x2048",
+  "input": {
+   "width": 2048,
+   "height": 2048
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    2048,
+    2048
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "4096x2048",
+  "input": {
+   "width": 4096,
+   "height": 2048
+  },
+  "output": {
+   "tokens": 1105,
+   "scaled": [
+    2048,
+    1024
+   ],
+   "scaledTokens": 1105
+  }
+ },
+ {
+  "name": "3000x4000",
+  "input": {
+   "width": 3000,
+   "height": 4000
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    1536,
+    2048
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "2560x1440",
+  "input": {
+   "width": 2560,
+   "height": 1440
+  },
+  "output": {
+   "tokens": 1105,
+   "scaled": [
+    2048,
+    1152
+   ],
+   "scaledTokens": 1105
+  }
+ },
+ {
+  "name": "100x5000",
+  "input": {
+   "width": 100,
+   "height": 5000
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    41,
+    2048
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "5000x100",
+  "input": {
+   "width": 5000,
+   "height": 100
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    2048,
+    41
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "1366x768",
+  "input": {
+   "width": 1366,
+   "height": 768
+  },
+  "output": {
+   "tokens": 1105,
+   "scaled": [
+    1366,
+    768
+   ],
+   "scaledTokens": 1105
+  }
+ },
+ {
+  "name": "801x333",
+  "input": {
+   "width": 801,
+   "height": 333
+  },
+  "output": {
+   "tokens": 425,
+   "scaled": [
+    801,
+    333
+   ],
+   "scaledTokens": 425
+  }
+ },
+ {
+  "name": "2049x1",
+  "input": {
+   "width": 2049,
+   "height": 1
+  },
+  "output": {
+   "tokens": 765,
+   "scaled": [
+    2048,
+    1
+   ],
+   "scaledTokens": 765
+  }
+ },
+ {
+  "name": "3001x1999",
+  "input": {
+   "width": 3001,
+   "height": 1999
+  },
+  "output": {
+   "tokens": 1105,
+   "scaled": [
+    2048,
+    1364
+   ],
+   "scaledTokens": 1105
+  }
+ }
+]

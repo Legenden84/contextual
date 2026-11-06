@@ -1,0 +1,1731 @@
+[
+ {
+  "name": "headings and paragraphs",
+  "fn": "parseMarkdown",
+  "input": "# Title\n\nSome **bold** and *italic* and `code` text\nthat continues on the next line.\n\n## Second ##\n###### Six\n####### seven is a paragraph",
+  "output": [
+   {
+    "kind": "heading",
+    "level": 1,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Title"
+     }
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Some "
+     },
+     {
+      "kind": "bold",
+      "children": [
+       {
+        "kind": "text",
+        "text": "bold"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": " and "
+     },
+     {
+      "kind": "italic",
+      "children": [
+       {
+        "kind": "text",
+        "text": "italic"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": " and "
+     },
+     {
+      "kind": "code",
+      "text": "code"
+     },
+     {
+      "kind": "text",
+      "text": " text that continues on the next line."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Second"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 6,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Six"
+     }
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "####### seven is a paragraph"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "lists",
+  "fn": "parseMarkdown",
+  "input": "Changes:\n\n- First item with [a link](https://example.com \"Example\")\n- Second item\n  continues here\n  - nested bullet\n    - deeper\n1. one\n2) two\n10. ten\n\n- [A] src/New.cs\n- [M] src/Old.cs\n- [D] src/Gone.cs\n- [ ] todo\n- [x] done\n- [X] Done too\n* star item\n+ plus item",
+  "output": [
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Changes:"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "items": [
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "First item with "
+       },
+       {
+        "kind": "link",
+        "href": "https://example.com",
+        "children": [
+         {
+          "kind": "text",
+          "text": "a link"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "Second item"
+       },
+       {
+        "kind": "text",
+        "text": " "
+       },
+       {
+        "kind": "text",
+        "text": "continues here"
+       }
+      ]
+     },
+     {
+      "depth": 1,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "nested bullet"
+       }
+      ]
+     },
+     {
+      "depth": 2,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "deeper"
+       }
+      ]
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "one"
+       }
+      ],
+      "number": "1."
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "two"
+       }
+      ],
+      "number": "2."
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "ten"
+       }
+      ],
+      "number": "10."
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "src/New.cs"
+       }
+      ],
+      "status": "A"
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "src/Old.cs"
+       }
+      ],
+      "status": "M"
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "src/Gone.cs"
+       }
+      ],
+      "status": "D"
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "todo"
+       }
+      ],
+      "checked": false
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "done"
+       }
+      ],
+      "checked": true
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "Done too"
+       }
+      ],
+      "checked": true
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "star item"
+       }
+      ]
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "plus item"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "list separated by blank line",
+  "fn": "parseMarkdown",
+  "input": "- a\n\n- b\n\nnot a list",
+  "output": [
+   {
+    "kind": "list",
+    "items": [
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "a"
+       }
+      ]
+     },
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "b"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "not a list"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "tables",
+  "fn": "parseMarkdown",
+  "input": "| Name | Type | Default |\n| :--- | :---: | ---: |\n| `id` | int | – |\n| path \\| name | string | \"\" |\n| **bold** | _it_ |\n\nafter table\n\na | b\n--|--\n1 | 2\nparagraph | then\n|---|---|",
+  "output": [
+   {
+    "kind": "table",
+    "head": [
+     [
+      {
+       "kind": "text",
+       "text": "Name"
+      }
+     ],
+     [
+      {
+       "kind": "text",
+       "text": "Type"
+      }
+     ],
+     [
+      {
+       "kind": "text",
+       "text": "Default"
+      }
+     ]
+    ],
+    "align": [
+     "left",
+     "center",
+     "right"
+    ],
+    "rows": [
+     [
+      [
+       {
+        "kind": "code",
+        "text": "id"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "int"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "–"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "kind": "text",
+        "text": "path | name"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "string"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "\"\""
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "kind": "bold",
+        "children": [
+         {
+          "kind": "text",
+          "text": "bold"
+         }
+        ]
+       }
+      ],
+      [
+       {
+        "kind": "italic",
+        "children": [
+         {
+          "kind": "text",
+          "text": "it"
+         }
+        ]
+       }
+      ]
+     ]
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "after table"
+     }
+    ]
+   },
+   {
+    "kind": "table",
+    "head": [
+     [
+      {
+       "kind": "text",
+       "text": "a"
+      }
+     ],
+     [
+      {
+       "kind": "text",
+       "text": "b"
+      }
+     ]
+    ],
+    "align": [
+     null,
+     null
+    ],
+    "rows": [
+     [
+      [
+       {
+        "kind": "text",
+        "text": "1"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "2"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "kind": "text",
+        "text": "paragraph"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "then"
+       }
+      ]
+     ],
+     [
+      [
+       {
+        "kind": "text",
+        "text": "---"
+       }
+      ],
+      [
+       {
+        "kind": "text",
+        "text": "---"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "code fences",
+  "fn": "parseMarkdown",
+  "input": "Here is the fix:\n\n```csharp\npublic class A\n{\n    // ``` inside is fine when indented? no, this closes only at line start\n}\n```\n\n~~~\ntilde fence\n~~~\n\n````md\n```\nnested fence\n```\n````\n\n```unknownlang extra info\nx\n```\n\n```\nunterminated",
+  "output": [
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Here is the fix:"
+     }
+    ]
+   },
+   {
+    "kind": "code",
+    "code": "public class A\n{\n    // ``` inside is fine when indented? no, this closes only at line start\n}",
+    "lang": "csharp"
+   },
+   {
+    "kind": "code",
+    "code": "tilde fence",
+    "lang": "plain"
+   },
+   {
+    "kind": "code",
+    "code": "```\nnested fence\n```",
+    "lang": "markdown"
+   },
+   {
+    "kind": "code",
+    "code": "x",
+    "lang": "plain"
+   },
+   {
+    "kind": "code",
+    "code": "unterminated",
+    "lang": "plain"
+   }
+  ]
+ },
+ {
+  "name": "file delete edit blocks",
+  "fn": "parseMarkdown",
+  "input": "I updated the service and removed the old helper.\n\n### FILE: src/New.cs\n```csharp\npublic class New {}\n```\n\n### FILE: `src/Quoted.ts`\n```\nexport const x = 1\n```\n\n### FILE: docs/Ref.html (condensed reference, read-only: do not return this file)\n```html\n<p>ref</p>\n```\n\n## DELETE: src/Old.cs\n#### DELETE: `src/Older.cs` (no longer used)\n\n### EDIT: src/Service.cs\n<<<<<<< SEARCH\n    public void Run()\n    {\n=======\n    public void Run(int times)\n    {\n>>>>>>> REPLACE\n\n<<<<<<< SEARCH\n        Console.WriteLine(\"hi\");\n=======\n        Console.WriteLine(\"hello\");\n>>>>>>> REPLACE\nThat's all.",
+  "output": [
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "I updated the service and removed the old helper."
+     }
+    ]
+   },
+   {
+    "kind": "file",
+    "path": "src/New.cs"
+   },
+   {
+    "kind": "code",
+    "code": "public class New {}",
+    "lang": "csharp",
+    "path": "src/New.cs"
+   },
+   {
+    "kind": "file",
+    "path": "src/Quoted.ts"
+   },
+   {
+    "kind": "code",
+    "code": "export const x = 1",
+    "lang": "typescript",
+    "path": "src/Quoted.ts"
+   },
+   {
+    "kind": "file",
+    "path": "docs/Ref.html"
+   },
+   {
+    "kind": "code",
+    "code": "<p>ref</p>",
+    "lang": "plain",
+    "path": "docs/Ref.html"
+   },
+   {
+    "kind": "delete",
+    "path": "src/Old.cs"
+   },
+   {
+    "kind": "delete",
+    "path": "src/Older.cs"
+   },
+   {
+    "kind": "edit",
+    "path": "src/Service.cs",
+    "edits": [
+     {
+      "search": "    public void Run()\n    {",
+      "replace": "    public void Run(int times)\n    {"
+     },
+     {
+      "search": "        Console.WriteLine(\"hi\");",
+      "replace": "        Console.WriteLine(\"hello\");"
+     }
+    ],
+    "partial": false
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "That's all."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "edit as whole file",
+  "fn": "parseMarkdown",
+  "input": "### EDIT: src/Small.py\n```python\nprint(\"whole file\")\n```\n",
+  "output": [
+   {
+    "kind": "file",
+    "path": "src/Small.py"
+   },
+   {
+    "kind": "code",
+    "code": "print(\"whole file\")",
+    "lang": "python",
+    "path": "src/Small.py"
+   }
+  ]
+ },
+ {
+  "name": "edit fenced blocks",
+  "fn": "parseMarkdown",
+  "input": "### EDIT: src/A.ts\n```\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n```\n",
+  "output": [
+   {
+    "kind": "edit",
+    "path": "src/A.ts",
+    "edits": [
+     {
+      "search": "a",
+      "replace": "b"
+     }
+    ],
+    "partial": false
+   }
+  ]
+ },
+ {
+  "name": "edit partial",
+  "fn": "parseMarkdown",
+  "input": "### EDIT: src/Streaming.cs\n<<<<<<< SEARCH\nold line\n=======\nnew li",
+  "output": [
+   {
+    "kind": "edit",
+    "path": "src/Streaming.cs",
+    "edits": [],
+    "partial": true
+   }
+  ]
+ },
+ {
+  "name": "edit loose markers",
+  "fn": "parseMarkdown",
+  "input": "### EDIT: src/Loose.cs\n  <<<<<<<   SEARCH\nx\n  =========\ny\n>>>>>>>>> REPLACE\n<<<<<<<<<< SEARCH\nnot a marker (10)",
+  "output": [
+   {
+    "kind": "edit",
+    "path": "src/Loose.cs",
+    "edits": [
+     {
+      "search": "x",
+      "replace": "y"
+     }
+    ],
+    "partial": false
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "<<<<<<<<<< SEARCH not a marker (10)"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "edit empty",
+  "fn": "parseMarkdown",
+  "input": "### EDIT: src/Empty.cs\n\nSome text after.",
+  "output": [
+   {
+    "kind": "edit",
+    "path": "src/Empty.cs",
+    "edits": [],
+    "partial": false
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Some text after."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "quotes",
+  "fn": "parseMarkdown",
+  "input": "> Quoted **text**\n> - list in quote\n>\n> > nested\n\nafter",
+  "output": [
+   {
+    "kind": "quote",
+    "blocks": [
+     {
+      "kind": "p",
+      "inline": [
+       {
+        "kind": "text",
+        "text": "Quoted "
+       },
+       {
+        "kind": "bold",
+        "children": [
+         {
+          "kind": "text",
+          "text": "text"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "kind": "list",
+      "items": [
+       {
+        "depth": 0,
+        "inline": [
+         {
+          "kind": "text",
+          "text": "list in quote"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "kind": "quote",
+      "blocks": [
+       {
+        "kind": "p",
+        "inline": [
+         {
+          "kind": "text",
+          "text": "nested"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "after"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "hr variants",
+  "fn": "parseMarkdown",
+  "input": "---\n* * *\n___\n- - -\n-- not hr\ntext\n***",
+  "output": [
+   {
+    "kind": "hr"
+   },
+   {
+    "kind": "hr"
+   },
+   {
+    "kind": "hr"
+   },
+   {
+    "kind": "hr"
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "-- not hr text"
+     }
+    ]
+   },
+   {
+    "kind": "hr"
+   }
+  ]
+ },
+ {
+  "name": "inline",
+  "fn": "parseMarkdown",
+  "input": "Mix: `code with **stars**`, **bold _and italic_**, __under bold__, ~~strike~~, snake_case_name, 2*3*4,\n*emph*, _emph_, ** not bold**, visit https://example.com/path?q=1. Or (http://x.io/a_b), [link **b**](./rel/path.md).\nUnclosed `tick and *star and [bracket](no close",
+  "output": [
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Mix: "
+     },
+     {
+      "kind": "code",
+      "text": "code with **stars**"
+     },
+     {
+      "kind": "text",
+      "text": ", "
+     },
+     {
+      "kind": "bold",
+      "children": [
+       {
+        "kind": "text",
+        "text": "bold "
+       },
+       {
+        "kind": "italic",
+        "children": [
+         {
+          "kind": "text",
+          "text": "and italic"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": ", "
+     },
+     {
+      "kind": "bold",
+      "children": [
+       {
+        "kind": "text",
+        "text": "under bold"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": ", "
+     },
+     {
+      "kind": "strike",
+      "children": [
+       {
+        "kind": "text",
+        "text": "strike"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": ", snake_case_name, 2*3*4, "
+     },
+     {
+      "kind": "italic",
+      "children": [
+       {
+        "kind": "text",
+        "text": "emph"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": ", "
+     },
+     {
+      "kind": "italic",
+      "children": [
+       {
+        "kind": "text",
+        "text": "emph"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": ", ** not bold"
+     },
+     {
+      "kind": "bold",
+      "children": [
+       {
+        "kind": "text",
+        "text": ", visit "
+       },
+       {
+        "kind": "link",
+        "href": "https://example.com/path?q=1",
+        "children": [
+         {
+          "kind": "text",
+          "text": "https://example.com/path?q=1"
+         }
+        ]
+       },
+       {
+        "kind": "text",
+        "text": ". Or ("
+       },
+       {
+        "kind": "link",
+        "href": "http://x.io/a_b",
+        "children": [
+         {
+          "kind": "text",
+          "text": "http://x.io/a_b"
+         }
+        ]
+       },
+       {
+        "kind": "text",
+        "text": "), [link "
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": "b**](./rel/path.md). Unclosed `tick and *star and [bracket](no close"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "crlf and unicode",
+  "fn": "parseMarkdown",
+  "input": "# Überschrift 🚀\r\n\r\nZeile mit **fett** und émoji 😀\r\n- punkt\r\n",
+  "output": [
+   {
+    "kind": "heading",
+    "level": 1,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Überschrift 🚀"
+     }
+    ]
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Zeile mit "
+     },
+     {
+      "kind": "bold",
+      "children": [
+       {
+        "kind": "text",
+        "text": "fett"
+       }
+      ]
+     },
+     {
+      "kind": "text",
+      "text": " und émoji 😀"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "items": [
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "punkt"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "lone cr",
+  "fn": "parseMarkdown",
+  "input": "para\rwith cr\n```ts\r\ncode\n```",
+  "output": [
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "para\rwith cr"
+     }
+    ]
+   },
+   {
+    "kind": "code",
+    "code": "code",
+    "lang": "typescript"
+   }
+  ]
+ },
+ {
+  "name": "empty",
+  "fn": "parseMarkdown",
+  "input": "",
+  "output": []
+ },
+ {
+  "name": "only blank",
+  "fn": "parseMarkdown",
+  "input": "\n\n   \n",
+  "output": []
+ },
+ {
+  "name": "tabs indent list",
+  "fn": "parseMarkdown",
+  "input": "- top\n\t- tab nested\n\t\t- deeper",
+  "output": [
+   {
+    "kind": "list",
+    "items": [
+     {
+      "depth": 0,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "top"
+       }
+      ]
+     },
+     {
+      "depth": 2,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "tab nested"
+       }
+      ]
+     },
+     {
+      "depth": 4,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "deeper"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "bom and nbsp",
+  "fn": "parseMarkdown",
+  "input": "﻿# Title\n  - item\n ",
+  "output": [
+   {
+    "kind": "heading",
+    "level": 1,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Title"
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "items": [
+     {
+      "depth": 1,
+      "inline": [
+       {
+        "kind": "text",
+        "text": "item"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "heading closers",
+  "fn": "parseMarkdown",
+  "input": "# Title #\n## Title ## \n### #\n#\n#notheading",
+  "output": [
+   {
+    "kind": "heading",
+    "level": 1,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Title"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "inline": [
+     {
+      "kind": "text",
+      "text": "Title"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 3,
+    "inline": []
+   },
+   {
+    "kind": "p",
+    "inline": [
+     {
+      "kind": "text",
+      "text": "# #notheading"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "file then plain fence",
+  "fn": "parseMarkdown",
+  "input": "## FILE: a/b.json\n\n```\n{\"a\": 1}\n```\n\n```\nno path\n```",
+  "output": [
+   {
+    "kind": "file",
+    "path": "a/b.json"
+   },
+   {
+    "kind": "code",
+    "code": "{\"a\": 1}",
+    "lang": "json",
+    "path": "a/b.json"
+   },
+   {
+    "kind": "code",
+    "code": "no path",
+    "lang": "plain"
+   }
+  ]
+ },
+ {
+  "name": "file header empty after clean",
+  "fn": "parseMarkdown",
+  "input": "### FILE: `\n```\nx\n```",
+  "output": [
+   {
+    "kind": "file",
+    "path": ""
+   },
+   {
+    "kind": "code",
+    "code": "x",
+    "lang": "plain",
+    "path": ""
+   }
+  ]
+ },
+ {
+  "name": "plain text",
+  "fn": "parseInline",
+  "input": "plain text",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "plain text"
+    }
+   ],
+   "text": "plain text"
+  }
+ },
+ {
+  "name": "**bold** then *it*",
+  "fn": "parseInline",
+  "input": "**bold** then *it*",
+  "output": {
+   "nodes": [
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "bold"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " then "
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "it"
+      }
+     ]
+    }
+   ],
+   "text": "bold then it"
+  }
+ },
+ {
+  "name": "***both***",
+  "fn": "parseInline",
+  "input": "***both***",
+  "output": {
+   "nodes": [
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "*both"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": "*"
+    }
+   ],
+   "text": "*both*"
+  }
+ },
+ {
+  "name": "`a` `b`",
+  "fn": "parseInline",
+  "input": "`a` `b`",
+  "output": {
+   "nodes": [
+    {
+     "kind": "code",
+     "text": "a"
+    },
+    {
+     "kind": "text",
+     "text": " "
+    },
+    {
+     "kind": "code",
+     "text": "b"
+    }
+   ],
+   "text": "a b"
+  }
+ },
+ {
+  "name": "a_b_c and _x_",
+  "fn": "parseInline",
+  "input": "a_b_c and _x_",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "a_b_c and "
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "x"
+      }
+     ]
+    }
+   ],
+   "text": "a_b_c and x"
+  }
+ },
+ {
+  "name": "*not closed",
+  "fn": "parseInline",
+  "input": "*not closed",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "*not closed"
+    }
+   ],
+   "text": "*not closed"
+  }
+ },
+ {
+  "name": "* list-like *",
+  "fn": "parseInline",
+  "input": "* list-like *",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "* list-like *"
+    }
+   ],
+   "text": "* list-like *"
+  }
+ },
+ {
+  "name": "x*y*z and *a*b",
+  "fn": "parseInline",
+  "input": "x*y*z and *a*b",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "x*y*z and *a*b"
+    }
+   ],
+   "text": "x*y*z and *a*b"
+  }
+ },
+ {
+  "name": "[text](url) and [bad] (url)",
+  "fn": "parseInline",
+  "input": "[text](url) and [bad] (url)",
+  "output": {
+   "nodes": [
+    {
+     "kind": "link",
+     "href": "url",
+     "children": [
+      {
+       "kind": "text",
+       "text": "text"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " and [bad] (url)"
+    }
+   ],
+   "text": "text and [bad] (url)"
+  }
+ },
+ {
+  "name": "[t](u \"title\") [t2](u2 'no')",
+  "fn": "parseInline",
+  "input": "[t](u \"title\") [t2](u2 'no')",
+  "output": {
+   "nodes": [
+    {
+     "kind": "link",
+     "href": "u",
+     "children": [
+      {
+       "kind": "text",
+       "text": "t"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " [t2](u2 'no')"
+    }
+   ],
+   "text": "t [t2](u2 'no')"
+  }
+ },
+ {
+  "name": "https://a.b/c, https://d.e/(f)",
+  "fn": "parseInline",
+  "input": "https://a.b/c, https://d.e/(f)",
+  "output": {
+   "nodes": [
+    {
+     "kind": "link",
+     "href": "https://a.b/c",
+     "children": [
+      {
+       "kind": "text",
+       "text": "https://a.b/c"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": ", "
+    },
+    {
+     "kind": "link",
+     "href": "https://d.e/",
+     "children": [
+      {
+       "kind": "text",
+       "text": "https://d.e/"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": "(f)"
+    }
+   ],
+   "text": "https://a.b/c, https://d.e/(f)"
+  }
+ },
+ {
+  "name": "see http://example.com/x_y_z.",
+  "fn": "parseInline",
+  "input": "see http://example.com/x_y_z.",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "see "
+    },
+    {
+     "kind": "link",
+     "href": "http://example.com/x_y_z",
+     "children": [
+      {
+       "kind": "text",
+       "text": "http://example.com/x_y_z"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": "."
+    }
+   ],
+   "text": "see http://example.com/x_y_z."
+  }
+ },
+ {
+  "name": "~~gone~~ ~~ not~~",
+  "fn": "parseInline",
+  "input": "~~gone~~ ~~ not~~",
+  "output": {
+   "nodes": [
+    {
+     "kind": "strike",
+     "children": [
+      {
+       "kind": "text",
+       "text": "gone"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " ~~ not~~"
+    }
+   ],
+   "text": "gone ~~ not~~"
+  }
+ },
+ {
+  "name": "__a__b __c__",
+  "fn": "parseInline",
+  "input": "__a__b __c__",
+  "output": {
+   "nodes": [
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "a"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": "b "
+    },
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "c"
+      }
+     ]
+    }
+   ],
+   "text": "ab c"
+  }
+ },
+ {
+  "name": "émoji **😀** _ü_",
+  "fn": "parseInline",
+  "input": "émoji **😀** _ü_",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "émoji "
+    },
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "😀"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " "
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "ü"
+      }
+     ]
+    }
+   ],
+   "text": "émoji 😀 ü"
+  }
+ },
+ {
+  "name": "_a*b_",
+  "fn": "parseInline",
+  "input": "_a*b_",
+  "output": {
+   "nodes": [
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "a*b"
+      }
+     ]
+    }
+   ],
+   "text": "a*b"
+  }
+ },
+ {
+  "name": "**a**b**c**",
+  "fn": "parseInline",
+  "input": "**a**b**c**",
+  "output": {
+   "nodes": [
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "a"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": "b"
+    },
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "c"
+      }
+     ]
+    }
+   ],
+   "text": "abc"
+  }
+ },
+ {
+  "name": "nbsp *x* ",
+  "fn": "parseInline",
+  "input": "nbsp *x* ",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "nbsp "
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "x"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " "
+    }
+   ],
+   "text": "nbsp x "
+  }
+ },
+ {
+  "name": "HTTPS://upper.case",
+  "fn": "parseInline",
+  "input": "HTTPS://upper.case",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "HTTPS://upper.case"
+    }
+   ],
+   "text": "HTTPS://upper.case"
+  }
+ },
+ {
+  "name": "xhttps://no.boundary 9https://digit",
+  "fn": "parseInline",
+  "input": "xhttps://no.boundary 9https://digit",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "xhttps://no.boundary 9https://digit"
+    }
+   ],
+   "text": "xhttps://no.boundary 9https://digit"
+  }
+ },
+ {
+  "name": "foo_bar_ baz and x*y* z",
+  "fn": "parseInline",
+  "input": "foo_bar_ baz and x*y* z",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "foo_bar_ baz and x*y* z"
+    }
+   ],
+   "text": "foo_bar_ baz and x*y* z"
+  }
+ },
+ {
+  "name": "**_x_ and _y_ __z__",
+  "fn": "parseInline",
+  "input": "**_x_ and _y_ __z__",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "**"
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "x"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " and "
+    },
+    {
+     "kind": "italic",
+     "children": [
+      {
+       "kind": "text",
+       "text": "y"
+      }
+     ]
+    },
+    {
+     "kind": "text",
+     "text": " "
+    },
+    {
+     "kind": "bold",
+     "children": [
+      {
+       "kind": "text",
+       "text": "z"
+      }
+     ]
+    }
+   ],
+   "text": "**x and y z"
+  }
+ },
+ {
+  "name": "[a](b c) [`x`](y)",
+  "fn": "parseInline",
+  "input": "[a](b c) [`x`](y)",
+  "output": {
+   "nodes": [
+    {
+     "kind": "text",
+     "text": "[a](b c) "
+    },
+    {
+     "kind": "link",
+     "href": "y",
+     "children": [
+      {
+       "kind": "code",
+       "text": "x"
+      }
+     ]
+    }
+   ],
+   "text": "[a](b c) x"
+  }
+ }
+]
