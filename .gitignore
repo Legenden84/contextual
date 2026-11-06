@@ -1,5 +1,8 @@
-# Rust
-/target
+# Rust build output (any crate or checkout)
+target/
+
+# Claude Code's temporary git worktrees (full copies of the repo)
+.claude/worktrees/
 
 # Local config and secrets
 *.local
