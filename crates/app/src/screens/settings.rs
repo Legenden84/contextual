@@ -106,13 +106,13 @@ impl SettingsScreen {
         );
         let model_name = field(
             "Model name",
-            "Shown in the UI.",
+            "Shown in the UI; looked up in the model catalog.",
             opt(f.model_name.clone()),
             false,
         );
         let context_limit = field(
             "Context limit",
-            "Tokens; drives the context bar.",
+            "Tokens; empty: from the model catalog.",
             opt(f.context_limit),
             false,
         );
@@ -124,13 +124,13 @@ impl SettingsScreen {
         );
         let in_price = field(
             "Input price / 1M",
-            "USD; for the cost estimate.",
+            "USD; empty: from the model catalog.",
             opt(f.input_price_per_1m),
             false,
         );
         let out_price = field(
             "Output price / 1M",
-            "USD; for the cost estimate.",
+            "USD; empty: from the model catalog.",
             opt(f.output_price_per_1m),
             false,
         );
@@ -381,6 +381,30 @@ fn section(title: &'static str, cx: &gpui_kit::App) -> impl IntoElement + use<> 
         .child(title)
 }
 
+/// "GPT-6 Astra: 922k context · $10 in / $1 cached / $50 out per 1M · above 272k: $20 / $75."
+fn catalog_line(m: &contextual_core::models::ModelInfo) -> String {
+    use contextual_core::logic::format::fmt_k;
+    let usd = |v: f64| format!("${v}");
+    let mut line = format!("{}: {} context", m.label, fmt_k(m.context_limit));
+    if let (Some(i), Some(o)) = (m.input_price_per_1m, m.output_price_per_1m) {
+        line.push_str(&format!(" · {} in", usd(i)));
+        if let Some(cached) = m.cached_input_price_per_1m {
+            line.push_str(&format!(" / {} cached", usd(cached)));
+        }
+        line.push_str(&format!(" / {} out per 1M", usd(o)));
+    }
+    if let Some(l) = &m.long_context {
+        line.push_str(&format!(
+            " · above {} input: {} / {}",
+            fmt_k(l.above_input_tokens),
+            usd(l.input_price_per_1m),
+            usd(l.output_price_per_1m)
+        ));
+    }
+    line.push_str(". From the model catalog; fields below override it.");
+    line
+}
+
 fn subsection(
     title: &'static str,
     hint: &'static str,
@@ -419,6 +443,18 @@ impl Render for SettingsScreen {
                 Some((format!("Connected in {latency_ms} ms."), c.success))
             }
             ConnectionTest::Failed(e) => Some((e.clone(), c.danger)),
+        };
+        let catalog_note = {
+            let typed = |f: &Field| f.input.read(cx).value().trim().to_string();
+            let mut names = vec![typed(&self.model_name), typed(&self.deployment)];
+            if let Some(cfg) = &a.config {
+                names.extend([cfg.model_name.clone(), cfg.deployment.clone()]);
+            }
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            match contextual_core::models::find(&a.settings.models, &names) {
+                Some(m) => catalog_line(m),
+                None => "Not in the model catalog: set the context limit and prices below, or add the model to \"models\" in settings.json.".to_string(),
+            }
         };
         let frameworks_note = a.project.as_ref().map(|p| {
             let p = p.read(cx);
@@ -553,6 +589,14 @@ impl Render for SettingsScreen {
                     .child(self.field_row(&self.api_version, cx))
                     .child(self.field_row(&self.deployment, cx))
                     .child(self.field_row(&self.model_name, cx))
+                    .child(
+                        div()
+                            .pl(px(LABEL_W) + sp(4))
+                            .pb(sp(1))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(SharedString::from(catalog_note)),
+                    )
                     .child(self.field_row(&self.context_limit, cx))
                     .child(self.field_row(&self.max_tokens, cx))
                     .child(self.field_row(&self.in_price, cx))

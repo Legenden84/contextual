@@ -77,7 +77,7 @@ pub fn context_bar(
         Level::Danger => (c.danger, c.danger),
     };
     let pct = (t.share * 100.0).round() as u64;
-    let priced = deployment.in_price > 0.0 || deployment.out_price > 0.0;
+    let priced = deployment.priced();
 
     div()
         .flex()
@@ -163,7 +163,15 @@ pub fn context_bar(
             div()
                 .type_style(contextual_theme::type_style::CODE_SMALL)
                 .whitespace_nowrap()
-                .child(SharedString::from(if priced {
+                .child(SharedString::from(if priced && t.long_context {
+                    // The whole request is billed at the higher rates past the threshold.
+                    let above = deployment.long_context.as_ref().map_or(0, |l| l.above);
+                    format!(
+                        "~${:.3} / message (long-context rates, over {})",
+                        t.cost,
+                        fmt_k(above)
+                    )
+                } else if priced {
                     format!("~${:.3} / message", t.cost)
                 } else {
                     "Cost: prices not set".into()

@@ -1,0 +1,17 @@
+[
+  {
+    "id": "gpt-6-astra",
+    "label": "GPT-6 Astra",
+    "contextLimit": 922000,
+    "inputPricePer1m": 10.0,
+    "cachedInputPricePer1m": 1.0,
+    "outputPricePer1m": 50.0,
+    "longContext": {
+      "aboveInputTokens": 272000,
+      "inputPricePer1m": 20.0,
+      "cachedInputPricePer1m": 2.0,
+      "outputPricePer1m": 75.0
+    },
+    "source": "https://azure.microsoft.com/en-us/blog/gpt-6-astra-sol-and-luna-for-production-agents-in-microsoft-foundry/"
+  }
+]

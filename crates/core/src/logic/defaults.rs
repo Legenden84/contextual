@@ -275,6 +275,7 @@ pub fn placeholder_deployment() -> Deployment {
         limit: 128_000,
         in_price: 0.0,
         out_price: 0.0,
+        ..Deployment::default()
     }
 }
 

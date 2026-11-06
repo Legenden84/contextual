@@ -10,6 +10,7 @@ use crate::logic::defaults::{
     default_presets, placeholder_deployment,
 };
 use crate::logic::types::Deployment;
+use crate::models::{self, ModelInfo};
 use crate::{Error, Result};
 use contextual_protocol::fs::{ExclusionPreset, ScanOptions};
 use serde::{Deserialize, Serialize};
@@ -171,21 +172,46 @@ pub struct Settings {
     pub workspace: WorkspaceSettings,
     #[serde(default)]
     pub theme: ThemePreference,
+    /// Models added to the catalog, or replacing built-in entries with the same id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelInfo>,
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Settings {
-    /// The deployment the context bar and cost estimate use, from the resolved Foundry config.
-    pub fn deployment(config: Option<&FoundryConfig>) -> Deployment {
-        match config {
-            Some(c) => Deployment {
-                name: c.deployment.clone(),
-                limit: c.context_limit.unwrap_or(FALLBACK_CONTEXT_LIMIT),
-                in_price: c.input_price_per_1m.unwrap_or(0.0),
-                out_price: c.output_price_per_1m.unwrap_or(0.0),
-            },
-            None => placeholder_deployment(),
+    /// The model catalog entry for the configured deployment.
+    pub fn model(&self, config: &FoundryConfig) -> Option<&ModelInfo> {
+        models::find(&self.models, &[&config.model_name, &config.deployment])
+    }
+
+    /// The deployment the context bar and cost estimate use: limit and prices from Settings or
+    /// environment variables when set, else from the model catalog.
+    pub fn deployment(&self, config: Option<&FoundryConfig>) -> Deployment {
+        let Some(c) = config else {
+            return placeholder_deployment();
+        };
+        let m = self.model(c);
+        // Typed prices replace the catalog's, cached and long-context rates included.
+        let own_prices = c.input_price_per_1m.is_some() || c.output_price_per_1m.is_some();
+        let catalog = m.filter(|_| !own_prices);
+        Deployment {
+            name: c.deployment.clone(),
+            limit: c
+                .context_limit
+                .or(m.map(|m| m.context_limit))
+                .unwrap_or(FALLBACK_CONTEXT_LIMIT),
+            in_price: c
+                .input_price_per_1m
+                .or(catalog.and_then(|m| m.input_price_per_1m))
+                .unwrap_or(0.0),
+            out_price: c
+                .output_price_per_1m
+                .or(catalog.and_then(|m| m.output_price_per_1m))
+                .unwrap_or(0.0),
+            cached_price: catalog.and_then(|m| m.cached_input_price_per_1m),
+            long_context: catalog.and_then(|m| m.long_context.as_ref().map(|l| l.rates())),
+            model: m.map(|m| m.label.clone()),
         }
     }
 }
@@ -387,6 +413,45 @@ mod tests {
         let mut reset = s.clone();
         reset.reset_exclusions();
         assert_eq!(reset.presets, default_presets());
+    }
+
+    #[test]
+    fn deployment_takes_limit_and_prices_from_the_catalog() {
+        let cfg = |model: &str| {
+            read_foundry_config(|k| match k {
+                config::ENV_ENDPOINT => Some("https://res.openai.azure.com/".into()),
+                config::ENV_API_KEY => Some("k".into()),
+                config::ENV_API_VERSION => Some("2025-04-01-preview".into()),
+                config::ENV_DEPLOYMENT => Some("prod".into()),
+                config::ENV_MODEL_NAME => Some(model.into()),
+                _ => None,
+            })
+            .unwrap()
+        };
+        let s = Settings::default();
+        let d = s.deployment(Some(&cfg("gpt-6-astra")));
+        assert_eq!(d.model.as_deref(), Some("GPT-6 Astra"));
+        assert_eq!((d.limit, d.in_price, d.out_price), (922_000, 10.0, 50.0));
+        // 100k in (40k cached), 2k out; past 272k the long-context rates apply to everything.
+        assert!((d.cost(100_000, 40_000, 2_000) - (0.6 + 0.04 + 0.1)).abs() < 1e-9);
+        assert!(d.rates(300_000).long_context);
+        assert!((d.cost(300_000, 0, 0) - 6.0).abs() < 1e-9);
+
+        // Typed values win; typed prices drop the catalog's cached and long-context rates.
+        let mut own = cfg("gpt-6-astra");
+        own.context_limit = Some(200_000);
+        own.input_price_per_1m = Some(5.0);
+        let d = s.deployment(Some(&own));
+        assert_eq!((d.limit, d.in_price, d.out_price), (200_000, 5.0, 0.0));
+        assert_eq!((d.cached_price, d.long_context), (None, None));
+
+        // Unknown model: the fallback limit, no prices.
+        let d = s.deployment(Some(&cfg("something-else")));
+        assert_eq!(
+            (d.limit, d.model.as_deref()),
+            (FALLBACK_CONTEXT_LIMIT, None)
+        );
+        assert!(!d.priced());
     }
 
     fn settings() -> Settings {

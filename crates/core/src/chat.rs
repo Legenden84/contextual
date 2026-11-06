@@ -373,11 +373,9 @@ pub fn visible_changes(changes: Vec<Change>) -> Vec<Change> {
 
 /// "12k in (8k cached) / 1.5k out · $0.031" and the cost, when prices are set.
 pub fn usage_meta(usage: &Usage, dep: &Deployment) -> (String, Option<f64>) {
-    let priced = dep.in_price > 0.0 || dep.out_price > 0.0;
-    let cost = priced.then(|| {
-        usage.input_tokens as f64 / 1e6 * dep.in_price
-            + usage.output_tokens as f64 / 1e6 * dep.out_price
-    });
+    let cost = dep
+        .priced()
+        .then(|| dep.cost(usage.input_tokens, usage.cached_tokens, usage.output_tokens));
     let mut meta = format!("{} in", fmt_k(usage.input_tokens));
     if usage.cached_tokens > 0 {
         meta.push_str(&format!(" ({} cached)", fmt_k(usage.cached_tokens)));
@@ -571,6 +569,7 @@ mod tests {
             limit: 1000,
             in_price: 1.0,
             out_price: 2.0,
+            ..Deployment::default()
         };
         let (meta, cost) = usage_meta(
             &Usage {

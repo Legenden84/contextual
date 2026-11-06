@@ -42,6 +42,9 @@ pub struct Totals {
     pub level: Level,
     /// Estimated cost of the next message in USD.
     pub cost: f64,
+    /// The next message would be billed at the model's long-context rates.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub long_context: bool,
     /// Where the bulk comes from, when near or over the limit (`"Infrastructure: 31k"`).
     pub hint: Option<String>,
 }
@@ -119,8 +122,8 @@ pub fn totals(input: &ContextInput<'_>) -> Totals {
     } else {
         Level::Ok
     };
-    let cost = tokens as f64 / 1e6 * input.deployment.in_price
-        + EST_OUTPUT_TOKENS as f64 / 1e6 * input.deployment.out_price;
+    let cost = input.deployment.cost(tokens, 0, EST_OUTPUT_TOKENS);
+    let long_context = input.deployment.rates(tokens).long_context;
     let hint = (level != Level::Ok)
         .then(|| biggest_folder(input.tree, input.selected))
         .flatten()
@@ -136,6 +139,7 @@ pub fn totals(input: &ContextInput<'_>) -> Totals {
         share,
         level,
         cost,
+        long_context,
         hint,
     }
 }
@@ -167,6 +171,7 @@ mod tests {
             limit: 64_000,
             in_price: 1.0,
             out_price: 4.0,
+            ..Deployment::default()
         };
         let (fv, stale) = (HashMap::new(), HashSet::new());
         let input = ContextInput {

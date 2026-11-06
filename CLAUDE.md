@@ -21,8 +21,9 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
   - `chat.rs` — turn preparation (only files new or changed since sent, by hash), saved-thread
     format (reads the old app's JSON), notes, save bookkeeping. `llm/` — Foundry client on reqwest
     (Responses API with `previous_response_id`, chain reset, chat-completions fallback, SSE),
-    drafts and edit repair. `llm`, `settings`, `chat` and `migrate` sit behind the `llm` feature.
+    drafts and edit repair. `llm`, `settings`, `models`, `chat` and `migrate` sit behind the `llm` feature.
   - `threads.rs`, `settings.rs`, `recents.rs`, `migrate.rs` (`.env.local` import),
+    `models.rs` (model catalog: `data/models.json` + `models` in settings.json),
     `location.rs` / `wsl.rs` (where a project lives, distro discovery, agent deployment).
 - `protocol` — serde wire types (camelCase, like the old `/api` JSON) and JSON-RPC framing.
 - `theme` — `build.rs` generates typed tokens from `docs/design/contextual/tokens.json`.

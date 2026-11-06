@@ -28,9 +28,21 @@ cargo test --workspace
 
 ## Configuration
 
-Settings → Azure AI Foundry: endpoint, deployment, API version, model name, context limit and
-prices. The API key is stored in the OS keychain (Credential Manager, Keychain, Secret Service),
-never in `settings.json`. "Import .env.local" reads the old app's file.
+Settings → Azure AI Foundry: endpoint, deployment, API version and model name. The API key is
+stored in the OS keychain (Credential Manager, Keychain, Secret Service), never in
+`settings.json`. "Import .env.local" reads the old app's file.
+
+Context limit and prices come from the model catalog, looked up by model name (else deployment
+name): `crates/core/data/models.json` ships with the app; add a model there, or locally under
+`"models"` in `settings.json` (same fields; the same `id` replaces a built-in entry). The
+Settings fields and environment variables override the catalog for one deployment.
+
+```json
+{ "id": "gpt-6-astra", "label": "GPT-6 Astra", "aliases": [], "contextLimit": 922000,
+  "inputPricePer1m": 10, "cachedInputPricePer1m": 1, "outputPricePer1m": 50,
+  "longContext": { "aboveInputTokens": 272000, "inputPricePer1m": 20, "outputPricePer1m": 75 },
+  "source": "https://…" }
+```
 
 These environment variables override the settings (handy for development):
 `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT`,

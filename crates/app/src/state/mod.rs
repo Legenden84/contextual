@@ -147,7 +147,7 @@ impl AppModel {
     }
 
     pub fn deployment(&self) -> Deployment {
-        Settings::deployment(self.config.as_ref())
+        self.settings.deployment(self.config.as_ref())
     }
 
     pub fn has_api_key(&self) -> bool {

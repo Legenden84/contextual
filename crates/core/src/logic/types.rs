@@ -85,7 +85,7 @@ pub struct Rule {
     pub content: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub name: String,
@@ -94,6 +94,68 @@ pub struct Deployment {
     pub in_price: f64,
     /// USD per 1M output tokens.
     pub out_price: f64,
+    /// USD per 1M cached input tokens; `None`: charged like other input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_price: Option<f64>,
+    /// Higher rates for the whole request once its input passes a size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_context: Option<LongContextRates>,
+    /// The model catalog entry the limit and prices came from (its label).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// Rates for requests whose input is above `above` tokens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LongContextRates {
+    pub above: u64,
+    pub in_price: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_price: Option<f64>,
+    pub out_price: f64,
+}
+
+/// USD per 1M tokens for one request.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rates {
+    pub input: f64,
+    pub cached: f64,
+    pub output: f64,
+    /// The long-context rates apply.
+    pub long_context: bool,
+}
+
+impl Deployment {
+    pub fn priced(&self) -> bool {
+        self.in_price > 0.0 || self.out_price > 0.0
+    }
+
+    /// The rates for a request with `input_tokens` of input.
+    pub fn rates(&self, input_tokens: u64) -> Rates {
+        match &self.long_context {
+            Some(l) if input_tokens > l.above => Rates {
+                input: l.in_price,
+                cached: l.cached_price.unwrap_or(l.in_price),
+                output: l.out_price,
+                long_context: true,
+            },
+            _ => Rates {
+                input: self.in_price,
+                cached: self.cached_price.unwrap_or(self.in_price),
+                output: self.out_price,
+                long_context: false,
+            },
+        }
+    }
+
+    /// USD for a request; `cached` of the `input` tokens were read from the prompt cache.
+    pub fn cost(&self, input: u64, cached: u64, output: u64) -> f64 {
+        let r = self.rates(input);
+        let cached = cached.min(input);
+        ((input - cached) as f64 * r.input + cached as f64 * r.cached + output as f64 * r.output)
+            / 1e6
+    }
 }
 
 /// A proposed change to one file.

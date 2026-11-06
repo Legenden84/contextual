@@ -19,6 +19,8 @@ pub mod location;
 pub mod logic;
 #[cfg(feature = "llm")]
 pub mod migrate;
+#[cfg(feature = "llm")]
+pub mod models;
 pub mod platform;
 pub mod process;
 pub mod recents;

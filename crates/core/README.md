@@ -30,7 +30,9 @@ user didn't open (`allow_root`).
   context totals, images, PR helpers).
 - `threads` (saved chats, per project key; `import_legacy` copies the old app's), `settings`
   (`settings.json`, env overrides, `SecretStore`), `recents` (`state.json`), `migrate`
-  (`.env.local` import), `location` and `wsl` (paths to locations, distros, agent deployment).
+  (`.env.local` import), `models` (model catalog: context limit and prices per model, from
+  `data/models.json` plus `models` in `settings.json`), `location` and `wsl` (paths to
+  locations, distros, agent deployment).
 
-`llm`, `settings`, `chat` and `migrate` are behind the default `llm` feature; the agent builds
+`llm`, `settings`, `models`, `chat` and `migrate` are behind the default `llm` feature; the agent builds
 without it (no HTTP/TLS stack).
