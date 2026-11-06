@@ -13,6 +13,7 @@ use crate::state::{AppModel, Screen};
 use crate::theme::{ActiveTheme, TypeExt, hsla};
 use crate::views::folder_dialog::FolderDialog;
 use crate::views::status_bar::status_bar;
+use crate::views::title_bar::title_bar;
 use crate::{CloseFolder, OpenFolder, OpenSettings, ToggleTheme};
 
 pub struct Shell {
@@ -24,6 +25,8 @@ pub struct Shell {
     /// Rebuilt each time Settings opens, so the form starts from the saved values.
     settings: Option<Entity<SettingsScreen>>,
     folder_dialog: Option<Entity<FolderDialog>>,
+    /// The window title, also shown in the title bar.
+    title: String,
     _sub: Subscription,
 }
 
@@ -41,6 +44,7 @@ impl Shell {
             workspace: None,
             settings: None,
             folder_dialog: None,
+            title: "Contextual".into(),
             _sub: sub,
         };
         this.sync(window, cx);
@@ -59,6 +63,7 @@ impl Shell {
             _ => "Contextual".to_string(),
         };
         window.set_window_title(&title);
+        self.title = title;
 
         match project {
             Some(p) if self.workspace.as_ref().map(|(id, _)| *id) != Some(p.entity_id()) => {
@@ -96,7 +101,7 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &cx.tokens().colors;
         let screen = self.app.read(cx).screen;
         let body = match screen {
@@ -143,6 +148,13 @@ impl Render for Shell {
                     a.save_settings(s, None, cx);
                 });
             }))
+            // On Linux the compositor may draw its own title bar (X11, or Wayland with server-side
+            // decorations); then ours would be a second one.
+            .when(
+                !(cfg!(target_os = "linux")
+                    && matches!(window.window_decorations(), gpui_kit::Decorations::Server)),
+                |d| d.child(title_bar(&self.title, cx)),
+            )
             .child(
                 div()
                     .relative()

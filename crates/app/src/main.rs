@@ -78,13 +78,17 @@ fn main() {
         keymap(cx);
 
         let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+        // We draw the title bar ourselves (views/title_bar.rs): a transparent system title bar
+        // on macOS and Windows, client-side decorations on Linux (WSLg's Wayland draws none).
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some("Contextual".into()),
-                ..Default::default()
+                ..gpui_kit::component::TitleBar::title_bar_options()
             }),
-            ..Default::default()
+            window_decorations: cfg!(target_os = "linux")
+                .then_some(gpui_kit::WindowDecorations::Client),
+            ..gpui_kit::component::TitleBar::window_options()
         };
         if args.spike {
             theme::apply(contextual_theme::Appearance::Dark, None, cx);
