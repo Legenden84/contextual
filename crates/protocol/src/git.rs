@@ -1,1 +1,322 @@
 //! Source Control and pull request types.
+//!
+//! Wire format matches the old `/api/git/*` and `/api/pr/*` JSON: camelCase keys; fields that
+//! were `T | null` serialise as `null`, fields that were optional (`?:`) are omitted when `None`.
+
+use serde::{Deserialize, Serialize};
+
+/// VS Code-style letters: M modified, A added, D deleted, R renamed, U untracked, C conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ChangeLetter {
+    M,
+    A,
+    D,
+    R,
+    U,
+    C,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusEntry {
+    pub path: String,
+    /// Original path of a rename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    pub letter: ChangeLetter,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatus {
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: u64,
+    pub behind: u64,
+    pub staged: Vec<StatusEntry>,
+    pub changes: Vec<StatusEntry>,
+    pub conflicts: Vec<StatusEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    pub old: String,
+    pub new: String,
+    /// Not shown: binary or too large.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitResult {
+    /// Short hash of the new commit.
+    pub commit: String,
+    pub files: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushResult {
+    pub branch: String,
+    pub upstream: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchInfo {
+    /// Local: "feature/x"; remote: "origin/feature/x".
+    pub name: String,
+    pub upstream: Option<String>,
+    pub sha: String,
+    pub when: String,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchList {
+    pub current: Option<String>,
+    pub local: Vec<BranchInfo>,
+    pub remote: Vec<BranchInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    pub sha: String,
+    pub subject: String,
+    pub author: String,
+    pub when: String,
+}
+
+/// A file of a comparison: [`FileDiff`] plus its letter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComparisonFile {
+    pub path: String,
+    pub letter: ChangeLetter,
+    pub old: String,
+    pub new: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExistingPr {
+    pub url: String,
+    pub number: u64,
+}
+
+/// What a PR from `branch` into `base` would contain, like GitHub's compare view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comparison {
+    /// Source branch of the PR (compare).
+    pub branch: Option<String>,
+    /// The checked-out branch.
+    pub current: Option<String>,
+    pub default_branch: Option<String>,
+    /// Target branch of the PR (base).
+    pub base: String,
+    pub remote: Option<String>,
+    /// gh can reach the repository.
+    pub github: bool,
+    /// Why a PR can't be created here, if it can't.
+    pub problem: Option<String>,
+    pub commits: Vec<Commit>,
+    pub files: Vec<ComparisonFile>,
+    /// Uncommitted changes (only counted when the source is the checked-out branch).
+    pub uncommitted: u64,
+    /// Commits of the source branch not on origin yet (pushed when the PR is created).
+    pub unpushed: u64,
+    pub existing_pr: Option<ExistingPr>,
+}
+
+/// Diff and commit list for a model-written PR description.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDiff {
+    pub diff: String,
+    pub commits: String,
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrRequest {
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    pub base: String,
+    /// Source branch; default: the checked-out branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
+    /// Create this branch at HEAD first (when the source is the checked-out default branch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_branch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrResult {
+    pub url: String,
+    pub number: Option<u64>,
+    pub branch: String,
+    pub updated_existing: bool,
+}
+
+/// Model-written PR title and description.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDraft {
+    pub title: String,
+    pub body: String,
+}
+
+/// Model-written commit message (`/api/git/draft-commit`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDraft {
+    pub message: String,
+}
+
+// ------------------------------------------------------------------ requests
+
+/// `{ root }`: status, push, draft-commit.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootRequest {
+    pub root: String,
+}
+
+/// `{ root, paths }`: stage, unstage.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathsRequest {
+    pub root: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffRequest {
+    pub root: String,
+    pub path: String,
+    #[serde(default)]
+    pub staged: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRequest {
+    pub root: String,
+    pub message: String,
+    #[serde(default)]
+    pub all: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchesRequest {
+    pub root: String,
+    #[serde(default)]
+    pub fetch: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchRequest {
+    pub root: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBranchRequest {
+    pub root: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareRequest {
+    pub root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+}
+
+/// `{ root, base, head?, notes }`: model-drafted PR description.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDraftRequest {
+    pub root: String,
+    pub base: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    #[serde(default)]
+    pub notes: String,
+}
+
+/// `{ root, title, body, base, head?, draft, newBranch? }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePrRequest {
+    pub root: String,
+    #[serde(flatten)]
+    pub pr: PrRequest,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn wire_shape() {
+        let st = GitStatus {
+            branch: Some("main".into()),
+            staged: vec![StatusEntry {
+                path: "b".into(),
+                from: Some("a".into()),
+                letter: ChangeLetter::R,
+            }],
+            changes: vec![StatusEntry {
+                path: "c".into(),
+                from: None,
+                letter: ChangeLetter::U,
+            }],
+            ..GitStatus::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&st).unwrap(),
+            json!({"branch":"main","upstream":null,"ahead":0,"behind":0,
+                   "staged":[{"path":"b","from":"a","letter":"R"}],
+                   "changes":[{"path":"c","letter":"U"}],"conflicts":[]})
+        );
+        let pr = PrResult {
+            url: "u".into(),
+            number: None,
+            branch: "b".into(),
+            updated_existing: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&pr).unwrap(),
+            json!({"url":"u","number":null,"branch":"b","updatedExisting":false})
+        );
+        let req: CreatePrRequest =
+            serde_json::from_value(json!({"root":"/r","title":"t","base":"main","newBranch":"x"}))
+                .unwrap();
+        assert_eq!(req.pr.new_branch.as_deref(), Some("x"));
+        assert!(!req.pr.draft);
+    }
+}

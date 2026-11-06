@@ -1,0 +1,671 @@
+{
+  "requests": [
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Look"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+                "detail": "high"
+              }
+            ]
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Files:\n\nsrc/a.ts"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+                "detail": "high"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "Earlier reply"
+          },
+          {
+            "role": "user",
+            "content": "Again"
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "Next"
+          }
+        ],
+        "previous_response_id": "resp_prev1",
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "After expiry"
+          }
+        ],
+        "previous_response_id": "resp_gone",
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Files:\n\nsrc/a.ts"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+                "detail": "high"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "Earlier reply"
+          },
+          {
+            "role": "user",
+            "content": "After expiry"
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-chat",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "previous_response_id": "resp_prev1",
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-chat/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-chat",
+        "messages": [
+          {
+            "role": "system",
+            "content": "SYS"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Files:\n\nsrc/a.ts"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+                  "detail": "high"
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "Earlier reply"
+          },
+          {
+            "role": "user",
+            "content": "Hello"
+          }
+        ],
+        "max_completion_tokens": 4096,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-chat/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-chat",
+        "messages": [
+          {
+            "role": "system",
+            "content": "SYS"
+          },
+          {
+            "role": "user",
+            "content": "Hello again"
+          }
+        ],
+        "max_completion_tokens": 4096,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-fail",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "x"
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-incomplete",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "x"
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/v1/responses",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-401",
+        "instructions": "SYS",
+        "input": [
+          {
+            "role": "user",
+            "content": "x"
+          }
+        ],
+        "store": true,
+        "stream": true,
+        "max_output_tokens": 4096
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-resp/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "messages": [
+          {
+            "role": "user",
+            "content": "ping"
+          }
+        ],
+        "max_completion_tokens": 16
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-401/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-401",
+        "messages": [
+          {
+            "role": "user",
+            "content": "ping"
+          }
+        ],
+        "max_completion_tokens": 16
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-resp/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "max_completion_tokens": 1000,
+        "messages": [
+          {
+            "role": "system",
+            "content": "You write git commit messages. Reply with the message only: an imperative subject line of at most 72 characters without a trailing period, then (only if useful) a blank line and a few short \"- \" bullet lines on the notable changes. No code fences, no quotes."
+          },
+          {
+            "role": "user",
+            "content": "```diff\ndiff --git a/x b/x\n+1\n```"
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-resp/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "max_completion_tokens": 2000,
+        "messages": [
+          {
+            "role": "system",
+            "content": "You write GitHub pull request titles and descriptions.\nReply in exactly this format:\nTITLE: <imperative summary, at most 72 characters, no trailing period>\n---\n<markdown description: a short paragraph on what changed and why, then a \"Changes\" list of the notable edits per file. No headings above level 2. Do not invent testing that was not mentioned.>"
+          },
+          {
+            "role": "user",
+            "content": "Branch: feature/x\n\n# Commits\n\n- Add x\n\n# What was asked and explained in the chat\n\n(no chat notes)\n\n# Diff\n\n```diff\ndiff --git a/x b/x\n```"
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-resp/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "max_completion_tokens": 4096,
+        "messages": [
+          {
+            "role": "system",
+            "content": "You apply edits to a file. The SEARCH parts of the edit blocks may not match the file exactly; work out where each edit belongs and apply its intent. Reply with the complete updated file only: no explanation, no code fence."
+          },
+          {
+            "role": "user",
+            "content": "File: src/a.ts\n\n# Current file\n\nexport const a = 1\n\n\n# Edits to apply\n\n<<<<<<< SEARCH\na = 1\n=======\na = 2\n>>>>>>> REPLACE"
+          }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "url": "/openai/deployments/gpt-resp/chat/completions?api-version=2025-04-01-preview",
+      "headers": {
+        "api-key": "test-key",
+        "authorization": null,
+        "content-type": "application/json"
+      },
+      "body": {
+        "model": "gpt-resp",
+        "max_completion_tokens": 4096,
+        "messages": [
+          {
+            "role": "system",
+            "content": "You apply edits to a file. The SEARCH parts of the edit blocks may not match the file exactly; work out where each edit belongs and apply its intent. Reply with the complete updated file only: no explanation, no code fence."
+          },
+          {
+            "role": "user",
+            "content": "File: src/a.ts\n\n# Current file\n\nx\n\n# Edits to apply\n\nCUT"
+          }
+        ]
+      }
+    }
+  ],
+  "results": {
+    "fresh": [
+      {
+        "type": "delta",
+        "text": "Here is the "
+      },
+      {
+        "type": "delta",
+        "text": "change – café ☕"
+      },
+      {
+        "type": "delta",
+        "text": ":\n\n### FILE: src/a.ts\n```ts\nexport const a = 2\n```\n"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 5321,
+        "outputTokens": 187,
+        "cachedTokens": 4864
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": "resp_68f1c2a9e4b0819089",
+        "api": "responses",
+        "chainReset": false
+      }
+    ],
+    "fullHistory": [
+      {
+        "type": "delta",
+        "text": "Here is the "
+      },
+      {
+        "type": "delta",
+        "text": "change – café ☕"
+      },
+      {
+        "type": "delta",
+        "text": ":\n\n### FILE: src/a.ts\n```ts\nexport const a = 2\n```\n"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 5321,
+        "outputTokens": 187,
+        "cachedTokens": 4864
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": "resp_68f1c2a9e4b0819089",
+        "api": "responses",
+        "chainReset": false
+      }
+    ],
+    "chained": [
+      {
+        "type": "delta",
+        "text": "Here is the "
+      },
+      {
+        "type": "delta",
+        "text": "change – café ☕"
+      },
+      {
+        "type": "delta",
+        "text": ":\n\n### FILE: src/a.ts\n```ts\nexport const a = 2\n```\n"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 5321,
+        "outputTokens": 187,
+        "cachedTokens": 4864
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": "resp_68f1c2a9e4b0819089",
+        "api": "responses",
+        "chainReset": false
+      }
+    ],
+    "chainReset": [
+      {
+        "type": "delta",
+        "text": "Here is the "
+      },
+      {
+        "type": "delta",
+        "text": "change – café ☕"
+      },
+      {
+        "type": "delta",
+        "text": ":\n\n### FILE: src/a.ts\n```ts\nexport const a = 2\n```\n"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 5321,
+        "outputTokens": 187,
+        "cachedTokens": 4864
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": "resp_68f1c2a9e4b0819089",
+        "api": "responses",
+        "chainReset": true
+      }
+    ],
+    "fallback": [
+      {
+        "type": "delta",
+        "text": "Fallback "
+      },
+      {
+        "type": "delta",
+        "text": "reply ✓"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 2048,
+        "outputTokens": 57,
+        "cachedTokens": 1920
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": null,
+        "api": "chat",
+        "chainReset": true
+      }
+    ],
+    "fallbackAgain": [
+      {
+        "type": "delta",
+        "text": "Fallback "
+      },
+      {
+        "type": "delta",
+        "text": "reply ✓"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 2048,
+        "outputTokens": 57,
+        "cachedTokens": 1920
+      },
+      {
+        "type": "done",
+        "finishReason": "stop",
+        "responseId": null,
+        "api": "chat",
+        "chainReset": false
+      }
+    ],
+    "failed": [
+      {
+        "type": "delta",
+        "text": "Start"
+      },
+      {
+        "type": "error",
+        "message": "Could not reach Foundry: The model produced invalid content."
+      }
+    ],
+    "incomplete": [
+      {
+        "type": "delta",
+        "text": "Partial answer"
+      },
+      {
+        "type": "usage",
+        "inputTokens": 900,
+        "outputTokens": 4096,
+        "cachedTokens": 0
+      },
+      {
+        "type": "done",
+        "finishReason": "length",
+        "responseId": "resp_incomplete01",
+        "api": "responses",
+        "chainReset": false
+      }
+    ],
+    "unauthorized": [
+      {
+        "type": "error",
+        "message": "Foundry returned 401: 401 Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."
+      }
+    ],
+    "test": {
+      "ok": "number"
+    },
+    "test401": {
+      "error": "Foundry returned 401: 401 Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource."
+    },
+    "draftCommit": {
+      "ok": "Add login flag to the app\n\n- Toggle login in src/app.ts\n- Drop the unused binary"
+    },
+    "draftPr": {
+      "ok": {
+        "title": "Add a login flag",
+        "body": "Adds a `login` flag so the app can gate the new flow.\n\n## Changes\n- `src/app.ts`: new `login` export"
+      }
+    },
+    "repair": {
+      "ok": {
+        "content": "export const a = 2\nexport const b = 3\n",
+        "inputTokens": 120,
+        "outputTokens": 30
+      }
+    },
+    "repairCut": {
+      "error": "Could not reach Foundry: The rebuilt file was cut off."
+    }
+  }
+}

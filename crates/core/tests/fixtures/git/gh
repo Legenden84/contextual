@@ -1,0 +1,23 @@
+#!/bin/sh
+# Fake GitHub CLI for the git fixtures: the default branch is main, feature/login has open PR #7,
+# and `pr create` returns PR #8. Anything else fails like gh does.
+case "$1 $2" in
+  "repo view") echo main ;;
+  "pr view")
+    if [ "$3" = "feature/login" ]; then
+      echo '{"baseRefName":"main","number":7,"state":"OPEN","url":"https://github.com/acme/demo/pull/7"}'
+    else
+      echo "no pull requests found for branch \"$3\"" >&2
+      exit 1
+    fi
+    ;;
+  "pr create")
+    echo "Creating pull request for $6 into $4 in acme/demo"
+    echo
+    echo "https://github.com/acme/demo/pull/8"
+    ;;
+  *)
+    echo "unknown command $*" >&2
+    exit 1
+    ;;
+esac
