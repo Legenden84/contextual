@@ -1,0 +1,304 @@
+[
+ {
+  "name": "rules",
+  "fn": "systemPrompt",
+  "input": {
+   "rules": [
+    {
+     "path": ".cursor/rules/style.mdc",
+     "type": "Rule",
+     "tokens": 40,
+     "content": "\n  Use 4 spaces.\n"
+    },
+    {
+     "path": ".claude/skills/db/SKILL.md",
+     "type": "Skill",
+     "tokens": 90,
+     "content": "Use EF Core."
+    }
+   ],
+   "outputFormat": "  You are helping edit files in a local project. The user reviews every change\nand saves it manually. You cannot write to disk.\n\n- Explain the change in a few sentences first.\n- Only touch files that are included in the context.\n- Follow the project rules provided above this prompt.\n\n"
+  },
+  "output": "# Project rules\n\n## .cursor/rules/style.mdc\n\nUse 4 spaces.\n\n## .claude/skills/db/SKILL.md\n\nUse EF Core.\n\nYou are helping edit files in a local project. The user reviews every change\nand saves it manually. You cannot write to disk.\n\n- Explain the change in a few sentences first.\n- Only touch files that are included in the context.\n- Follow the project rules provided above this prompt.\n\n# How to return file changes\n\nThese rules take precedence over any earlier instruction about how to return files. Never write file contents outside the blocks below.\n\n## Changing an existing file\nReturn only the parts that change, as one or more edit blocks after a header line:\n\n### EDIT: src/path/to/File.cs\n<<<<<<< SEARCH\nexact existing lines, copied verbatim with their indentation\n=======\nthe lines that replace them\n>>>>>>> REPLACE\n\n- SEARCH must match the current file exactly, character for character, including indentation, comments and blank lines.\n- Include 2–3 unchanged lines around the change so SEARCH occurs only once in the file. Keep blocks small; never repeat a whole file in SEARCH.\n- To insert lines, SEARCH for the lines next to the insertion point and repeat them in REPLACE together with the new lines.\n- To remove lines, leave them out of REPLACE.\n- Use several blocks for separate changes in the same file, in file order, without overlapping. One header per file.\n- Do not put edit blocks in a code fence.\n\n## New files, or rewriting most of a small file\n### FILE: src/path/to/NewFile.cs\n```csharp\ncomplete file contents\n```\n\n## Deleting a file\n### DELETE: src/path/to/Old.cs\n\nNever return a file marked as a condensed reference."
+ },
+ {
+  "name": "no rules, empty format",
+  "fn": "systemPrompt",
+  "input": {
+   "rules": [],
+   "outputFormat": "  \n"
+  },
+  "output": "# How to return file changes\n\nThese rules take precedence over any earlier instruction about how to return files. Never write file contents outside the blocks below.\n\n## Changing an existing file\nReturn only the parts that change, as one or more edit blocks after a header line:\n\n### EDIT: src/path/to/File.cs\n<<<<<<< SEARCH\nexact existing lines, copied verbatim with their indentation\n=======\nthe lines that replace them\n>>>>>>> REPLACE\n\n- SEARCH must match the current file exactly, character for character, including indentation, comments and blank lines.\n- Include 2–3 unchanged lines around the change so SEARCH occurs only once in the file. Keep blocks small; never repeat a whole file in SEARCH.\n- To insert lines, SEARCH for the lines next to the insertion point and repeat them in REPLACE together with the new lines.\n- To remove lines, leave them out of REPLACE.\n- Use several blocks for separate changes in the same file, in file order, without overlapping. One header per file.\n- Do not put edit blocks in a code fence.\n\n## New files, or rewriting most of a small file\n### FILE: src/path/to/NewFile.cs\n```csharp\ncomplete file contents\n```\n\n## Deleting a file\n### DELETE: src/path/to/Old.cs\n\nNever return a file marked as a condensed reference."
+ },
+ {
+  "name": "all kinds",
+  "fn": "contextBlock",
+  "input": {
+   "files": [
+    {
+     "path": "src/Order.cs",
+     "content": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n"
+    },
+    {
+     "path": "src/app.tsx",
+     "content": "import { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n"
+    },
+    {
+     "path": "web/index.HTML",
+     "content": "<p>x</p>",
+     "condensed": true
+    },
+    {
+     "path": "icons/logo.svg",
+     "content": "<svg/>"
+    },
+    {
+     "path": "scripts/run.sh",
+     "content": "echo hi"
+    },
+    {
+     "path": "README",
+     "content": ""
+    },
+    {
+     "path": "shots/a.png",
+     "image": "data:image/png;base64,AAAA"
+    },
+    {
+     "path": "bin/blob.dat"
+    }
+   ]
+  },
+  "output": "# Context files (8)\n\n### FILE: src/Order.cs\n```csharp\nusing System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n\n```\n### FILE: src/app.tsx\n```typescript\nimport { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n\n```\n### FILE: web/index.HTML (condensed reference, read-only: do not return this file)\nEmbedded images, fonts, minified scripts/styles and long path data were replaced by placeholders.\n```html\n<p>x</p>\n```\n### FILE: icons/logo.svg\n```html\n<svg/>\n```\n### FILE: scripts/run.sh\n```bash\necho hi\n```\n### FILE: README\n```\n\n```\n\nImage files (attached as pictures below):\n- shots/a.png\n\nAlso selected, contents not available:\n- bin/blob.dat"
+ },
+ {
+  "name": "empty",
+  "fn": "contextBlock",
+  "input": {
+   "files": []
+  },
+  "output": "# Context files (0)\n"
+ },
+ {
+  "name": "none",
+  "fn": "withImages",
+  "input": {
+   "text": "x",
+   "images": []
+  },
+  "output": "x"
+ },
+ {
+  "name": "two",
+  "fn": "withImages",
+  "input": {
+   "text": "x",
+   "images": [
+    {
+     "name": "screenshot-101112.png",
+     "url": "data:image/png;base64,BBBB"
+    },
+    {
+     "name": "b.jpg",
+     "url": "data:image/jpeg;base64,CC"
+    }
+   ]
+  },
+  "output": [
+   {
+    "type": "text",
+    "text": "x"
+   },
+   {
+    "type": "text",
+    "text": "Image: screenshot-101112.png"
+   },
+   {
+    "type": "image_url",
+    "image_url": {
+     "url": "data:image/png;base64,BBBB",
+     "detail": "high"
+    }
+   },
+   {
+    "type": "text",
+    "text": "Image: b.jpg"
+   },
+   {
+    "type": "image_url",
+    "image_url": {
+     "url": "data:image/jpeg;base64,CC",
+     "detail": "high"
+    }
+   }
+  ]
+ },
+ {
+  "name": "text only",
+  "fn": "buildTurn",
+  "input": {
+   "name": "text only",
+   "text": "Hi",
+   "files": [],
+   "unchanged": [],
+   "removed": [],
+   "attachments": []
+  },
+  "output": {
+   "content": "Hi",
+   "text": "Hi",
+   "images": 0
+  }
+ },
+ {
+  "name": "everything",
+  "fn": "buildTurn",
+  "input": {
+   "name": "everything",
+   "text": "Fix the bug",
+   "files": [
+    {
+     "path": "src/Order.cs",
+     "content": "using System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n"
+    },
+    {
+     "path": "src/app.tsx",
+     "content": "import { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n"
+    },
+    {
+     "path": "web/index.HTML",
+     "content": "<p>x</p>",
+     "condensed": true
+    },
+    {
+     "path": "icons/logo.svg",
+     "content": "<svg/>"
+    },
+    {
+     "path": "scripts/run.sh",
+     "content": "echo hi"
+    },
+    {
+     "path": "README",
+     "content": ""
+    },
+    {
+     "path": "shots/a.png",
+     "image": "data:image/png;base64,AAAA"
+    },
+    {
+     "path": "bin/blob.dat"
+    }
+   ],
+   "unchanged": [
+    "src/Keep.cs"
+   ],
+   "removed": [
+    "src/Gone.cs",
+    "x.ts"
+   ],
+   "attachments": [
+    {
+     "name": "screenshot-101112.png",
+     "url": "data:image/png;base64,BBBB"
+    }
+   ]
+  },
+  "output": {
+   "content": [
+    {
+     "type": "text",
+     "text": "# Context files (8)\n\n### FILE: src/Order.cs\n```csharp\nusing System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n\n```\n### FILE: src/app.tsx\n```typescript\nimport { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n\n```\n### FILE: web/index.HTML (condensed reference, read-only: do not return this file)\nEmbedded images, fonts, minified scripts/styles and long path data were replaced by placeholders.\n```html\n<p>x</p>\n```\n### FILE: icons/logo.svg\n```html\n<svg/>\n```\n### FILE: scripts/run.sh\n```bash\necho hi\n```\n### FILE: README\n```\n\n```\n\nImage files (attached as pictures below):\n- shots/a.png\n\nAlso selected, contents not available:\n- bin/blob.dat\n\n# Unchanged files\n\nStill in context, unchanged since sent earlier in this conversation:\n- src/Keep.cs\n\n# Removed from context\n\nIgnore these files from earlier messages:\n- src/Gone.cs\n- x.ts\n\n# Request\n\nFix the bug"
+    },
+    {
+     "type": "text",
+     "text": "Image: shots/a.png"
+    },
+    {
+     "type": "image_url",
+     "image_url": {
+      "url": "data:image/png;base64,AAAA",
+      "detail": "high"
+     }
+    },
+    {
+     "type": "text",
+     "text": "Image: screenshot-101112.png"
+    },
+    {
+     "type": "image_url",
+     "image_url": {
+      "url": "data:image/png;base64,BBBB",
+      "detail": "high"
+     }
+    }
+   ],
+   "text": "# Context files (8)\n\n### FILE: src/Order.cs\n```csharp\nusing System;\nusing System.Threading.Tasks;\n\nnamespace Shop.Orders;\n\npublic class OrderService\n{\n    private readonly IOrderRepository _repo;\n\n    public OrderService(IOrderRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task<Order> GetAsync(int id)\n    {\n        var order = await _repo.FindAsync(id);\n        if (order is null) throw new NotFoundException(id);\n        return order;\n    }\n\n    public void Cancel(Order order)\n    {\n        order.Status = OrderStatus.Cancelled;\n        _repo.Save(order);\n    }\n\n    internal static decimal Total(Order order) => order.Lines.Sum(l => l.Price * l.Quantity);\n}\n\n```\n### FILE: src/app.tsx\n```typescript\nimport { useState } from 'react'\n\nexport function Counter({ start = 0 }: { start?: number }) {\n  const [n, setN] = useState(start)\n  return <button onClick={() => setN(n + 1)}>Clicked {n} times</button>\n}\n\n```\n### FILE: web/index.HTML (condensed reference, read-only: do not return this file)\nEmbedded images, fonts, minified scripts/styles and long path data were replaced by placeholders.\n```html\n<p>x</p>\n```\n### FILE: icons/logo.svg\n```html\n<svg/>\n```\n### FILE: scripts/run.sh\n```bash\necho hi\n```\n### FILE: README\n```\n\n```\n\nImage files (attached as pictures below):\n- shots/a.png\n\nAlso selected, contents not available:\n- bin/blob.dat\n\n# Unchanged files\n\nStill in context, unchanged since sent earlier in this conversation:\n- src/Keep.cs\n\n# Removed from context\n\nIgnore these files from earlier messages:\n- src/Gone.cs\n- x.ts\n\n# Request\n\nFix the bug\nImage: shots/a.png\n\nImage: screenshot-101112.png\n",
+   "images": 2
+  }
+ },
+ {
+  "name": "unchanged only",
+  "fn": "buildTurn",
+  "input": {
+   "name": "unchanged only",
+   "text": "Again",
+   "files": [],
+   "unchanged": [
+    "a",
+    "b"
+   ],
+   "removed": [],
+   "attachments": []
+  },
+  "output": {
+   "content": "# Unchanged files\n\nStill in context, unchanged since sent earlier in this conversation:\n- a\n- b\n\n# Request\n\nAgain",
+   "text": "# Unchanged files\n\nStill in context, unchanged since sent earlier in this conversation:\n- a\n- b\n\n# Request\n\nAgain",
+   "images": 0
+  }
+ },
+ {
+  "name": "attachments only",
+  "fn": "buildTurn",
+  "input": {
+   "name": "attachments only",
+   "text": "Look",
+   "files": [],
+   "unchanged": [],
+   "removed": [],
+   "attachments": [
+    {
+     "name": "screenshot-101112.png",
+     "url": "data:image/png;base64,BBBB"
+    }
+   ]
+  },
+  "output": {
+   "content": [
+    {
+     "type": "text",
+     "text": "Look"
+    },
+    {
+     "type": "text",
+     "text": "Image: screenshot-101112.png"
+    },
+    {
+     "type": "image_url",
+     "image_url": {
+      "url": "data:image/png;base64,BBBB",
+      "detail": "high"
+     }
+    }
+   ],
+   "text": "Look\nImage: screenshot-101112.png\n",
+   "images": 1
+  }
+ },
+ {
+  "name": "REFERENCE_NOTE",
+  "fn": "const",
+  "input": null,
+  "output": "(condensed reference, read-only: do not return this file)"
+ }
+]

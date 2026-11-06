@@ -1,0 +1,4509 @@
+[
+ {
+  "name": "pickable",
+  "fn": "pickableFiles",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ]
+  },
+  "output": [
+   "README.md",
+   "docs/Guide.MD",
+   "docs/blank-excl.txt",
+   "lib/util.ts",
+   "src/App.tsx",
+   "src/lib/Big.json",
+   "src/lib/diff.ts",
+   "src/lib/logo.png",
+   "src/page.html"
+  ]
+ },
+ {
+  "name": "selectable",
+  "fn": "selectableFiles",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ]
+  },
+  "output": [
+   "src/App.tsx",
+   "src/lib/diff.ts",
+   "src/lib/logo.png",
+   "src/page.html",
+   "README.md",
+   "docs/Guide.MD",
+   "docs/blank-excl.txt",
+   "lib/util.ts"
+  ]
+ },
+ {
+  "name": "sort",
+  "fn": "sortNodes",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ]
+  },
+  "output": [
+   "src",
+   "docs",
+   "lib",
+   "package-lock.json",
+   "README.md"
+  ]
+ },
+ {
+  "name": "sort src",
+  "fn": "sortNodes",
+  "input": {
+   "nodes": [
+    {
+     "name": "App.tsx",
+     "path": "src/App.tsx",
+     "kind": "file",
+     "tokens": 1200
+    },
+    {
+     "name": "lib",
+     "path": "src/lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "diff.ts",
+       "path": "src/lib/diff.ts",
+       "kind": "file",
+       "tokens": 900,
+       "changedOnDisk": true
+      },
+      {
+       "name": "Big.json",
+       "path": "src/lib/Big.json",
+       "kind": "file",
+       "tokens": 90000,
+       "excluded": "too large (90k tokens)"
+      },
+      {
+       "name": "logo.png",
+       "path": "src/lib/logo.png",
+       "kind": "file",
+       "tokens": 765,
+       "image": true
+      }
+     ]
+    },
+    {
+     "name": "page.html",
+     "path": "src/page.html",
+     "kind": "file",
+     "tokens": 3000,
+     "condensedFrom": 41000
+    },
+    {
+     "name": "node_modules",
+     "path": "src/node_modules",
+     "kind": "dir",
+     "excluded": "ignored: node_modules",
+     "children": [
+      {
+       "name": "x.js",
+       "path": "src/node_modules/x.js",
+       "kind": "file",
+       "tokens": 5
+      }
+     ]
+    },
+    {
+     "name": "empty",
+     "path": "src/empty",
+     "kind": "dir",
+     "children": []
+    }
+   ]
+  },
+  "output": [
+   "src/lib",
+   "src/node_modules",
+   "src/empty",
+   "src/App.tsx",
+   "src/page.html"
+  ]
+ },
+ {
+  "name": "find ",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": ""
+  },
+  "output": null
+ },
+ {
+  "name": "find src/lib/diff.ts",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "src/lib/diff.ts"
+  },
+  "output": "src/lib/diff.ts"
+ },
+ {
+  "name": "find src",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "src"
+  },
+  "output": "src"
+ },
+ {
+  "name": "find src/lib",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "src/lib"
+  },
+  "output": "src/lib"
+ },
+ {
+  "name": "find lib/util.ts",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "lib/util.ts"
+  },
+  "output": "lib/util.ts"
+ },
+ {
+  "name": "find missing",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "missing"
+  },
+  "output": null
+ },
+ {
+  "name": "find src/node_modules/x.js",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "src/node_modules/x.js"
+  },
+  "output": "src/node_modules/x.js"
+ },
+ {
+  "name": "find docs/Guide.MD",
+  "fn": "findNode",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "path": "docs/Guide.MD"
+  },
+  "output": "docs/Guide.MD"
+ },
+ {
+  "name": "filter ",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": ""
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "App.tsx",
+      "path": "src/App.tsx",
+      "kind": "file",
+      "tokens": 1200
+     },
+     {
+      "name": "lib",
+      "path": "src/lib",
+      "kind": "dir",
+      "children": [
+       {
+        "name": "diff.ts",
+        "path": "src/lib/diff.ts",
+        "kind": "file",
+        "tokens": 900,
+        "changedOnDisk": true
+       },
+       {
+        "name": "Big.json",
+        "path": "src/lib/Big.json",
+        "kind": "file",
+        "tokens": 90000,
+        "excluded": "too large (90k tokens)"
+       },
+       {
+        "name": "logo.png",
+        "path": "src/lib/logo.png",
+        "kind": "file",
+        "tokens": 765,
+        "image": true
+       }
+      ]
+     },
+     {
+      "name": "page.html",
+      "path": "src/page.html",
+      "kind": "file",
+      "tokens": 3000,
+      "condensedFrom": 41000
+     },
+     {
+      "name": "node_modules",
+      "path": "src/node_modules",
+      "kind": "dir",
+      "excluded": "ignored: node_modules",
+      "children": [
+       {
+        "name": "x.js",
+        "path": "src/node_modules/x.js",
+        "kind": "file",
+        "tokens": 5
+       }
+      ]
+     },
+     {
+      "name": "empty",
+      "path": "src/empty",
+      "kind": "dir",
+      "children": []
+     }
+    ]
+   },
+   {
+    "name": "package-lock.json",
+    "path": "package-lock.json",
+    "kind": "file",
+    "tokens": 50000,
+    "excluded": "lock file"
+   },
+   {
+    "name": "README.md",
+    "path": "README.md",
+    "kind": "file"
+   },
+   {
+    "name": "docs",
+    "path": "docs",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "Guide.MD",
+      "path": "docs/Guide.MD",
+      "kind": "file",
+      "tokens": 400
+     },
+     {
+      "name": "blank-excl.txt",
+      "path": "docs/blank-excl.txt",
+      "kind": "file",
+      "tokens": 7,
+      "excluded": ""
+     }
+    ]
+   },
+   {
+    "name": "lib",
+    "path": "lib",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "util.ts",
+      "path": "lib/util.ts",
+      "kind": "file",
+      "tokens": 2000
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "filter   ",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": "  "
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "App.tsx",
+      "path": "src/App.tsx",
+      "kind": "file",
+      "tokens": 1200
+     },
+     {
+      "name": "lib",
+      "path": "src/lib",
+      "kind": "dir",
+      "children": [
+       {
+        "name": "diff.ts",
+        "path": "src/lib/diff.ts",
+        "kind": "file",
+        "tokens": 900,
+        "changedOnDisk": true
+       },
+       {
+        "name": "Big.json",
+        "path": "src/lib/Big.json",
+        "kind": "file",
+        "tokens": 90000,
+        "excluded": "too large (90k tokens)"
+       },
+       {
+        "name": "logo.png",
+        "path": "src/lib/logo.png",
+        "kind": "file",
+        "tokens": 765,
+        "image": true
+       }
+      ]
+     },
+     {
+      "name": "page.html",
+      "path": "src/page.html",
+      "kind": "file",
+      "tokens": 3000,
+      "condensedFrom": 41000
+     },
+     {
+      "name": "node_modules",
+      "path": "src/node_modules",
+      "kind": "dir",
+      "excluded": "ignored: node_modules",
+      "children": [
+       {
+        "name": "x.js",
+        "path": "src/node_modules/x.js",
+        "kind": "file",
+        "tokens": 5
+       }
+      ]
+     },
+     {
+      "name": "empty",
+      "path": "src/empty",
+      "kind": "dir",
+      "children": []
+     }
+    ]
+   },
+   {
+    "name": "package-lock.json",
+    "path": "package-lock.json",
+    "kind": "file",
+    "tokens": 50000,
+    "excluded": "lock file"
+   },
+   {
+    "name": "README.md",
+    "path": "README.md",
+    "kind": "file"
+   },
+   {
+    "name": "docs",
+    "path": "docs",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "Guide.MD",
+      "path": "docs/Guide.MD",
+      "kind": "file",
+      "tokens": 400
+     },
+     {
+      "name": "blank-excl.txt",
+      "path": "docs/blank-excl.txt",
+      "kind": "file",
+      "tokens": 7,
+      "excluded": ""
+     }
+    ]
+   },
+   {
+    "name": "lib",
+    "path": "lib",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "util.ts",
+      "path": "lib/util.ts",
+      "kind": "file",
+      "tokens": 2000
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "filter LIB",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": "LIB"
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "lib",
+      "path": "src/lib",
+      "kind": "dir",
+      "children": [
+       {
+        "name": "diff.ts",
+        "path": "src/lib/diff.ts",
+        "kind": "file",
+        "tokens": 900,
+        "changedOnDisk": true
+       },
+       {
+        "name": "Big.json",
+        "path": "src/lib/Big.json",
+        "kind": "file",
+        "tokens": 90000,
+        "excluded": "too large (90k tokens)"
+       },
+       {
+        "name": "logo.png",
+        "path": "src/lib/logo.png",
+        "kind": "file",
+        "tokens": 765,
+        "image": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "lib",
+    "path": "lib",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "util.ts",
+      "path": "lib/util.ts",
+      "kind": "file",
+      "tokens": 2000
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "filter diff",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": "diff"
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "lib",
+      "path": "src/lib",
+      "kind": "dir",
+      "children": [
+       {
+        "name": "diff.ts",
+        "path": "src/lib/diff.ts",
+        "kind": "file",
+        "tokens": 900,
+        "changedOnDisk": true
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "filter md",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": "md"
+  },
+  "output": [
+   {
+    "name": "README.md",
+    "path": "README.md",
+    "kind": "file"
+   },
+   {
+    "name": "docs",
+    "path": "docs",
+    "kind": "dir",
+    "children": [
+     {
+      "name": "Guide.MD",
+      "path": "docs/Guide.MD",
+      "kind": "file",
+      "tokens": 400
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "filter nothing",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": "nothing"
+  },
+  "output": []
+ },
+ {
+  "name": "filter .json",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": ".json"
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "lib",
+      "path": "src/lib",
+      "kind": "dir",
+      "children": [
+       {
+        "name": "Big.json",
+        "path": "src/lib/Big.json",
+        "kind": "file",
+        "tokens": 90000,
+        "excluded": "too large (90k tokens)"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "package-lock.json",
+    "path": "package-lock.json",
+    "kind": "file",
+    "tokens": 50000,
+    "excluded": "lock file"
+   }
+  ]
+ },
+ {
+  "name": "filter  App ",
+  "fn": "filterTree",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "query": " App "
+  },
+  "output": [
+   {
+    "name": "src",
+    "path": "src",
+    "kind": "dir",
+    "mtimeMs": 1712345678901.25,
+    "children": [
+     {
+      "name": "App.tsx",
+      "path": "src/App.tsx",
+      "kind": "file",
+      "tokens": 1200
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "selection 0",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": []
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 4,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/Big.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    }
+   },
+   "check": {
+    "src": "off",
+    "src/App.tsx": "off",
+    "src/lib": "off",
+    "src/lib/diff.ts": "off",
+    "src/lib/Big.json": "off",
+    "src/lib/logo.png": "off",
+    "src/page.html": "off",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "off",
+    "lib/util.ts": "off"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": null
+  }
+ },
+ {
+  "name": "selection 1",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "src/App.tsx"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 4,
+     "selected": 1,
+     "selectedTokens": 1200
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 1200
+    },
+    "src/lib": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/Big.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    }
+   },
+   "check": {
+    "src": "mixed",
+    "src/App.tsx": "on",
+    "src/lib": "off",
+    "src/lib/diff.ts": "off",
+    "src/lib/Big.json": "off",
+    "src/lib/logo.png": "off",
+    "src/page.html": "off",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "off",
+    "lib/util.ts": "off"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": {
+    "name": "src",
+    "tokens": 1200
+   }
+  }
+ },
+ {
+  "name": "selection 2",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "src/App.tsx",
+    "src/lib/diff.ts",
+    "src/lib/logo.png",
+    "src/page.html"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 4,
+     "selected": 4,
+     "selectedTokens": 5865
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 1200
+    },
+    "src/lib": {
+     "files": 2,
+     "selected": 2,
+     "selectedTokens": 1665
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 900
+    },
+    "src/lib/Big.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 765
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 3000
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    }
+   },
+   "check": {
+    "src": "on",
+    "src/App.tsx": "on",
+    "src/lib": "on",
+    "src/lib/diff.ts": "on",
+    "src/lib/Big.json": "off",
+    "src/lib/logo.png": "on",
+    "src/page.html": "on",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "off",
+    "lib/util.ts": "off"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": {
+    "name": "src",
+    "tokens": 4200
+   }
+  }
+ },
+ {
+  "name": "selection 3",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "src/lib/Big.json"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 5,
+     "selected": 1,
+     "selectedTokens": 90000
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib": {
+     "files": 3,
+     "selected": 1,
+     "selectedTokens": 90000
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/Big.json": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 90000
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    }
+   },
+   "check": {
+    "src": "mixed",
+    "src/App.tsx": "off",
+    "src/lib": "mixed",
+    "src/lib/diff.ts": "off",
+    "src/lib/Big.json": "on",
+    "src/lib/logo.png": "off",
+    "src/page.html": "off",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "off",
+    "lib/util.ts": "off"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": null
+  }
+ },
+ {
+  "name": "selection 4",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "src/App.tsx",
+    "src/lib/diff.ts",
+    "src/lib/logo.png",
+    "src/page.html",
+    "src/lib/Big.json",
+    "README.md",
+    "docs/Guide.MD",
+    "lib/util.ts",
+    "docs/blank-excl.txt"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 5,
+     "selected": 5,
+     "selectedTokens": 95865
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 1200
+    },
+    "src/lib": {
+     "files": 3,
+     "selected": 3,
+     "selectedTokens": 91665
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 900
+    },
+    "src/lib/Big.json": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 90000
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 765
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 3000
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 2,
+     "selectedTokens": 407
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 400
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 7
+    },
+    "lib": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    }
+   },
+   "check": {
+    "src": "on",
+    "src/App.tsx": "on",
+    "src/lib": "on",
+    "src/lib/diff.ts": "on",
+    "src/lib/Big.json": "on",
+    "src/lib/logo.png": "on",
+    "src/page.html": "on",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "on",
+    "docs": "on",
+    "docs/Guide.MD": "on",
+    "docs/blank-excl.txt": "on",
+    "lib": "on",
+    "lib/util.ts": "on"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": {
+    "name": "src",
+    "tokens": 4200
+   }
+  }
+ },
+ {
+  "name": "selection 5",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "package-lock.json",
+    "src/node_modules/x.js",
+    "lib/util.ts"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 4,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/Big.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 5
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    }
+   },
+   "check": {
+    "src": "off",
+    "src/App.tsx": "off",
+    "src/lib": "off",
+    "src/lib/diff.ts": "off",
+    "src/lib/Big.json": "off",
+    "src/lib/logo.png": "off",
+    "src/page.html": "off",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "on",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "on",
+    "lib/util.ts": "on"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": {
+    "name": "lib",
+    "tokens": 2000
+   }
+  }
+ },
+ {
+  "name": "selection 6",
+  "fn": "selection",
+  "input": {
+   "nodes": [
+    {
+     "name": "src",
+     "path": "src",
+     "kind": "dir",
+     "mtimeMs": 1712345678901.25,
+     "children": [
+      {
+       "name": "App.tsx",
+       "path": "src/App.tsx",
+       "kind": "file",
+       "tokens": 1200
+      },
+      {
+       "name": "lib",
+       "path": "src/lib",
+       "kind": "dir",
+       "children": [
+        {
+         "name": "diff.ts",
+         "path": "src/lib/diff.ts",
+         "kind": "file",
+         "tokens": 900,
+         "changedOnDisk": true
+        },
+        {
+         "name": "Big.json",
+         "path": "src/lib/Big.json",
+         "kind": "file",
+         "tokens": 90000,
+         "excluded": "too large (90k tokens)"
+        },
+        {
+         "name": "logo.png",
+         "path": "src/lib/logo.png",
+         "kind": "file",
+         "tokens": 765,
+         "image": true
+        }
+       ]
+      },
+      {
+       "name": "page.html",
+       "path": "src/page.html",
+       "kind": "file",
+       "tokens": 3000,
+       "condensedFrom": 41000
+      },
+      {
+       "name": "node_modules",
+       "path": "src/node_modules",
+       "kind": "dir",
+       "excluded": "ignored: node_modules",
+       "children": [
+        {
+         "name": "x.js",
+         "path": "src/node_modules/x.js",
+         "kind": "file",
+         "tokens": 5
+        }
+       ]
+      },
+      {
+       "name": "empty",
+       "path": "src/empty",
+       "kind": "dir",
+       "children": []
+      }
+     ]
+    },
+    {
+     "name": "package-lock.json",
+     "path": "package-lock.json",
+     "kind": "file",
+     "tokens": 50000,
+     "excluded": "lock file"
+    },
+    {
+     "name": "README.md",
+     "path": "README.md",
+     "kind": "file"
+    },
+    {
+     "name": "docs",
+     "path": "docs",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "Guide.MD",
+       "path": "docs/Guide.MD",
+       "kind": "file",
+       "tokens": 400
+      },
+      {
+       "name": "blank-excl.txt",
+       "path": "docs/blank-excl.txt",
+       "kind": "file",
+       "tokens": 7,
+       "excluded": ""
+      }
+     ]
+    },
+    {
+     "name": "lib",
+     "path": "lib",
+     "kind": "dir",
+     "children": [
+      {
+       "name": "util.ts",
+       "path": "lib/util.ts",
+       "kind": "file",
+       "tokens": 2000
+      }
+     ]
+    }
+   ],
+   "selected": [
+    "lib/util.ts",
+    "src/lib/diff.ts"
+   ]
+  },
+  "output": {
+   "stats": {
+    "src": {
+     "files": 4,
+     "selected": 1,
+     "selectedTokens": 900
+    },
+    "src/App.tsx": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib": {
+     "files": 2,
+     "selected": 1,
+     "selectedTokens": 900
+    },
+    "src/lib/diff.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 900
+    },
+    "src/lib/Big.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/lib/logo.png": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/page.html": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/node_modules/x.js": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "src/empty": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "package-lock.json": {
+     "files": 0,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "README.md": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs": {
+     "files": 2,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/Guide.MD": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "docs/blank-excl.txt": {
+     "files": 1,
+     "selected": 0,
+     "selectedTokens": 0
+    },
+    "lib": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    },
+    "lib/util.ts": {
+     "files": 1,
+     "selected": 1,
+     "selectedTokens": 2000
+    }
+   },
+   "check": {
+    "src": "mixed",
+    "src/App.tsx": "off",
+    "src/lib": "mixed",
+    "src/lib/diff.ts": "on",
+    "src/lib/Big.json": "off",
+    "src/lib/logo.png": "off",
+    "src/page.html": "off",
+    "src/node_modules": "off",
+    "src/node_modules/x.js": "off",
+    "src/empty": "off",
+    "package-lock.json": "off",
+    "README.md": "off",
+    "docs": "off",
+    "docs/Guide.MD": "off",
+    "docs/blank-excl.txt": "off",
+    "lib": "on",
+    "lib/util.ts": "on"
+   },
+   "overridable": [
+    "src/lib/Big.json"
+   ],
+   "biggest": {
+    "name": "lib",
+    "tokens": 2900
+   }
+  }
+ }
+]

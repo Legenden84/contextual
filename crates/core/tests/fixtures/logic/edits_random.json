@@ -1,0 +1,4871 @@
+[
+ {
+  "name": "random 0",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀a\nc\npublic class A\nx = 2\npublic class A\nb",
+   "edits": [
+    {
+     "search": "x = 2\npublic class A\nb",
+     "replace": "  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀a\nc\npublic class A\n  a",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 1",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\ta\nvoid F()\nvoid F()x = 2\n\ta\nc\naa\né😀\n\rc\n",
+   "edits": [
+    {
+     "search": "\ta\nc\naa",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\ta\nvoid F()\nvoid F()x = 2\né😀\n\rc\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 2",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\n😁\n ",
+   "edits": [
+    {
+     "search": "\r",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "b\n😁\n ",
+   "failed": [
+    {
+     "search": "\r",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 3",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a{",
+   "edits": [
+    {
+     "search": "\n  a{\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 4",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\nca\npublic class A\nb\né😀\n",
+   "edits": [
+    {
+     "search": "é😀\n",
+     "replace": "é😀\r\n{"
+    },
+    {
+     "search": "ca",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\npublic class A\nb\né😀\n{\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 5",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a ",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": "😁\n"
+    },
+    {
+     "search": "a ",
+     "replace": "x = 2\nvoid F()"
+    },
+    {
+     "search": "a ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "😁",
+   "failed": [
+    {
+     "search": "a ",
+     "replace": "x = 2\nvoid F()"
+    },
+    {
+     "search": "a ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 6",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a \n \n\ta\nb\n😁\n}\n\ta\nc\n\ta",
+   "edits": [
+    {
+     "search": "😁",
+     "replace": "}\nc"
+    },
+    {
+     "search": " \n\ta",
+     "replace": ""
+    },
+    {
+     "search": "}\n\ta",
+     "replace": "a"
+    }
+   ]
+  },
+  "output": {
+   "content": "a \nb\n}\nc\na\nc\n\ta",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 7",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\n x = 2\na\n\r\nc\n{{\n}\nb\nvoid F()\na\npublic class A\n",
+   "edits": [
+    {
+     "search": "\nc\n{{\n}\n\n",
+     "replace": "\r\n "
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n x = 2\na\n\nb\nvoid F()\na\npublic class A\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 8",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\npublic class A\n\r\na\nx = 2\na \nb\n\ta\n",
+   "edits": [
+    {
+     "search": "\r",
+     "replace": " "
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\npublic class A\n\na\nx = 2\na \nb\n\ta\n",
+   "failed": [
+    {
+     "search": "\r",
+     "replace": " "
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 9",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\nc\na \n}\né😀\nx = 2b\na \né😀\nx = 2\n}\n\ta\n",
+   "edits": [
+    {
+     "search": "\nc\na \n\n",
+     "replace": "x = 2\n😁😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\nx = 2\n😁😁\n}\né😀\nx = 2b\na \né😀\nx = 2\n}\n\ta\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 10",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nb\n\na\n  a{\na b\nvoid F()x = 1\n",
+   "edits": [
+    {
+     "search": "a\nb",
+     "replace": "{c"
+    }
+   ]
+  },
+  "output": {
+   "content": "{c\n\na\n  a{\na b\nvoid F()x = 1\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 11",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\nb",
+   "edits": [
+    {
+     "search": "\nb\nb\n\n",
+     "replace": "{a\nb"
+    },
+    {
+     "search": "b",
+     "replace": "x = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "{a\nx = 1",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 12",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\n\tax = 1\n\n\ta\na\n}\n\nc\na \nx = 1\nx = 2 \n",
+   "edits": [
+    {
+     "search": "x = 2 \n",
+     "replace": ""
+    },
+    {
+     "search": "\n    a\n\n",
+     "replace": "😁\n"
+    },
+    {
+     "search": "x = 1\nx = 2 ",
+     "replace": "é😀\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "c\n\tax = 1\n\n😁\na\n}\n\nc\na \nx = 1\n",
+   "failed": [
+    {
+     "search": "x = 1\nx = 2 ",
+     "replace": "é😀\ta"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 13",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\n{\n\taa\na\nb\n \n  a\n \navoid F()\n\na\n",
+   "edits": [
+    {
+     "search": "avoid F()\n\na",
+     "replace": "void F()"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\n{\n\taa\na\nb\n \n  a\n \nvoid F()\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 14",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\nx = 1\n  a\n  a\n  a\n\r\na\nb\r\n  a\n",
+   "edits": [
+    {
+     "search": "  a",
+     "replace": ""
+    },
+    {
+     "search": "c",
+     "replace": "\ta\n😁a"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": "}\n  a😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n😁a\nx = 1\n  a\n  a\n\na\nb\n  a\n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": "}\n  a😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 15",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\na\n  a\n{\npublic class Avoid F()\n\ta\na \n{\n",
+   "edits": [
+    {
+     "search": "\n}\n\n",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "public class Avoid F()",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n  a\n{\n\ta\na \n{\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 16",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a b\nx = 1\nb\nx = 2\nx = 2x = 2\nx = 2\n😁 \n \n}\n\n",
+   "edits": [
+    {
+     "search": "x = 2",
+     "replace": ""
+    },
+    {
+     "search": "\n😁 \n \n}\n\n",
+     "replace": ""
+    },
+    {
+     "search": "a b",
+     "replace": "public class A\nb"
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\nb\nx = 1\nb\nx = 2x = 2\nx = 2\n\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 17",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": "public class A"
+    },
+    {
+     "search": "",
+     "replace": "\ta\ta\nx = 2"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\ta\nx = 2\n",
+   "failed": [
+    {
+     "search": "void F()",
+     "replace": "public class A"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 18",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \nc\npublic class A\npublic class Ax = 1\nx = 1\n\na \n}\n\na \n😁\n",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": ""
+    },
+    {
+     "search": "b",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": " \nc\npublic class A\npublic class Ax = 1\nx = 1\n\n}\n\na \n😁\n",
+   "failed": [
+    {
+     "search": "b",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 19",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  ax = 2\nx = 2\nvoid F()\n{ \n",
+   "edits": [
+    {
+     "search": "\n  ax = 2\nx = 2\n\n",
+     "replace": "x = 1\nx = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\nx = 2\nvoid F()\n{ \n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 20",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 21",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\né😀\nbc\né😀c\nx = 2é😀\nb\nc\nx = 1\n",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "bc\né😀c\nx = 2é😀",
+     "replace": ""
+    },
+    {
+     "search": "  a\né😀",
+     "replace": "}a "
+    }
+   ]
+  },
+  "output": {
+   "content": "  a\nb\nc\nx = 1\n",
+   "failed": [
+    {
+     "search": "  a\né😀",
+     "replace": "}a "
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 22",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\npublic class Ax = 2\n\n\r\n",
+   "edits": [
+    {
+     "search": "b",
+     "replace": "}"
+    }
+   ]
+  },
+  "output": {
+   "content": "}\npublic class Ax = 2\n\n\n",
+   "failed": [
+    {
+     "search": "b",
+     "replace": "}"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 23",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a \n\nx = 2\n  a\n\r\n{\r\n\r\npublic class Avoid F()\na x = 1\n}",
+   "edits": [
+    {
+     "search": "",
+     "replace": "void F()"
+    }
+   ]
+  },
+  "output": {
+   "content": "  a \n\nx = 2\n  a\n\n{\n\npublic class Avoid F()\na x = 1\n}",
+   "failed": [
+    {
+     "search": "",
+     "replace": "void F()"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 24",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\nx = 2\nb}\n\ta{\nb\n😁\npublic class A\npublic class A\npublic class A\nb\n  avoid F()\n",
+   "edits": [
+    {
+     "search": "b}\na{",
+     "replace": "\r"
+    },
+    {
+     "search": "  avoid F()",
+     "replace": "x = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "\nx = 2\n\r\nb\n😁\npublic class A\npublic class A\npublic class A\nb\nx = 2\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 25",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\rc\n",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\rc\n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 26",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "\n\n\n\n",
+     "replace": "public class A"
+    },
+    {
+     "search": "",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 27",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}é😀\npublic class A\nx = 2\na \n\r\né😀\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": "x = 1a "
+    }
+   ]
+  },
+  "output": {
+   "content": "}é😀\npublic class A\nx = 2\na \n\né😀\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "x = 1a "
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 28",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\r\nvoid F()\n\ta\ta\n{\nx = 1void F()\n\n\r\n}  a\n😁\nx = 1void F()\npublic class A\n",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": ""
+    },
+    {
+     "search": "\r",
+     "replace": "{\na"
+    },
+    {
+     "search": "{\nx = 1void F()",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "c\n\ta\ta\n\n\n}  a\n😁\nx = 1void F()\npublic class A\n",
+   "failed": [
+    {
+     "search": "\r",
+     "replace": "{\na"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 29",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta}",
+   "edits": [
+    {
+     "search": "\n\ta}\n\n",
+     "replace": "x = 1\n\ta"
+    },
+    {
+     "search": "a}",
+     "replace": ""
+    },
+    {
+     "search": "\ta}",
+     "replace": "void F()\na b"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\n\ta",
+   "failed": [
+    {
+     "search": "a}",
+     "replace": ""
+    },
+    {
+     "search": "\ta}",
+     "replace": "void F()\na b"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 30",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\naa \nx = 2 \na \n😁void F()\n",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "c\n  a"
+    },
+    {
+     "search": "x = 2 \na ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\naa \nx = 2 \n😁void F()\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "c\n  a"
+    },
+    {
+     "search": "x = 2 \na ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 31",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁x = 2\nx = 1é😀\nx = 1\nx = 2\npublic class A\npublic class A\n{\n \n \r",
+   "edits": [
+    {
+     "search": "\n😁x = 2\nx = 1é😀\n\n",
+     "replace": ""
+    },
+    {
+     "search": "a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\nx = 2\npublic class A\npublic class A\n{\n \n \r",
+   "failed": [
+    {
+     "search": "a",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 32",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n\ta\n b\nx = 1\n\ta",
+   "edits": [
+    {
+     "search": "x = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\n\ta\n b\n\ta",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 33",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\nx = 1\npublic class A\n\ta\n😁\nx = 2\nb\npublic class A\n ",
+   "edits": [
+    {
+     "search": "x = 2\nb",
+     "replace": "a"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\nx = 1\npublic class A\n\ta\n😁\na\npublic class A\n ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 34",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 35",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \n\r\n😁 \n",
+   "edits": [
+    {
+     "search": "\r\n😁 \n",
+     "replace": ""
+    },
+    {
+     "search": " \n\r",
+     "replace": ""
+    },
+    {
+     "search": "é😀",
+     "replace": "a{\né😀b"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "é😀",
+     "replace": "a{\né😀b"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 36",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\na \n  a\ta\né😀\npublic class A\na \na \n  a\n",
+   "edits": [
+    {
+     "search": "a \n    a\ta",
+     "replace": "public class A"
+    },
+    {
+     "search": "a \na \n  a",
+     "replace": "a\nc"
+    },
+    {
+     "search": "a \na \n    a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\npublic class A\né😀\npublic class A\na\nc\n",
+   "failed": [
+    {
+     "search": "a \na \n    a",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 37",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c}\n{\né😀\nx = 1\n \nc",
+   "edits": [
+    {
+     "search": " ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "c}\n{\né😀\nx = 1\n \nc",
+   "failed": [
+    {
+     "search": " ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 38",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a \n \npublic class A\n\n  a\n",
+   "edits": [
+    {
+     "search": "x = 2",
+     "replace": "x = 1\n}"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a \n \npublic class A\n\n  a\n",
+   "failed": [
+    {
+     "search": "x = 2",
+     "replace": "x = 1\n}"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 39",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 40",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\n \r\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "}",
+     "replace": ""
+    },
+    {
+     "search": " \r\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n \n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "}",
+     "replace": ""
+    },
+    {
+     "search": " \r\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 41",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\nx = 1\n  a  a\n{\n😁\nx = 2\nc\n",
+   "edits": [
+    {
+     "search": "\nc\n\n\n",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\nx = 1\n  a  a\n{\n😁\nx = 2\n😁\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 42",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\nx = 2\n\ta\n\r\n ",
+   "edits": [
+    {
+     "search": "\r\n ",
+     "replace": ""
+    },
+    {
+     "search": "x = 2\n\ta\n\r",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\n ",
+   "failed": [
+    {
+     "search": "\r\n ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 43",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\tac\n\rx = 2\na ",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\tac\n\rx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 44",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "}\n",
+   "failed": [
+    {
+     "search": "a",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 45",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\nb\nvoid F()\nvoid F()\n\ta\na\n}\n{\n{\nx = 1\nx = 1",
+   "edits": [
+    {
+     "search": "\nx = 1\nx = 1\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "c\nb\nvoid F()\nvoid F()\n\ta\na\n}\n{\n{",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 46",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\n{\nx = 1\n😁",
+   "edits": [
+    {
+     "search": "\ta\n{\nx = 1",
+     "replace": "\r\né😀}"
+    }
+   ]
+  },
+  "output": {
+   "content": "\né😀}\n😁",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 47",
+  "fn": "applyEdits",
+  "input": {
+   "original": "ba \na\nb\n}\n",
+   "edits": [
+    {
+     "search": "\n}\n\n\n",
+     "replace": ""
+    },
+    {
+     "search": "ba ",
+     "replace": "\ta\n{x = 2"
+    },
+    {
+     "search": "b",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n{x = 2\na\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 48",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\nvoid F()\nc\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "\r\nb"
+    },
+    {
+     "search": "c\nvoid F()\nc",
+     "replace": "  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "  a\n",
+   "failed": [
+    {
+     "search": "a",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "\r\nb"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 49",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\rb\npublic class A\n \nx = 2\nc\n}\nc\né😀\nx = 2x = 1\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": "a"
+    }
+   ]
+  },
+  "output": {
+   "content": "\rb\npublic class A\n \nx = 2\nc\n}\nc\né😀\nx = 2x = 1\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "a"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 50",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{a \n😁\n\ta\n\r\na\n\r\nx = 1\nx = 2\nx = 2c\na",
+   "edits": [
+    {
+     "search": "x = 2c\na",
+     "replace": "a  "
+    },
+    {
+     "search": "\r\na",
+     "replace": ""
+    },
+    {
+     "search": "\na\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{a \n😁\n\ta\n\nx = 1\nx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 51",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\nvoid F()}\n😁\npublic class Ac\n}{\n  a\n{\n\r\r\n\ta😁\n\r\né😀",
+   "edits": [
+    {
+     "search": "\n\ta😁\n\n",
+     "replace": "é😀"
+    },
+    {
+     "search": "\né😀\n\n",
+     "replace": ""
+    },
+    {
+     "search": "void F()}\n😁",
+     "replace": "😁\navoid F()"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n😁\navoid F()\npublic class Ac\n}{\n  a\n{\né😀",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 52",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A \n}\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A \n}\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 53",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\n\nx = 2\nx = 2",
+   "edits": [
+    {
+     "search": "x = 2",
+     "replace": ""
+    },
+    {
+     "search": "x = 2\nx = 2",
+     "replace": "public class A\n}"
+    }
+   ]
+  },
+  "output": {
+   "content": "\n\nx = 2",
+   "failed": [
+    {
+     "search": "x = 2\nx = 2",
+     "replace": "public class A\n}"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 54",
+  "fn": "applyEdits",
+  "input": {
+   "original": "cé😀\n\n{\n\r\n😁\n\rc\n  a\na \npublic class Apublic class A\nb\n\r",
+   "edits": [
+    {
+     "search": "{",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "cé😀\n\n\n😁\n\rc\n  a\na \npublic class Apublic class A\nb\n\r",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 55",
+  "fn": "applyEdits",
+  "input": {
+   "original": "cvoid F()\n{\nc\na \nx = 1 \npublic class A\nb\nx = 1\nx = 1\nx = 2\n",
+   "edits": [
+    {
+     "search": "{",
+     "replace": "é😀public class A\né😀\r"
+    },
+    {
+     "search": "public class A\nb\nx = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "cvoid F()\né😀public class A\né😀\r\nc\na \nx = 1 \nx = 1\nx = 2\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 56",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\nvoid F()😁\n",
+   "edits": [
+    {
+     "search": "    a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()😁\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 57",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \n \r\n é😀\né😀\n{x = 2\n\nba\nvoid F()\n \nx = 2\n",
+   "edits": [
+    {
+     "search": " \n \r",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": " \n \n é😀\né😀\n{x = 2\n\nba\nvoid F()\n \nx = 2\n",
+   "failed": [
+    {
+     "search": " \n \r",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 58",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\nx = 1a\n}\n\r\npublic class A\n😁\na \nx = 2a\n\n",
+   "edits": [
+    {
+     "search": "public class A",
+     "replace": "{\nb"
+    },
+    {
+     "search": "\nx = 1a\n\n",
+     "replace": ""
+    },
+    {
+     "search": "😁\na \nx = 2a",
+     "replace": "b\n\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n}\n\n{\nb\nb\n\ta\n\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 59",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": ""
+    },
+    {
+     "search": "void F()",
+     "replace": "  a\nx = 1"
+    },
+    {
+     "search": "void F()",
+     "replace": "public class A\n  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "void F()",
+     "replace": "  a\nx = 1"
+    },
+    {
+     "search": "void F()",
+     "replace": "public class A\n  a"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 60",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1\né😀\n",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": "c"
+    },
+    {
+     "search": "a ",
+     "replace": "b"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\nc\n",
+   "failed": [
+    {
+     "search": "a ",
+     "replace": "b"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 61",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\na \nb\né😀\n",
+   "edits": [
+    {
+     "search": "a \nb",
+     "replace": "public class A"
+    },
+    {
+     "search": "b\né😀\n",
+     "replace": ""
+    },
+    {
+     "search": "b\né😀",
+     "replace": "cx = 1\nb"
+    }
+   ]
+  },
+  "output": {
+   "content": "{\npublic class A\né😀\n",
+   "failed": [
+    {
+     "search": "b\né😀\n",
+     "replace": ""
+    },
+    {
+     "search": "b\né😀",
+     "replace": "cx = 1\nb"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 62",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\na \n",
+   "edits": [
+    {
+     "search": "a \n",
+     "replace": ""
+    },
+    {
+     "search": "b\na \n",
+     "replace": "é😀\n😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\n",
+   "failed": [
+    {
+     "search": "b\na \n",
+     "replace": "é😀\n😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 63",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1\nca\nx = 1\na\nx = 2\na",
+   "edits": [
+    {
+     "search": "a",
+     "replace": ""
+    },
+    {
+     "search": "a",
+     "replace": "a "
+    },
+    {
+     "search": "x = 1\nca\nx = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\na ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 64",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁b\nc\nx = 2\nx = 2\n\ta",
+   "edits": [
+    {
+     "search": "\n\ta\n\n",
+     "replace": "é😀\n  a"
+    },
+    {
+     "search": "\ta",
+     "replace": "\n\rx = 2"
+    },
+    {
+     "search": "\n😁b\nc\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\nx = 2\né😀\n\n\rx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 65",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\r\nx = 2public class A\npublic class A😁\n \na\n ",
+   "edits": [
+    {
+     "search": "  a",
+     "replace": "public class Aé😀"
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\nx = 2public class A\npublic class A😁\n \npublic class Aé😀\n ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 66",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 67",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\na \nc\n{\nc\n}a\n😁\nc\nb\n",
+   "edits": [
+    {
+     "search": "b\n",
+     "replace": "\ta\na}"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\na \nc\n{\nc\n}a\n😁\nc\n\ta\na}\n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 68",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\nvoid F()\ta\né😀a \n\tab\npublic class A\nb\r\n",
+   "edits": [
+    {
+     "search": "void F()\ta",
+     "replace": "x = 1x = 2"
+    },
+    {
+     "search": "public class A\nb\r\n",
+     "replace": " \r"
+    },
+    {
+     "search": "é😀a \n\tab\npublic class A",
+     "replace": "a "
+    }
+   ]
+  },
+  "output": {
+   "content": "b\nx = 1x = 2\né😀a \n\tab\n \r\n",
+   "failed": [
+    {
+     "search": "é😀a \n\tab\npublic class A",
+     "replace": "a "
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 69",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \nx = 1",
+   "edits": [
+    {
+     "search": "\ta",
+     "replace": "b\na"
+    },
+    {
+     "search": "x = 1",
+     "replace": ""
+    },
+    {
+     "search": " \nx = 1",
+     "replace": "\ta\na\r"
+    }
+   ]
+  },
+  "output": {
+   "content": " ",
+   "failed": [
+    {
+     "search": "\ta",
+     "replace": "b\na"
+    },
+    {
+     "search": " \nx = 1",
+     "replace": "\ta\na\r"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 70",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a \n😁\n{\n \nx = 1\n  a\nb\n}\nx = 1}",
+   "edits": [
+    {
+     "search": "\ta",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n{\n \nx = 1\n  a\nb\n}\nx = 1}",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 71",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \n\n",
+   "edits": [
+    {
+     "search": "    ",
+     "replace": "{\n\r"
+    },
+    {
+     "search": " \n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n\r\n",
+   "failed": [
+    {
+     "search": " \n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 72",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\na \npublic class A\nvoid F()\nvoid F()\n\na\nvoid F()\n",
+   "edits": [
+    {
+     "search": "public class A",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a \npublic class A\nvoid F()\nvoid F()\n\na\nvoid F()\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 73",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\npublic class A\nx = 2\né😀  a\nvoid F()\n\r  a\n \n",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": "\r\nvoid F()"
+    },
+    {
+     "search": "\nvoid F()\n\r  a\n \n\n",
+     "replace": "c"
+    },
+    {
+     "search": "\n \n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\nvoid F()\npublic class A\nx = 2\né😀  a\nc\n \n",
+   "failed": [
+    {
+     "search": "\n \n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 74",
+  "fn": "applyEdits",
+  "input": {
+   "original": "aé😀\n{x = 1\nx = 2\n\n}\n\r\né😀\na  \n{\npublic class A\n{",
+   "edits": [
+    {
+     "search": "a  \n{",
+     "replace": "c"
+    },
+    {
+     "search": "}",
+     "replace": ""
+    },
+    {
+     "search": "{x = 1\nx = 2\n",
+     "replace": "é😀a"
+    }
+   ]
+  },
+  "output": {
+   "content": "aé😀\né😀a\n\n\né😀\nc\npublic class A\n{",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 75",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\nx = 1\nb\n{\nb\n \nvoid F()\n}\né😀\nx = 1\n😁",
+   "edits": [
+    {
+     "search": "{\nb",
+     "replace": ""
+    },
+    {
+     "search": "😁",
+     "replace": "}\n😁"
+    },
+    {
+     "search": "\ta",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\nb\n \nvoid F()\n}\né😀\nx = 1\n}\n😁",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 76",
+  "fn": "applyEdits",
+  "input": {
+   "original": "cpublic class A",
+   "edits": [
+    {
+     "search": "cpublic class A",
+     "replace": ""
+    },
+    {
+     "search": "cpublic class A",
+     "replace": "\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "cpublic class A",
+     "replace": "\ta"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 77",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\na x = 1\nb\nb",
+   "edits": [
+    {
+     "search": "{",
+     "replace": "ca"
+    }
+   ]
+  },
+  "output": {
+   "content": "ca\na x = 1\nb\nb",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 78",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r \n\ré😀\n😁\n\n",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "\n😁\n    \n\n",
+     "replace": "\r"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 79",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "é😀",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 80",
+  "fn": "applyEdits",
+  "input": {
+   "original": "cpublic class A\nb\nx = 1\nc\n \n}\navoid F()\n\ta\n\tavoid F()\n",
+   "edits": [
+    {
+     "search": "\nc\n \n\n",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 1\nc\n\n",
+     "replace": ""
+    },
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "cpublic class A\nb\nx = 1\n \navoid F()\n\ta\n\tavoid F()\n",
+   "failed": [
+    {
+     "search": "\nx = 1\nc\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 81",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\n😁a\n}\n{\nc\n ",
+   "edits": [
+    {
+     "search": "}\n{\nc",
+     "replace": "public class A\n{"
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "}\n{\nc",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "b\n😁a\npublic class A\n{\n ",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "}\n{\nc",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 82",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\n\r\nc\n}😁\nvoid F()\n  a\n",
+   "edits": [
+    {
+     "search": "\n}😁\n\n",
+     "replace": "}{\nx = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "c\n\nc\n}{\nx = 1\nvoid F()\n  a\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 83",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "  a",
+     "replace": "x = 2\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "  a",
+     "replace": "x = 2\n"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 84",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\r\na \nx = 2a",
+   "edits": [
+    {
+     "search": "x = 2a",
+     "replace": ""
+    },
+    {
+     "search": "void F()\r\na ",
+     "replace": "}x = 1\na"
+    }
+   ]
+  },
+  "output": {
+   "content": "}x = 1\na",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 85",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\nvoid F()\n{\nx = 2public class A\nvoid F()\né😀",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": "  a\na"
+    },
+    {
+     "search": "é😀",
+     "replace": "a"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n  a\na\n{\nx = 2public class A\nvoid F()\na",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 86",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\nb\na\n{\n",
+   "edits": [
+    {
+     "search": "\n{\n\n",
+     "replace": "a\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\nb\na\n{\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 87",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n  a}\né😀\nb \n}\na\n😁\n",
+   "edits": [
+    {
+     "search": "\né😀\nb \n}\n\n",
+     "replace": "}x = 1"
+    },
+    {
+     "search": "\r",
+     "replace": ""
+    },
+    {
+     "search": "}",
+     "replace": "é😀\nx = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\nx = 1\n  a}\n}x = 1\na\n😁\n",
+   "failed": [
+    {
+     "search": "\r",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 88",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\n\r\ta\nb\nc\npublic class A",
+   "edits": [
+    {
+     "search": "void F()\n\r\ta",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "b\nc\npublic class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 89",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\n \n😁\n  a\n\na a\n\n  a\nvoid F()\nx = 2\n",
+   "edits": [
+    {
+     "search": "\n  a\n\na a\n\n",
+     "replace": "}"
+    },
+    {
+     "search": " \n😁\n  a",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "\r\nx = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n \n😁\n}\n\n  a\nvoid F()\nx = 2\n",
+   "failed": [
+    {
+     "search": " \n😁\n  a",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "\r\nx = 2"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 90",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1\na\na \na\né😀\nb\npublic class A\nx = 2}\nb\n",
+   "edits": [
+    {
+     "search": "public class A\nx = 2}\nb",
+     "replace": "\r\n}  a"
+    },
+    {
+     "search": "\nb\n\n",
+     "replace": ""
+    },
+    {
+     "search": "\npublic class A\nx = 2}\nb\n\n",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\na\na \na\né😀\n\n}  a\n",
+   "failed": [
+    {
+     "search": "\npublic class A\nx = 2}\nb\n\n",
+     "replace": "😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 91",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \nx = 2\na\nx = 1\nx = 2c\n \r",
+   "edits": [
+    {
+     "search": "\nx = 2c\n\n",
+     "replace": ""
+    },
+    {
+     "search": "x = 1",
+     "replace": "é😀"
+    }
+   ]
+  },
+  "output": {
+   "content": " \nx = 2\na\né😀\n \r",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 92",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\n  a\n\n{\n{\n😁\r\nax = 2\nc\n😁\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": "}"
+    }
+   ]
+  },
+  "output": {
+   "content": "\n  }\n\n{\n{\n😁\nax = 2\nc\n😁\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 93",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\n \na\n \n\r\na c\n  a\nx = 2\n\n",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 2\n\n\n",
+     "replace": "void F()public class A\nvoid F()"
+    }
+   ]
+  },
+  "output": {
+   "content": " \na\n \n\na c\n  a\nvoid F()public class A\nvoid F()\n\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 94",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\né😀\n\ta\n\r",
+   "edits": [
+    {
+     "search": "😁",
+     "replace": ""
+    },
+    {
+     "search": "é😀",
+     "replace": "x = 1"
+    },
+    {
+     "search": "a\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\n\r",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 95",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "a ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 96",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\n\tax = 1\nx = 1\nx = 1\nx = 2x = 1\nax = 1\na\né😀\na \n\ta",
+   "edits": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n\tax = 1\nx = 1\nx = 1\nx = 2x = 1\nax = 1\na\né😀\na \n\ta",
+   "failed": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 97",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{é😀\npublic class A\n}{",
+   "edits": [
+    {
+     "search": "{é😀\npublic class A",
+     "replace": ""
+    },
+    {
+     "search": "public class A",
+     "replace": "\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "}{",
+   "failed": [
+    {
+     "search": "public class A",
+     "replace": "\ta"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 98",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\nvoid F()\na \nca \né😀\n}\nx = 1\n\ta\n😁\n{",
+   "edits": [
+    {
+     "search": "ca ",
+     "replace": ""
+    },
+    {
+     "search": "😁\n{",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "b\nvoid F()\na \né😀\n}\nx = 1\n\ta",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 99",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n \n}\nc\n{😁\né😀\nb",
+   "edits": [
+    {
+     "search": "\nb\n\n",
+     "replace": "{"
+    },
+    {
+     "search": "}\nc",
+     "replace": "\tac\npublic class Ab"
+    }
+   ]
+  },
+  "output": {
+   "content": "\n \n\tac\npublic class Ab\n{😁\né😀\n{",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 100",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\n\nb\né😀",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "b\né😀",
+     "replace": "\nx = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\n\nb",
+   "failed": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "b\né😀",
+     "replace": "\nx = 2"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 101",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": "{😁\n\r"
+    },
+    {
+     "search": "",
+     "replace": "c"
+    }
+   ]
+  },
+  "output": {
+   "content": "{😁\n\r\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "c"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 102",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1\nx = 1a \né😀\n}\n{\n  ab\né😀\npublic class A\nx = 1\nx = 1\n",
+   "edits": [
+    {
+     "search": "x = 1a ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\né😀\n}\n{\n  ab\né😀\npublic class A\nx = 1\nx = 1\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 103",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\n}\nb",
+   "edits": [
+    {
+     "search": "}\nb",
+     "replace": ""
+    },
+    {
+     "search": "b",
+     "replace": "c\na "
+    },
+    {
+     "search": "b",
+     "replace": "public class A\n{a"
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A",
+   "failed": [
+    {
+     "search": "b",
+     "replace": "c\na "
+    },
+    {
+     "search": "b",
+     "replace": "public class A\n{a"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 104",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\n{\n  a\nc\n\r\nx = 2\nb",
+   "edits": [
+    {
+     "search": "void F()\n{\n  a",
+     "replace": "public class A"
+    },
+    {
+     "search": "\nx = 2\nb\n\n",
+     "replace": ""
+    },
+    {
+     "search": "{\n    a\nc",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\nc\n",
+   "failed": [
+    {
+     "search": "{\n    a\nc",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 105",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\n  a\nb\nc\n\r\n😁  a\n\r\n",
+   "edits": [
+    {
+     "search": "\r",
+     "replace": ""
+    },
+    {
+     "search": "\r\n😁  a",
+     "replace": "a "
+    },
+    {
+     "search": "  a\nb\nc",
+     "replace": "x = 2\n😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "  a\nx = 2\n😁\na \n\n",
+   "failed": [
+    {
+     "search": "\r",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 106",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\npublic class A\nc\nx = 1é😀",
+   "edits": [
+    {
+     "search": "\na\npublic class A\nc\n\n",
+     "replace": "  a\n}"
+    },
+    {
+     "search": "public class A",
+     "replace": "x = 2"
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "  a\n}\nx = 1é😀",
+   "failed": [
+    {
+     "search": "public class A",
+     "replace": "x = 2"
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 107",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\npublic class Aé😀\né😀\né😀\na \nx = 2a",
+   "edits": [
+    {
+     "search": "}",
+     "replace": " "
+    },
+    {
+     "search": "x = 2a",
+     "replace": ""
+    },
+    {
+     "search": "é😀",
+     "replace": " "
+    }
+   ]
+  },
+  "output": {
+   "content": " \npublic class Aé😀\n \né😀\na ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 108",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  ax = 2\né😀\nvoid F()\n",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": "a"
+    },
+    {
+     "search": "  ax = 2",
+     "replace": "public class Aa\n😁\r"
+    },
+    {
+     "search": "void F()",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class Aa\n😁\r\né😀\na\n",
+   "failed": [
+    {
+     "search": "void F()",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 109",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\n\r\n}\nx = 1\n\r{",
+   "edits": [
+    {
+     "search": "}\nx = 1\n\r{",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 1\n\r{\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n",
+   "failed": [
+    {
+     "search": "\nx = 1\n\r{\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 110",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": "x = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 111",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a \nb\n\né😀\nx = 1\n}\n",
+   "edits": [
+    {
+     "search": "}",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "a \nb\n\né😀\nx = 1\n😁\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 112",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1c\n{\r\na \n\tax = 2\n}x = 2\nx = 2\nb\n\ta",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "{\r\na ",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 1c\n{\r    a \n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1c\n\tax = 2\n}x = 2\nx = 2\nb\n\ta",
+   "failed": [
+    {
+     "search": "é😀",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 1c\n{\r    a \n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 113",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1\nb\nvoid F()\n  a\r\n ",
+   "edits": [
+    {
+     "search": "b\nvoid F()\n  a\r",
+     "replace": "c\n{"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 1\nc\n{\n ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 114",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 115",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\né😀b\n }\n}{\n \nvoid F()\n{\n\n{ \na \n",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "{ \na ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\né😀b\n }\n}{\n \nvoid F()\n{\n\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 116",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n}x = 1\n}\n}\nx = 1\n}x = 2\n\ta\na\na\n",
+   "edits": [
+    {
+     "search": "}\nx = 1",
+     "replace": ""
+    },
+    {
+     "search": "😁",
+     "replace": "\r\nvoid F()"
+    },
+    {
+     "search": "}x = 2",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\n}x = 1\n}\n\ta\na\na\n",
+   "failed": [
+    {
+     "search": "😁",
+     "replace": "\r\nvoid F()"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 117",
+  "fn": "applyEdits",
+  "input": {
+   "original": " 😁\n😁x = 2\n\ta\n\n😁\n😁\n\rx = 1\npublic class A\n",
+   "edits": [
+    {
+     "search": "x = 1\npublic class A",
+     "replace": "\r\n "
+    },
+    {
+     "search": "😁x = 2\n\ta\n",
+     "replace": "é😀\nb"
+    }
+   ]
+  },
+  "output": {
+   "content": " 😁\né😀\nb\n\n😁\n😁\n\n \n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 118",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\n  a\n a \n\ta\na\n  a\n\ta\n",
+   "edits": [
+    {
+     "search": "a\na\na",
+     "replace": ""
+    },
+    {
+     "search": "  a\n\ta",
+     "replace": "c\n  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\na\nc\n  a\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 119",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\n \nb\nx = 2\n\n",
+   "edits": [
+    {
+     "search": " \nb\nx = 2",
+     "replace": "\ta "
+    },
+    {
+     "search": "",
+     "replace": "}\n\ra "
+    },
+    {
+     "search": "",
+     "replace": "}"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n\ta \n\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "}\n\ra "
+    },
+    {
+     "search": "",
+     "replace": "}"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 120",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a void F()\n😁\n{",
+   "edits": [
+    {
+     "search": "a void F()\n😁\n{",
+     "replace": ""
+    },
+    {
+     "search": "\na void F()\n\n",
+     "replace": "public class A  a\n}"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "\na void F()\n\n",
+     "replace": "public class A  a\n}"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 121",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\r\n\r\n{\n{\nx = 2",
+   "edits": [
+    {
+     "search": "b\r",
+     "replace": "{\nx = 1"
+    },
+    {
+     "search": "b\r\n\r\n{",
+     "replace": "x = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "{\nx = 1\n\n{\n{\nx = 2",
+   "failed": [
+    {
+     "search": "b\r\n\r\n{",
+     "replace": "x = 1"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 122",
+  "fn": "applyEdits",
+  "input": {
+   "original": "apublic class A\n \n \n😁\nvoid F()\n{\nvoid F()\n \nb\nc\nc",
+   "edits": [
+    {
+     "search": "b",
+     "replace": "x = 1é😀"
+    },
+    {
+     "search": "\nb\nc\nc\n\n",
+     "replace": "x = 1\n\ra "
+    }
+   ]
+  },
+  "output": {
+   "content": "apublic class A\n \n \n😁\nvoid F()\n{\nvoid F()\n \nx = 1é😀\nc\nc",
+   "failed": [
+    {
+     "search": "\nb\nc\nc\n\n",
+     "replace": "x = 1\n\ra "
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 123",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": "x = 2\n😁"
+    },
+    {
+     "search": "\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n😁\n",
+   "failed": [
+    {
+     "search": "\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 124",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\na \nc\né😀  a\n\ta\n  a\nvoid F()\n\ta\n \nc\nvoid F()\n",
+   "edits": [
+    {
+     "search": "a \nc",
+     "replace": "\na"
+    },
+    {
+     "search": "\ta\n \nc",
+     "replace": "x = 2\nx = 1"
+    },
+    {
+     "search": "{",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\na\né😀  a\n\ta\n  a\nvoid F()\nx = 2\nx = 1\nvoid F()\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 125",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\n}\nb\nx = 2public class A\n{\nc\n}\n",
+   "edits": [
+    {
+     "search": "}\nb\nx = 2public class A",
+     "replace": "{\na "
+    },
+    {
+     "search": "x = 2public class A",
+     "replace": "void F()😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n{\na \n{\nc\n}\n",
+   "failed": [
+    {
+     "search": "x = 2public class A",
+     "replace": "void F()😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 126",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\n  a\nc\ncpublic class A\nvoid F()\n",
+   "edits": [
+    {
+     "search": "  a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\nc\ncpublic class A\nvoid F()\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 127",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class Aé😀\na \né😀\n\r\n}\nx = 2",
+   "edits": [
+    {
+     "search": "public class Aé😀",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a \né😀\n\n}\nx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 128",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\n\r\n😁\n \nc\nvoid F()\n\r\n\r\n\ta",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": ""
+    },
+    {
+     "search": "😁\n ",
+     "replace": ""
+    },
+    {
+     "search": "\n\ta\n\r\n\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n\nc\n\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 129",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\nx = 2\nvoid F()\n  a\n\r\n",
+   "edits": [
+    {
+     "search": "void F()\n  a\n\r",
+     "replace": ""
+    },
+    {
+     "search": "\r\nx = 2\nvoid F()",
+     "replace": ""
+    },
+    {
+     "search": "x = 2",
+     "replace": "public class A\n "
+    }
+   ]
+  },
+  "output": {
+   "content": "\npublic class A\n \n",
+   "failed": [
+    {
+     "search": "\r\nx = 2\nvoid F()",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 130",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\nb\n",
+   "edits": [
+    {
+     "search": "b\n",
+     "replace": "😁\nb\ta"
+    },
+    {
+     "search": "c",
+     "replace": " x = 1"
+    },
+    {
+     "search": "\ta",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\n😁\nb\ta\n",
+   "failed": [
+    {
+     "search": "c",
+     "replace": " x = 1"
+    },
+    {
+     "search": "\ta",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 131",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\né😀\n  a\n😁\nc\npublic class A😁\na \n\ta\na\na \n}",
+   "edits": [
+    {
+     "search": "c\npublic class A😁",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\né😀\n  a\n😁\na \n\ta\na\na \n}",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 132",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\n\n\r\n\nb\npublic class Aé😀\nvoid F()\n\ta \na \n{\né😀a ",
+   "edits": [
+    {
+     "search": "\nb\npublic class Aé😀",
+     "replace": ""
+    },
+    {
+     "search": "é😀a ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n\n\nvoid F()\n\ta \na \n{",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 133",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a é😀\na \n",
+   "edits": [
+    {
+     "search": "{",
+     "replace": "x = 2\npublic class A"
+    },
+    {
+     "search": "a é😀\na ",
+     "replace": ""
+    },
+    {
+     "search": "a \n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "{",
+     "replace": "x = 2\npublic class A"
+    },
+    {
+     "search": "a \n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 134",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\na \nc\na \n",
+   "edits": [
+    {
+     "search": "a ",
+     "replace": "x = 1\na "
+    },
+    {
+     "search": "a \nc\na ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\nx = 1\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 135",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\n}\npublic class Aa\n}x = 2\n\n😁\na\nx = 2é😀\n\né😀\n",
+   "edits": [
+    {
+     "search": "a\nx = 2é😀\n",
+     "replace": "😁"
+    },
+    {
+     "search": "}\npublic class Aa\n}x = 2",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n\n😁\n😁\n\né😀\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 136",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2x = 2",
+   "edits": [
+    {
+     "search": "x = 2x = 2",
+     "replace": "b\nvoid F()"
+    },
+    {
+     "search": "x = 2x = 2",
+     "replace": "😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\nvoid F()",
+   "failed": [
+    {
+     "search": "x = 2x = 2",
+     "replace": "😁"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 137",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a ",
+   "edits": [
+    {
+     "search": "x = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a ",
+   "failed": [
+    {
+     "search": "x = 1",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 138",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\n\npublic class A\n \npublic class Apublic class A\n  a\ta\n  a\nx = 1\n",
+   "edits": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\n\npublic class A\n \npublic class Apublic class A\n  a\ta\n  a\nx = 1\n",
+   "failed": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 139",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\na \n😁\r\né😀\n",
+   "edits": [
+    {
+     "search": "😁\r\né😀\n",
+     "replace": ""
+    },
+    {
+     "search": "😁\na \n😁\r",
+     "replace": "ab\n\ta"
+    },
+    {
+     "search": "\n😁\n\n",
+     "replace": "\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "a \n",
+   "failed": [
+    {
+     "search": "😁\na \n😁\r",
+     "replace": "ab\n\ta"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 140",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\n{\na\n😁public class A",
+   "edits": [
+    {
+     "search": "a\n😁public class A",
+     "replace": "  a\ta\na "
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n{\n  a\ta\na ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 141",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\né😀\n  a\npublic class A\n\ta\nvoid F()\na c\nx = 2",
+   "edits": [
+    {
+     "search": "\n  a\npublic class A\n\ta\n\n",
+     "replace": "  a\na "
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\né😀\n  a\na \nvoid F()\na c\nx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 142",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\nx = 2\npublic class A\n😁\nb\n{x = 1",
+   "edits": [
+    {
+     "search": "b\n{x = 1",
+     "replace": ""
+    },
+    {
+     "search": "{x = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A\nx = 2\npublic class A\n😁",
+   "failed": [
+    {
+     "search": "{x = 1",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 143",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n \nx = 2\nx = 2\nx = 2\na é😀\n\n\né😀\n{\nx = 2",
+   "edits": [
+    {
+     "search": "x = 2",
+     "replace": ""
+    },
+    {
+     "search": "x = 2",
+     "replace": ""
+    },
+    {
+     "search": "a é😀\n",
+     "replace": "x = 2x = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "}\n \nx = 2\nx = 2x = 2\n\n\né😀\n{\nx = 2",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 144",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "é😀\n}"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\n}",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 145",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "a{\n😁public class A"
+    },
+    {
+     "search": "\n\n\n",
+     "replace": "b\nx = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "a{\n😁public class A",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": "b\nx = 1"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 146",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\nx = 2é😀\na \npublic class A\n\r\nvoid F()\n😁\npublic class A\nvoid F()é😀\né😀\n",
+   "edits": [
+    {
+     "search": "\r\nvoid F()\n😁",
+     "replace": "a \nx = 2"
+    },
+    {
+     "search": "x = 2é😀\na ",
+     "replace": "😁"
+    },
+    {
+     "search": "é😀\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n😁\npublic class A\na \nx = 2\npublic class A\nvoid F()é😀\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 147",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n",
+   "edits": [
+    {
+     "search": "\n",
+     "replace": "😁"
+    },
+    {
+     "search": "\n",
+     "replace": "x = 1"
+    },
+    {
+     "search": "",
+     "replace": "}"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n",
+   "failed": [
+    {
+     "search": "\n",
+     "replace": "x = 1"
+    },
+    {
+     "search": "",
+     "replace": "}"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 148",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2é😀\n\ta \n\r\n \n{",
+   "edits": [
+    {
+     "search": " ",
+     "replace": ""
+    },
+    {
+     "search": "a \n",
+     "replace": ""
+    },
+    {
+     "search": "\nx = 2é😀\n\n",
+     "replace": "x = 2"
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n\n \n{",
+   "failed": [
+    {
+     "search": " ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 149",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁public class A\nvoid F()\n",
+   "edits": [
+    {
+     "search": "😁public class A",
+     "replace": "c\nc"
+    },
+    {
+     "search": "}",
+     "replace": ""
+    },
+    {
+     "search": "void F()\n",
+     "replace": "}\n}"
+    }
+   ]
+  },
+  "output": {
+   "content": "c\nc\n}\n}\n",
+   "failed": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 150",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \n}\n}\nx = 2\n😁\né😀\n\ta\n\r\nvoid F()x = 2\n",
+   "edits": [
+    {
+     "search": " \n}\n}",
+     "replace": "\ta\n "
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n \nx = 2\n😁\né😀\n\ta\n\nvoid F()x = 2\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 151",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\na \ta\né😀\nvoid F()\nx = 2a\npublic class A  a\n",
+   "edits": [
+    {
+     "search": "😁",
+     "replace": ""
+    },
+    {
+     "search": "a \ta\né😀\nvoid F()",
+     "replace": ""
+    },
+    {
+     "search": "public class A",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2a\npublic class A  a\n",
+   "failed": [
+    {
+     "search": "public class A",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 152",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\né😀\n😁\n  a\nx = 2\n \nb\navoid F()\n\ta\n ",
+   "edits": [
+    {
+     "search": "  a\nx = 2\n ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\né😀\n😁\nb\navoid F()\n\ta\n ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 153",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\nx = 1\n😁\nba \né😀x = 1\n}x = 1\n}\nx = 1\ta\n{\n}\npublic class A",
+   "edits": [
+    {
+     "search": "}\nx = 1\n😁",
+     "replace": "\r"
+    }
+   ]
+  },
+  "output": {
+   "content": "\r\nba \né😀x = 1\n}x = 1\n}\nx = 1\ta\n{\n}\npublic class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 154",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\n😁\nvoid F()\n{\nb",
+   "edits": [
+    {
+     "search": "void F()\n{\nb",
+     "replace": ""
+    },
+    {
+     "search": "😁",
+     "replace": "void F()😁"
+    }
+   ]
+  },
+  "output": {
+   "content": "\nvoid F()😁",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 155",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\n  a",
+   "edits": [
+    {
+     "search": "é😀\n    a",
+     "replace": "a b"
+    }
+   ]
+  },
+  "output": {
+   "content": "a b",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 156",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀\nx = 2\n \nx = 1\n  a\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": "ba \na x = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀\nx = 2\n \nx = 1\n  ba \n  a x = 1\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 157",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\nvoid F()\né😀void F()\nvoid F()\n\ta",
+   "edits": [
+    {
+     "search": "\n\r\nvoid F()\né😀void F()\n\n",
+     "replace": "\r\n\ta"
+    },
+    {
+     "search": "void F()",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\n\ta\n\ta",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 158",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A{\n}\n\r\n\n \n}public class A\na \n",
+   "edits": [
+    {
+     "search": "public class A{\n}",
+     "replace": "😁\nb"
+    },
+    {
+     "search": "b",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n\n\n \n}public class A\na \n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 159",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\r\nc\né😀\n}😁\nx = 2\né😀\na \né😀\na \né😀\n  a",
+   "edits": [
+    {
+     "search": "é😀",
+     "replace": "😁 \né😀"
+    },
+    {
+     "search": "c\né😀",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\nc\n😁 \né😀\n}😁\nx = 2\né😀\na \né😀\na \né😀\n  a",
+   "failed": [
+    {
+     "search": "c\né😀",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 160",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\nc\n}\n\ré😀\nvoid F()\nx = 2\nx = 1{\n\r\n",
+   "edits": [
+    {
+     "search": "void F()\nx = 2",
+     "replace": ""
+    },
+    {
+     "search": "x = 1{",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\nc\n}\n\ré😀\n\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 161",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 2\né😀\n",
+   "edits": [
+    {
+     "search": "é😀\n",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 162",
+  "fn": "applyEdits",
+  "input": {
+   "original": "é😀 \né😀\n",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    },
+    {
+     "search": "é😀\n",
+     "replace": "void F()\n\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "é😀 \nvoid F()\n\ta\n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 163",
+  "fn": "applyEdits",
+  "input": {
+   "original": "c\npublic class A\nx = 1\n\ta\nc\nvoid F()\nx = 1\nvoid F()\na \n}\n😁",
+   "edits": [
+    {
+     "search": "public class A\nx = 1\n\ta",
+     "replace": ""
+    },
+    {
+     "search": "void F()\nx = 1",
+     "replace": ""
+    },
+    {
+     "search": "a\nc\nvoid F()",
+     "replace": "b"
+    }
+   ]
+  },
+  "output": {
+   "content": "c\nc\nvoid F()\na \n}\n😁",
+   "failed": [
+    {
+     "search": "a\nc\nvoid F()",
+     "replace": "b"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 164",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a \nb\n{\na\n😁é😀\npublic class A\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": " public class A\na "
+    },
+    {
+     "search": "a\n😁é😀\npublic class A",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": "a\navoid F()"
+    }
+   ]
+  },
+  "output": {
+   "content": "a \nb\n{\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": " public class A\na "
+    },
+    {
+     "search": "",
+     "replace": "a\navoid F()"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 165",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()public class A\na",
+   "edits": [
+    {
+     "search": "a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()public class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 166",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\n}\na\na\n \npublic class A",
+   "edits": [
+    {
+     "search": "a\n    ",
+     "replace": "\ta"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n}\na\n\ta\npublic class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 167",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": "public class A\n"
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 168",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n\nx = 2}\n  a\n",
+   "edits": [
+    {
+     "search": "x = 2}",
+     "replace": "x = 2  a\n\r"
+    },
+    {
+     "search": "\n\nx = 2}\n\n",
+     "replace": "cx = 2\nx = 1"
+    },
+    {
+     "search": "    a",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "}\n\nx = 2  a\n\r\n",
+   "failed": [
+    {
+     "search": "\n\nx = 2}\n\n",
+     "replace": "cx = 2\nx = 1"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 169",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\nc  a",
+   "edits": [
+    {
+     "search": "\ta\nc  a",
+     "replace": ""
+    },
+    {
+     "search": "  a",
+     "replace": "\ta"
+    },
+    {
+     "search": "b",
+     "replace": "  a\n\r"
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": [
+    {
+     "search": "  a",
+     "replace": "\ta"
+    },
+    {
+     "search": "b",
+     "replace": "  a\n\r"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 170",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\né😀\nc\nx = 1\nx = 1\na \n😁\n",
+   "edits": [
+    {
+     "search": "😁",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "{\né😀\nc\nx = 1\nx = 1\na \n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 171",
+  "fn": "applyEdits",
+  "input": {
+   "original": "public class A\nx = 1\n ",
+   "edits": [
+    {
+     "search": "public class A\nx = 1",
+     "replace": "\ta"
+    },
+    {
+     "search": "x = 1\n ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\n ",
+   "failed": [
+    {
+     "search": "x = 1\n ",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 172",
+  "fn": "applyEdits",
+  "input": {
+   "original": "",
+   "edits": [
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\r",
+     "replace": "public class A"
+    }
+   ]
+  },
+  "output": {
+   "content": "public class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 173",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\nc\n \n}\ta\n}\nx = 2\n",
+   "edits": [
+    {
+     "search": "c\n \n}\ta",
+     "replace": ""
+    },
+    {
+     "search": "}",
+     "replace": ""
+    },
+    {
+     "search": "x = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "  a\nx = 2\n",
+   "failed": [
+    {
+     "search": "x = 1",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 174",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\n{}\na\nb\nvoid F()é😀\nvoid F()\n}\n}\nc",
+   "edits": [
+    {
+     "search": "b",
+     "replace": ""
+    },
+    {
+     "search": "void F()é😀\nvoid F()",
+     "replace": ""
+    },
+    {
+     "search": "\nvoid F()é😀\nvoid F()\n}\n\n",
+     "replace": "b\nb"
+    }
+   ]
+  },
+  "output": {
+   "content": "a\n{}\na\n}\n}\nc",
+   "failed": [
+    {
+     "search": "\nvoid F()é😀\nvoid F()\n}\n\n",
+     "replace": "b\nb"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 175",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\na\n\ta\n}😁\nx = 2\n\r",
+   "edits": [
+    {
+     "search": "a\na\n}😁",
+     "replace": "a \npublic class A"
+    }
+   ]
+  },
+  "output": {
+   "content": "\na \npublic class A\nx = 2\n\r",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 176",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\n}b\n{\n\ta\ta\na \na \né😀\n😁c\n",
+   "edits": [
+    {
+     "search": "\na \né😀\n\n",
+     "replace": ""
+    },
+    {
+     "search": "{",
+     "replace": ""
+    },
+    {
+     "search": "\ta\ta\na ",
+     "replace": "}\n}"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\n}b\n}\n}\n😁c\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 177",
+  "fn": "applyEdits",
+  "input": {
+   "original": "a\n}",
+   "edits": [
+    {
+     "search": "}",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "a",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 178",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\nx = 2\n\tapublic class A\nvoid F()\npublic class A\nx = 1\na😁\n  a\npublic class Ac\n",
+   "edits": [
+    {
+     "search": "public class A\nx = 1\na😁",
+     "replace": "  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "{\nx = 2\n\tapublic class A\nvoid F()\n  a\n  a\npublic class Ac\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 179",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\ncx = 2\n\nx = 2\nx = 2\n😁\né😀é😀\nc",
+   "edits": [
+    {
+     "search": "é😀é😀\nc",
+     "replace": "x = 2"
+    },
+    {
+     "search": "x = 1",
+     "replace": "  a"
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\ncx = 2\n\nx = 2\nx = 2\n😁\nx = 2",
+   "failed": [
+    {
+     "search": "x = 1",
+     "replace": "  a"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 180",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\r\n \n",
+   "edits": [
+    {
+     "search": "\r",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 181",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \nc\nc",
+   "edits": [
+    {
+     "search": "c",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": " \nc",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 182",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\taa \nvoid F()\nx = 2\nx = 1\nx = 2x = 1\n\ta\nc\n😁\n",
+   "edits": [
+    {
+     "search": "x = 1\nx = 2x = 1",
+     "replace": "😁 "
+    },
+    {
+     "search": "x = 1\nx = 2x = 1",
+     "replace": " "
+    },
+    {
+     "search": "x = 2x = 1\n\ta\nc",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\taa \nvoid F()\nx = 2\n😁 \n\ta\nc\n😁\n",
+   "failed": [
+    {
+     "search": "x = 1\nx = 2x = 1",
+     "replace": " "
+    },
+    {
+     "search": "x = 2x = 1\n\ta\nc",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 183",
+  "fn": "applyEdits",
+  "input": {
+   "original": "x = 1 \na \ncx = 1\n\na \n\ta  a\n😁\na \nx = 2",
+   "edits": [
+    {
+     "search": "x = 1 \na \ncx = 1",
+     "replace": ""
+    },
+    {
+     "search": "a \ncx = 1",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\na \n\ta  a\n😁\na \nx = 2",
+   "failed": [
+    {
+     "search": "a \ncx = 1",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 184",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\nx = 2\n\ta\n{\né😀\n  ab\n\ta\n😁public class A\n😁void F()\na\n",
+   "edits": [
+    {
+     "search": "ab",
+     "replace": "public class A "
+    },
+    {
+     "search": "\n\ta\n\n",
+     "replace": ""
+    },
+    {
+     "search": "😁void F()\na",
+     "replace": "}\n\r"
+    }
+   ]
+  },
+  "output": {
+   "content": "{\nx = 2\n\ta\n{\né😀\n  public class A \n😁public class A\n}\n\r\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 185",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\n\ta\n\tab\n{\n😁\n}\n}",
+   "edits": [
+    {
+     "search": "  a\n\ta",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\tab\n{\n😁\n}\n}",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 186",
+  "fn": "applyEdits",
+  "input": {
+   "original": "{\n} \nb\npublic class A\n\nx = 2\nvoid F()\ncx = 2\n\n\n",
+   "edits": [
+    {
+     "search": "",
+     "replace": "😁"
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\npublic class A\n    x = 2\n\n",
+     "replace": " \nx = 1"
+    }
+   ]
+  },
+  "output": {
+   "content": "{\n} \nb\npublic class A\n\nx = 2\nvoid F()\ncx = 2\n\n\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": "😁"
+    },
+    {
+     "search": "",
+     "replace": ""
+    },
+    {
+     "search": "\npublic class A\n    x = 2\n\n",
+     "replace": " \nx = 1"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 187",
+  "fn": "applyEdits",
+  "input": {
+   "original": " \n void F()\n\ta\na \nc\nb\r\n}\na \n ",
+   "edits": [
+    {
+     "search": "\ta\na \nc",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": " \n void F()\nb\n}\na \n ",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 188",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\n  a\nx = 1\n\r  a\n \nx = 1\nvoid F()\n}x = 2\nvoid F()\nvoid F()\npublic class A",
+   "edits": [
+    {
+     "search": "\nx = 1\n\n",
+     "replace": ""
+    },
+    {
+     "search": "    x = 1\nvoid F()",
+     "replace": "x = 1\n\r"
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\n  a\n\r  a\n \nx = 1\n\r\n}x = 2\nvoid F()\nvoid F()\npublic class A",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 189",
+  "fn": "applyEdits",
+  "input": {
+   "original": "aa ",
+   "edits": [
+    {
+     "search": "\naa \n\n",
+     "replace": "void F(){"
+    }
+   ]
+  },
+  "output": {
+   "content": "void F(){",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 190",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\na\n  a\nvoid F()\na \nx = 2}\na \n{a \n😁\n\ta  a",
+   "edits": [
+    {
+     "search": "\ta",
+     "replace": "{x = 2"
+    },
+    {
+     "search": "a ",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "void F()\n{x = 2\n  a\nvoid F()\nx = 2}\na \n{a \n😁\n\ta  a",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 191",
+  "fn": "applyEdits",
+  "input": {
+   "original": "  a\n",
+   "edits": [
+    {
+     "search": "\n  a\n\n\n",
+     "replace": " \nx = 2a "
+    }
+   ]
+  },
+  "output": {
+   "content": "x = 2a \n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 192",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\ta\na\nx = 2void F()\n😁\nb\na\n",
+   "edits": [
+    {
+     "search": "a",
+     "replace": "a \n😁"
+    },
+    {
+     "search": "x = 2void F()",
+     "replace": "c"
+    },
+    {
+     "search": "\nx = 2void F()\n\n",
+     "replace": "}x = 1\nb"
+    }
+   ]
+  },
+  "output": {
+   "content": "\ta\na \n😁\nc\n😁\nb\na\n",
+   "failed": [
+    {
+     "search": "\nx = 2void F()\n\n",
+     "replace": "}x = 1\nb"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 193",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\nx = 1a\nvoid F()\n\n😁\r\n😁\nb\nx = 2x = 1\nvoid F()\na\n",
+   "edits": [
+    {
+     "search": "\na\n\n",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "b\nx = 1a\nvoid F()\n\n😁\n😁\nb\nx = 2x = 1\nvoid F()\n",
+   "failed": [
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 194",
+  "fn": "applyEdits",
+  "input": {
+   "original": "b\npublic class A\na\na\n\r\nx = 2\né😀\n\ta",
+   "edits": [
+    {
+     "search": "public class A\na\na",
+     "replace": "a "
+    },
+    {
+     "search": "\n\ta\n\n",
+     "replace": ""
+    },
+    {
+     "search": "x = 2",
+     "replace": "é😀c\n\r"
+    }
+   ]
+  },
+  "output": {
+   "content": "b\na \n\né😀c\n\r\né😀",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 195",
+  "fn": "applyEdits",
+  "input": {
+   "original": "\nc\n{\n  ax = 2\n😁\n\ta\n\r\nx = 1",
+   "edits": [
+    {
+     "search": "c",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "\n{\n  ax = 2\n😁\n\ta\n\nx = 1",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 196",
+  "fn": "applyEdits",
+  "input": {
+   "original": "void F()\nvoid F()\nbvoid F()\n\npublic class A\n \n😁",
+   "edits": [
+    {
+     "search": "void F()",
+     "replace": "cé😀\n\r😁"
+    },
+    {
+     "search": "public class A\n \n😁",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "cé😀\n\r😁\nvoid F()\nbvoid F()\n",
+   "failed": []
+  }
+ },
+ {
+  "name": "random 197",
+  "fn": "applyEdits",
+  "input": {
+   "original": "😁\ta\napublic class A\n",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": "x = 1\nc"
+    },
+    {
+     "search": "\ta",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "😁\ta\napublic class A\n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": "x = 1\nc"
+    },
+    {
+     "search": "\ta",
+     "replace": ""
+    },
+    {
+     "search": "",
+     "replace": ""
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 198",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n  a\n",
+   "edits": [
+    {
+     "search": "\n\n\n",
+     "replace": "b"
+    },
+    {
+     "search": "  a",
+     "replace": "a "
+    }
+   ]
+  },
+  "output": {
+   "content": "}\na \n",
+   "failed": [
+    {
+     "search": "\n\n\n",
+     "replace": "b"
+    }
+   ]
+  }
+ },
+ {
+  "name": "random 199",
+  "fn": "applyEdits",
+  "input": {
+   "original": "}\n\taa\n  ab\n\r\né😀\r\na\n  a\n}",
+   "edits": [
+    {
+     "search": "\n  a\n\n",
+     "replace": ""
+    },
+    {
+     "search": "a ",
+     "replace": ""
+    },
+    {
+     "search": "  a\n}",
+     "replace": ""
+    }
+   ]
+  },
+  "output": {
+   "content": "}\n\taa\n  ab\n\né😀\n}",
+   "failed": [
+    {
+     "search": "  a\n}",
+     "replace": ""
+    }
+   ]
+  }
+ }
+]
