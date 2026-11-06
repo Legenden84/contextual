@@ -194,7 +194,15 @@ pub trait WorkspaceHost: Send + Sync {
   launches it. Old versions are pruned.
 - **Lifecycle:** one agent per distro, started lazily, restarted with backoff if it dies, killed
   when the app exits (job object on Windows so it can't outlive the app).
-- **Distro discovery:** `wsl.exe --list --quiet` — note that its output is **UTF-16LE**.
+- **Distro discovery:** read the registry, not `wsl.exe` output. Installed distros are the
+  subkeys of `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` (`DistributionName`), and
+  `DefaultDistribution` holds the default one's GUID. This needs no process and has no
+  encoding issues.
+  - **Fallback:** `wsl.exe --list --quiet`. Its output encoding is **not fixed**: UTF-16LE by
+    default, UTF-8 when `WSL_UTF8=1`, and UTF-8 was observed on the development machine with
+    `WSL_UTF8` unset. Detect it per call (UTF-16LE if the bytes contain NULs or start with
+    `FF FE`, otherwise UTF-8) and cover both cases with tests.
+  - Treat other `wsl.exe` output (errors, `--status`) the same way.
 - **Location detection (Windows app):** this replaces today's path translation in
   `fs/paths.ts`, which assumed the server runs inside WSL.
   - `C:\src\x` → `Location::Local` + `C:\src\x` (opened natively, not through WSL).
@@ -373,7 +381,7 @@ There are no tests today, so the port must create the safety net it relies on.
 | Behaviour drift during the rewrite (no existing tests) | High | Phase 0 fixtures + parity tests gate each slice; port module by module, not all at once. |
 | Webview differences (WKWebView on macOS vs WebView2 on Windows) for CSS/JS features | Medium | Test the UI on both in Phase 1; avoid Chromium-only APIs. |
 | WSL project unusable while the Windows app is being built | Medium | Keep the Node version runnable inside WSL until Phase 4 is done; Node is removed only in Phase 5. |
-| Only one macOS machine to build/test on | Low | `macos-latest` CI runner builds and tests every change. |
+| No Mac for day-to-day development (testing happens later on a friend's Mac) | Low | `macos-latest` CI runner builds and tests every change; run the manual smoke checklist on the Mac at the end of Phase 1 (UI in WKWebView) and before each release. |
 | Agent deployment fails (no `/tmp` space, noexec mounts, arm64 distro) | Medium | Deploy to `~/.cache`; static musl builds for x86_64 and aarch64; clear error with a manual install command. |
 | macOS GUI `PATH` misses Homebrew git/gh | Medium | PATH resolution in `CommandRunner` (§7) and a "git/gh not found" diagnostic in Settings. |
 | Windows file locks break atomic save | Medium | Retry with backoff; pre-checks stay before any write so a partial save is impossible. |
