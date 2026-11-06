@@ -7,10 +7,14 @@
 
 use std::sync::Arc;
 
-use contextual_theme::{Appearance, FontFamily, Rgba, Theme as Tokens, TypeStyle, radius, space};
+use contextual_theme::{
+    Appearance, FontFamily, Rgba, Shadow, Theme as Tokens, TypeStyle, radius, space,
+};
 use gpui_kit::component::highlighter::HighlightTheme;
 use gpui_kit::component::theme::{Theme as ComponentTheme, ThemeMode};
-use gpui_kit::{App, FontFeatures, FontWeight, Global, Hsla, Pixels, Styled, Window, px};
+use gpui_kit::{
+    App, BoxShadow, FontFeatures, FontWeight, Global, Hsla, Pixels, Styled, Window, point, px,
+};
 use serde_json::json;
 
 /// Bundled font families (see `assets.rs`).
@@ -242,4 +246,29 @@ pub fn row_height() -> Pixels {
 
 pub fn control_height() -> Pixels {
     px(space::CONTROL_HEIGHT)
+}
+
+pub fn shadow(s: Shadow) -> BoxShadow {
+    BoxShadow {
+        color: hsla(s.color),
+        offset: point(px(s.offset_x), px(s.offset_y)),
+        blur_radius: px(s.blur),
+        spread_radius: px(s.spread),
+        inset: false,
+    }
+}
+
+/// The appearance for a preference; `System` follows the window's (OS) appearance.
+pub fn resolve(pref: contextual_core::settings::ThemePreference, window: &Window) -> Appearance {
+    use contextual_core::settings::ThemePreference;
+    match pref {
+        ThemePreference::Dark => Appearance::Dark,
+        ThemePreference::Light => Appearance::Light,
+        ThemePreference::System => match window.appearance() {
+            gpui_kit::WindowAppearance::Light | gpui_kit::WindowAppearance::VibrantLight => {
+                Appearance::Light
+            }
+            _ => Appearance::Dark,
+        },
+    }
 }

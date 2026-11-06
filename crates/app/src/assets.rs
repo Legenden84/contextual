@@ -19,3 +19,24 @@ pub fn load_fonts(cx: &mut App) {
         eprintln!("couldn't load bundled fonts: {e}");
     }
 }
+
+// Icons beyond gpui-component's default set, embedded from the Lucide catalog.
+gpui_kit::assets::icon_assets!(ExtraIcons, [GitBranch]);
+
+/// The default component icons plus [`ExtraIcons`].
+pub struct AppAssets;
+
+impl gpui_kit::AssetSource for AppAssets {
+    fn load(&self, path: &str) -> gpui_kit::Result<Option<Cow<'static, [u8]>>> {
+        match gpui_kit::assets::Assets.load(path) {
+            Ok(Some(data)) => Ok(Some(data)),
+            _ => ExtraIcons.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> gpui_kit::Result<Vec<gpui_kit::SharedString>> {
+        let mut all = gpui_kit::assets::Assets.list(path).unwrap_or_default();
+        all.extend(ExtraIcons.list(path).unwrap_or_default());
+        Ok(all)
+    }
+}

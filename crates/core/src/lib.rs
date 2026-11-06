@@ -17,6 +17,7 @@ pub mod location;
 pub mod logic;
 pub mod platform;
 pub mod process;
+pub mod recents;
 pub mod remote;
 #[cfg(feature = "llm")]
 pub mod settings;

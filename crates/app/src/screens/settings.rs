@@ -1,0 +1,487 @@
+//! Settings (design spec: ScreenSettings): the Azure AI Foundry connection (API key in the OS
+//! keychain), Test connection, exclusions, the output-format prompt and the theme.
+
+use contextual_core::settings::{FoundrySettings, Settings, ThemePreference};
+use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
+use gpui_kit::component::{Icon, IconName, Sizable as _};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{
+    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+};
+
+use crate::state::{AppModel, ConnectionTest};
+use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::ui::{Button, ButtonSize, ButtonVariant, LinkButton, Switch};
+
+const LABEL_W: f32 = 200.0;
+const FIELD_W: f32 = 420.0;
+
+struct Field {
+    label: &'static str,
+    hint: &'static str,
+    input: Entity<InputState>,
+}
+
+pub struct SettingsScreen {
+    app: Entity<AppModel>,
+    endpoint: Field,
+    api_key: Field,
+    api_version: Field,
+    deployment: Field,
+    model_name: Field,
+    context_limit: Field,
+    max_tokens: Field,
+    in_price: Field,
+    out_price: Field,
+    max_kb: Field,
+    new_exclusion: Entity<InputState>,
+    output_prompt: Entity<TextareaState>,
+    exclusions: Vec<String>,
+    respect_gitignore: bool,
+    skip_binary: bool,
+    include_hidden: bool,
+    theme: ThemePreference,
+    /// Remove the stored key on save.
+    remove_key: bool,
+    status: Option<String>,
+    _sub: Subscription,
+}
+
+fn opt<T: ToString>(v: Option<T>) -> String {
+    v.map(|v| v.to_string()).unwrap_or_default()
+}
+
+impl SettingsScreen {
+    pub fn new(app: Entity<AppModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let a = app.read(cx);
+        let s = a.settings.clone();
+        let has_key = a.has_api_key();
+        let f = &s.foundry;
+        let mut field = |label, hint, value: String, masked: bool| Field {
+            label,
+            hint,
+            input: cx.new(|cx| {
+                let st = InputState::new(window, cx).default_value(value);
+                if masked {
+                    st.masked(true).placeholder(if has_key {
+                        "Stored ••••••••  (type to replace)"
+                    } else {
+                        "Paste the key"
+                    })
+                } else {
+                    st
+                }
+            }),
+        };
+        let endpoint = field(
+            "Endpoint",
+            "https://<resource>.openai.azure.com/",
+            opt(f.endpoint.clone()),
+            false,
+        );
+        let api_key = field(
+            "API key",
+            "Kept in the OS keychain, never in settings.json.",
+            String::new(),
+            true,
+        );
+        let api_version = field(
+            "API version",
+            "For chat completions, e.g. 2025-04-01-preview.",
+            opt(f.api_version.clone()),
+            false,
+        );
+        let deployment = field(
+            "Deployment",
+            "Sent as the model name on every request.",
+            opt(f.deployment.clone()),
+            false,
+        );
+        let model_name = field(
+            "Model name",
+            "Shown in the UI.",
+            opt(f.model_name.clone()),
+            false,
+        );
+        let context_limit = field(
+            "Context limit",
+            "Tokens; drives the context bar.",
+            opt(f.context_limit),
+            false,
+        );
+        let max_tokens = field(
+            "Max output tokens",
+            "Per reply.",
+            opt(f.max_completion_tokens),
+            false,
+        );
+        let in_price = field(
+            "Input price / 1M",
+            "USD; for the cost estimate.",
+            opt(f.input_price_per_1m),
+            false,
+        );
+        let out_price = field(
+            "Output price / 1M",
+            "USD; for the cost estimate.",
+            opt(f.output_price_per_1m),
+            false,
+        );
+        let max_kb = field(
+            "Max file size (KB)",
+            "Larger files are listed as too large.",
+            s.workspace.max_file_size_kb.to_string(),
+            false,
+        );
+        let new_exclusion =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Add a glob, e.g. **/*.min.js"));
+        let output_prompt = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .rows(10)
+                .default_value(s.workspace.output_prompt.clone())
+        });
+        let sub = cx.observe(&app, |_, _, cx| cx.notify());
+        Self {
+            endpoint,
+            api_key,
+            api_version,
+            deployment,
+            model_name,
+            context_limit,
+            max_tokens,
+            in_price,
+            out_price,
+            max_kb,
+            new_exclusion,
+            output_prompt,
+            exclusions: s.workspace.exclusions.clone(),
+            respect_gitignore: s.workspace.respect_gitignore,
+            skip_binary: s.workspace.skip_binary,
+            include_hidden: s.workspace.include_hidden,
+            theme: s.theme,
+            remove_key: false,
+            status: None,
+            app,
+            _sub: sub,
+        }
+    }
+
+    fn text(&self, f: &Field, cx: &Context<Self>) -> Option<String> {
+        let v = f.input.read(cx).value().trim().to_string();
+        (!v.is_empty()).then_some(v)
+    }
+
+    /// Builds settings from the form; `Err` names the first invalid number.
+    fn collect(&self, cx: &Context<Self>) -> Result<(Settings, Option<String>), String> {
+        fn num<T: std::str::FromStr>(v: Option<String>, label: &str) -> Result<Option<T>, String> {
+            v.map(|s| {
+                s.parse::<T>()
+                    .map_err(|_| format!("{label} must be a number."))
+            })
+            .transpose()
+        }
+        let mut s = self.app.read(cx).settings.clone();
+        s.foundry = FoundrySettings {
+            endpoint: self.text(&self.endpoint, cx),
+            api_version: self.text(&self.api_version, cx),
+            deployment: self.text(&self.deployment, cx),
+            model_name: self.text(&self.model_name, cx),
+            max_completion_tokens: num(self.text(&self.max_tokens, cx), self.max_tokens.label)?,
+            context_limit: num(self.text(&self.context_limit, cx), self.context_limit.label)?,
+            input_price_per_1m: num(self.text(&self.in_price, cx), self.in_price.label)?,
+            output_price_per_1m: num(self.text(&self.out_price, cx), self.out_price.label)?,
+        };
+        s.workspace.exclusions = self.exclusions.clone();
+        s.workspace.max_file_size_kb =
+            num(self.text(&self.max_kb, cx), self.max_kb.label)?.unwrap_or(256.0);
+        s.workspace.respect_gitignore = self.respect_gitignore;
+        s.workspace.skip_binary = self.skip_binary;
+        s.workspace.include_hidden = self.include_hidden;
+        s.workspace.output_prompt = self.output_prompt.read(cx).value().to_string();
+        s.theme = self.theme;
+        let key = if self.remove_key {
+            Some(String::new())
+        } else {
+            self.text(&self.api_key, cx)
+        };
+        Ok((s, key))
+    }
+
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.collect(cx) {
+            Ok((s, key)) => {
+                let typed_key = key.as_ref().is_some_and(|k| !k.is_empty());
+                self.app.update(cx, |a, cx| a.save_settings(s, key, cx));
+                if typed_key || self.remove_key {
+                    self.api_key
+                        .input
+                        .update(cx, |i, cx| i.set_value("", window, cx));
+                }
+                self.remove_key = false;
+                self.status = Some("Saved.".into());
+            }
+            Err(e) => self.status = Some(e),
+        }
+        cx.notify();
+    }
+
+    fn set_theme(&mut self, theme: ThemePreference, window: &mut Window, cx: &mut Context<Self>) {
+        self.theme = theme;
+        crate::theme::apply(crate::theme::resolve(theme, window), Some(window), cx);
+        self.app.update(cx, |a, cx| {
+            let mut s = a.settings.clone();
+            s.theme = theme;
+            a.save_settings(s, None, cx);
+        });
+        cx.notify();
+    }
+
+    fn field_row(&self, f: &Field, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let c = &cx.tokens().colors;
+        div()
+            .flex()
+            .items_start()
+            .gap(sp(4))
+            .py(sp(2))
+            .child(
+                div()
+                    .w(px(LABEL_W))
+                    .flex_none()
+                    .pt(px(3.0))
+                    .child(div().text_color(hsla(c.ink)).child(f.label))
+                    .child(
+                        div()
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(f.hint),
+                    ),
+            )
+            .child(div().w(px(FIELD_W)).child(Input::new(&f.input).small()))
+    }
+
+    fn switch_row(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        on: bool,
+        toggle: fn(&mut Self),
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        div()
+            .flex()
+            .items_center()
+            .gap(sp(2))
+            .py(sp(1))
+            .child(
+                Switch::new(id, on).on_toggle(cx.listener(move |t, _, _, cx| {
+                    toggle(t);
+                    cx.notify();
+                })),
+            )
+            .child(label)
+    }
+}
+
+fn section(title: &'static str, cx: &gpui_kit::App) -> impl IntoElement + use<> {
+    let c = &cx.tokens().colors;
+    div()
+        .mt(sp(6))
+        .mb(sp(2))
+        .pb(sp(2))
+        .border_b_1()
+        .border_color(hsla(c.border))
+        .type_style(contextual_theme::type_style::UI_TITLE)
+        .text_color(hsla(c.ink_strong))
+        .child(title)
+}
+
+impl Render for SettingsScreen {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = &cx.tokens().colors;
+        let a = self.app.read(cx);
+        let test = a.connection_test.clone();
+        let persistent = a.secrets.persistent();
+        let has_key = a.has_api_key();
+        let env_note = [
+            "AZURE_OPENAI_ENDPOINT",
+            "AZURE_OPENAI_API_KEY",
+            "AZURE_OPENAI_DEPLOYMENT",
+        ]
+        .iter()
+        .any(|k| std::env::var(k).is_ok());
+        let test_line = match &test {
+            ConnectionTest::Idle => None,
+            ConnectionTest::Running => Some(("Testing…".to_string(), c.ink_muted)),
+            ConnectionTest::Ok { latency_ms } => {
+                Some((format!("Connected in {latency_ms} ms."), c.success))
+            }
+            ConnectionTest::Failed(e) => Some((e.clone(), c.danger)),
+        };
+        let chips = self
+            .exclusions
+            .iter()
+            .enumerate()
+            .map(|(i, g)| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(sp(1))
+                    .pl(sp(2))
+                    .rounded(px(contextual_theme::radius::SM))
+                    .bg(hsla(c.surface_300))
+                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                    .child(SharedString::from(g.clone()))
+                    .child(
+                        div()
+                            .id(("rm-glob", i))
+                            .px(sp(1))
+                            .cursor_pointer()
+                            .text_color(hsla(c.ink_muted))
+                            .hover(|s| s.text_color(hsla(c.ink)))
+                            .on_click(cx.listener(move |t, _, _, cx| {
+                                t.exclusions.remove(i);
+                                cx.notify();
+                            }))
+                            .child(Icon::new(IconName::Close).size(px(12.0))),
+                    )
+            })
+            .collect::<Vec<_>>();
+        let theme_buttons = [
+            (ThemePreference::Dark, "Dark"),
+            (ThemePreference::Light, "Light"),
+            (ThemePreference::System, "System"),
+        ]
+        .into_iter()
+        .map(|(t, label)| {
+            Button::new(label, label)
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Xs)
+                .selected(self.theme == t)
+                .on_click(cx.listener(move |this, _, w, cx| this.set_theme(t, w, cx)))
+        })
+        .collect::<Vec<_>>();
+
+        div()
+            .id("settings")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .items_center()
+            .overflow_y_scroll()
+            .bg(hsla(c.surface_100))
+            .type_style(contextual_theme::type_style::UI_BODY)
+            .child(
+                div()
+                    .w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
+                    .py(sp(8))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(sp(3))
+                            .child(div().flex_1().type_style(contextual_theme::type_style::UI_DISPLAY).text_color(hsla(c.ink_strong)).child("Settings"))
+                            .child(Button::new("back", "Back").on_click(cx.listener(|t, _, _, cx| t.app.update(cx, |a, cx| a.close_settings(cx)))))
+                            .child(Button::new("save", "Save").variant(ButtonVariant::Primary).on_click(cx.listener(|t, _, w, cx| t.save(w, cx)))),
+                    )
+                    .when_some(self.status.clone(), |d, s| {
+                        d.child(div().mt(sp(2)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child(SharedString::from(s)))
+                    })
+                    .child(section("Azure AI Foundry", cx))
+                    .when(env_note, |d| {
+                        d.child(
+                            div()
+                                .mb(sp(2))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child("Environment variables (AZURE_OPENAI_*) are set and override these values."),
+                        )
+                    })
+                    .child(self.field_row(&self.endpoint, cx))
+                    .child(self.field_row(&self.api_key, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(sp(3))
+                            .pl(px(LABEL_W) + sp(4))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(if persistent { c.ink_muted } else { c.warning }))
+                            .child(if persistent {
+                                "Stored in the OS keychain."
+                            } else {
+                                "No OS keychain found: the key is kept until the app quits. Set AZURE_OPENAI_API_KEY to avoid re-entering it."
+                            })
+                            .when(has_key, |d| {
+                                d.child(LinkButton::new("remove-key", "Remove stored key", cx.listener(|t, _, w, cx| {
+                                    t.remove_key = true;
+                                    t.save(w, cx)
+                                })))
+                            }),
+                    )
+                    .child(self.field_row(&self.api_version, cx))
+                    .child(self.field_row(&self.deployment, cx))
+                    .child(self.field_row(&self.model_name, cx))
+                    .child(self.field_row(&self.context_limit, cx))
+                    .child(self.field_row(&self.max_tokens, cx))
+                    .child(self.field_row(&self.in_price, cx))
+                    .child(self.field_row(&self.out_price, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(sp(3))
+                            .pt(sp(2))
+                            .pl(px(LABEL_W) + sp(4))
+                            .child(
+                                Button::new("test", "Test connection")
+                                    .disabled(test == ConnectionTest::Running)
+                                    .on_click(cx.listener(|t, _, _, cx| t.app.update(cx, |a, cx| a.test_connection(cx)))),
+                            )
+                            .when_some(test_line, |d, (text, color)| {
+                                d.child(div().flex_1().type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(color)).child(SharedString::from(text)))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .pl(px(LABEL_W) + sp(4))
+                            .pt(sp(1))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child("Test uses the saved settings: save first."),
+                    )
+                    .child(section("Exclusions", cx))
+                    .child(div().flex().flex_wrap().gap(sp(1)).py(sp(2)).children(chips))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(sp(2))
+                            .w(px(FIELD_W))
+                            .child(div().flex_1().child(Input::new(&self.new_exclusion).small()))
+                            .child(Button::new("add-glob", "Add").on_click(cx.listener(|t, _, w, cx| {
+                                let g = t.new_exclusion.read(cx).value().trim().to_string();
+                                if !g.is_empty() && !t.exclusions.contains(&g) {
+                                    t.exclusions.push(g);
+                                    t.new_exclusion.update(cx, |i, cx| i.set_value("", w, cx));
+                                    cx.notify();
+                                }
+                            }))),
+                    )
+                    .child(self.field_row(&self.max_kb, cx))
+                    .child(self.switch_row("respect", "Respect .gitignore", self.respect_gitignore, |t| t.respect_gitignore = !t.respect_gitignore, cx))
+                    .child(self.switch_row("binary", "Skip binary files", self.skip_binary, |t| t.skip_binary = !t.skip_binary, cx))
+                    .child(self.switch_row("hidden", "Include hidden files", self.include_hidden, |t| t.include_hidden = !t.include_hidden, cx))
+                    .child(section("Output format", cx))
+                    .child(
+                        div()
+                            .mb(sp(2))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child("System prompt that tells the model how to return changes. The edit format is appended automatically."),
+                    )
+                    .child(div().type_style(contextual_theme::type_style::CODE_SMALL).child(Textarea::new(&self.output_prompt)))
+                    .child(section("Appearance", cx))
+                    .child(div().flex().gap(sp(1)).children(theme_buttons)),
+            )
+    }
+}

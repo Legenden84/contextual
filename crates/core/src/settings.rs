@@ -4,7 +4,13 @@
 //! env-var stores here).
 
 use crate::llm::config::{self, ConfigProblems, FoundryConfig, read_foundry_config};
+use crate::logic::context::FALLBACK_CONTEXT_LIMIT;
+use crate::logic::defaults::{
+    DEFAULT_EXCLUSIONS, LEGACY_OUTPUT_PROMPTS, OUTPUT_PROMPT, placeholder_deployment,
+};
+use crate::logic::types::Deployment;
 use crate::{Error, Result};
+use contextual_protocol::fs::ScanOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -65,14 +71,95 @@ impl FoundrySettings {
     }
 }
 
-/// Contents of `settings.json`. Unknown keys (UI settings added by the app) are kept.
+/// What gets scanned and how the model is asked to answer (Settings → Exclusions, Output format).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WorkspaceSettings {
+    pub exclusions: Vec<String>,
+    pub max_file_size_kb: f64,
+    pub respect_gitignore: bool,
+    pub skip_binary: bool,
+    pub include_hidden: bool,
+    /// The user's output-format prompt (the built-in edit format is appended separately).
+    pub output_prompt: String,
+}
+
+impl Default for WorkspaceSettings {
+    fn default() -> Self {
+        Self {
+            exclusions: DEFAULT_EXCLUSIONS.iter().map(|s| s.to_string()).collect(),
+            max_file_size_kb: 256.0,
+            respect_gitignore: true,
+            skip_binary: true,
+            include_hidden: false,
+            output_prompt: OUTPUT_PROMPT.to_string(),
+        }
+    }
+}
+
+impl WorkspaceSettings {
+    pub fn scan_options(&self) -> ScanOptions {
+        ScanOptions {
+            exclusions: self.exclusions.clone(),
+            max_file_size_kb: self.max_file_size_kb,
+            respect_gitignore: self.respect_gitignore,
+            skip_binary: self.skip_binary,
+            include_hidden: self.include_hidden,
+        }
+    }
+
+    /// Fixes values an older version or a hand edit may have left (like `readSettings` did).
+    fn normalise(&mut self) {
+        // Also catches NaN.
+        if self.max_file_size_kb.is_nan() || self.max_file_size_kb <= 0.0 {
+            self.max_file_size_kb = 256.0;
+        }
+        // An unedited old default prompt is replaced by the current one; the user's own is kept.
+        if self.output_prompt.trim().is_empty()
+            || LEGACY_OUTPUT_PROMPTS.contains(&self.output_prompt.as_str())
+        {
+            self.output_prompt = OUTPUT_PROMPT.to_string();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    #[default]
+    Dark,
+    Light,
+    /// Follow the OS appearance.
+    System,
+}
+
+/// Contents of `settings.json`. Unknown keys are kept, so an older app doesn't drop newer settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
     pub foundry: FoundrySettings,
+    #[serde(default)]
+    pub workspace: WorkspaceSettings,
+    #[serde(default)]
+    pub theme: ThemePreference,
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Settings {
+    /// The deployment the context bar and cost estimate use, from the resolved Foundry config.
+    pub fn deployment(config: Option<&FoundryConfig>) -> Deployment {
+        match config {
+            Some(c) => Deployment {
+                name: c.deployment.clone(),
+                limit: c.context_limit.unwrap_or(FALLBACK_CONTEXT_LIMIT),
+                in_price: c.input_price_per_1m.unwrap_or(0.0),
+                out_price: c.output_price_per_1m.unwrap_or(0.0),
+            },
+            None => placeholder_deployment(),
+        }
+    }
 }
 
 /// Reads and writes `settings.json`.
@@ -105,8 +192,13 @@ impl SettingsStore {
     /// The settings, or defaults when the file doesn't exist yet.
     pub fn load(&self) -> Result<Settings> {
         match std::fs::read_to_string(&self.path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map_err(|e| Error::invalid(format!("{} is not valid: {e}", self.path.display()))),
+            Ok(text) => {
+                let mut s: Settings = serde_json::from_str(&text).map_err(|e| {
+                    Error::invalid(format!("{} is not valid: {e}", self.path.display()))
+                })?;
+                s.workspace.normalise();
+                Ok(s)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
             Err(e) => Err(e.into()),
         }
@@ -275,7 +367,7 @@ mod tests {
         let store = SettingsStore::new(dir.path().join("cfg").join("settings.json"));
         assert_eq!(store.load().unwrap(), Settings::default());
         let mut s = settings();
-        s.other.insert("theme".into(), "dark".into());
+        s.other.insert("futureSetting".into(), "kept".into());
         store.save(&s).unwrap();
         let text = std::fs::read_to_string(store.path()).unwrap();
         assert!(!text.to_lowercase().contains("apikey"));
