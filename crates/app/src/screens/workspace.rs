@@ -14,7 +14,7 @@ use gpui_kit::{
 
 use crate::state::chat::{CenterView, ChatModel};
 use crate::state::scm::ScmModel;
-use crate::state::{AppModel, Project, Tab};
+use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, file_glyph};
 use crate::views::branch_picker::BranchPicker;
@@ -96,6 +96,18 @@ impl WorkspaceScreen {
                 cx.notify();
             }),
             cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&app, window, |this, _, _: &ReturnToChat, window, cx| {
+                this.project.update(cx, |p, cx| {
+                    p.activate(Tab::Chat);
+                    cx.notify();
+                });
+                this.chat.update(cx, |chat, cx| {
+                    chat.center = CenterView::Chat;
+                    cx.notify();
+                });
+                this.chat_panel.update(cx, |panel, cx| panel.focus_input(window, cx));
+                cx.notify();
+            }),
         ];
         let host = app.update(cx, |a, _| a.host());
         let scm = app.read(cx).scm.clone().unwrap_or_else(|| {

@@ -19,7 +19,7 @@ use contextual_core::settings::{
     API_KEY_SECRET, SecretStore, Settings, SettingsStore, resolve_foundry_config_from_env,
 };
 use contextual_protocol::fs::Scan;
-use gpui_kit::{AppContext, Context, Entity};
+use gpui_kit::{AppContext, Context, Entity, EventEmitter};
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
@@ -32,6 +32,9 @@ pub enum Screen {
     Workspace,
     Settings,
 }
+
+/// Settings were saved explicitly: reveal the chat without replacing its draft or thread.
+pub struct ReturnToChat;
 
 /// Result of the last "Test connection".
 #[derive(Clone, Debug, PartialEq)]
@@ -65,6 +68,8 @@ pub struct AppModel {
     pub error: Option<String>,
     pub folder_dialog_open: bool,
 }
+
+impl EventEmitter<ReturnToChat> for AppModel {}
 
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
@@ -163,35 +168,60 @@ impl AppModel {
         }
     }
 
-    /// Saves settings (and the API key, when given) and applies them.
+    /// Saves settings for inline controls, reporting failures through the app error.
     pub fn save_settings(
         &mut self,
         settings: Settings,
         api_key: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let rescan = settings.workspace != self.settings.workspace;
-        self.settings = settings;
-        if let Some(store) = &self.settings_store
-            && let Err(e) = store.save(&self.settings)
-        {
-            self.error = Some(format!("Couldn't save settings: {}", e.message));
+        if let Err(error) = self.try_save_settings(settings, api_key, cx) {
+            self.error = Some(error);
+            cx.notify();
         }
+    }
+
+    /// Persists and applies settings. The form stays open if either write fails.
+    pub fn try_save_settings(
+        &mut self,
+        settings: Settings,
+        api_key: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let store = self
+            .settings_store
+            .as_ref()
+            .ok_or_else(|| "Couldn't save settings: no settings directory is available.".to_string())?;
+        store
+            .save(&settings)
+            .map_err(|e| format!("Couldn't save settings: {}", e.message))?;
         if let Some(key) = api_key {
             let result = if key.trim().is_empty() {
                 self.secrets.delete(API_KEY_SECRET)
             } else {
                 self.secrets.set(API_KEY_SECRET, key.trim())
             };
-            if let Err(e) = result {
-                self.error = Some(format!("Couldn't store the API key: {}", e.message));
-            }
+            result.map_err(|e| format!("Couldn't store the API key: {}", e.message))?;
         }
+        let rescan = settings.workspace != self.settings.workspace;
+        self.settings = settings;
         self.refresh_foundry();
         self.connection_test = ConnectionTest::Idle;
         if rescan {
             self.rescan(cx);
         }
+        cx.notify();
+        Ok(())
+    }
+
+    /// Explicit Save returns to Chat; ordinary inline settings changes do not navigate.
+    pub fn finish_settings(&mut self, cx: &mut Context<Self>) {
+        self.screen = if self.project.is_some() {
+            cx.emit(ReturnToChat);
+            Screen::Workspace
+        } else {
+            Screen::Welcome
+        };
         cx.notify();
     }
 

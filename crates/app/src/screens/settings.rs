@@ -313,22 +313,33 @@ impl SettingsScreen {
         cx.notify();
     }
 
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.collect(cx) {
-            Ok((s, key)) => {
-                let typed_key = key.as_ref().is_some_and(|k| !k.is_empty());
-                self.app.update(cx, |a, cx| a.save_settings(s, key, cx));
-                if typed_key || self.remove_key {
-                    self.api_key
-                        .input
-                        .update(cx, |i, cx| i.set_value("", window, cx));
-                }
+    fn persist(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let result = self
+            .collect(cx)
+            .and_then(|(s, key)| self.app.update(cx, |a, cx| a.try_save_settings(s, key, cx)));
+        match result {
+            Ok(()) => {
+                self.api_key
+                    .input
+                    .update(cx, |i, cx| i.set_value("", window, cx));
                 self.remove_key = false;
+                self.imported_key = None;
                 self.status = Some("Saved.".into());
+                cx.notify();
+                true
             }
-            Err(e) => self.status = Some(e),
+            Err(e) => {
+                self.status = Some(e);
+                cx.notify();
+                false
+            }
         }
-        cx.notify();
+    }
+
+    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.persist(window, cx) {
+            self.app.update(cx, |a, cx| a.finish_settings(cx));
+        }
     }
 
     /// The general list and the framework presets back to the defaults (saved on Save).
@@ -613,7 +624,7 @@ impl Render for SettingsScreen {
                             .when(has_key, |d| {
                                 d.child(LinkButton::new("remove-key", "Remove stored key", cx.listener(|t, _, w, cx| {
                                     t.remove_key = true;
-                                    t.save(w, cx)
+                                    t.persist(w, cx);
                                 })))
                             }),
                     )

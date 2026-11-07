@@ -6,6 +6,8 @@ use std::io::Read as _;
 use std::path::PathBuf;
 
 use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
+use contextual_core::llm::config;
+use contextual_core::logic::foundry_status::FoundryStatus;
 use contextual_core::logic::format::fmt_k;
 use contextual_core::logic::images::{
     Attachment, IMAGE_TYPES, MAX_SOURCE_BYTES, attachment_name, clipboard_attachment, to_attachment,
@@ -16,8 +18,8 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
-    InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, PathPromptOptions,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Focusable, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
+    PathPromptOptions, PromptLevel, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     WeakEntity, Window, div, list, px,
 };
 
@@ -40,6 +42,7 @@ pub struct ChatPanel {
     rendered: usize,
     image_loading: bool,
     image_error: Option<String>,
+    settings_prompt_open: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -104,6 +107,39 @@ fn mime_for_path(p: &std::path::Path) -> Option<&'static str> {
     IMAGE_TYPES.contains(&m).then_some(m)
 }
 
+fn settings_prompt_detail(status: &FoundryStatus) -> String {
+    fn label(name: &str) -> &str {
+        match name {
+            config::ENV_ENDPOINT => "Endpoint",
+            config::ENV_API_KEY => "API key",
+            config::ENV_API_VERSION => "API version",
+            config::ENV_DEPLOYMENT => "Deployment",
+            config::ENV_MODEL_NAME => "Model name",
+            config::ENV_MAX_COMPLETION_TOKENS => "Max output tokens",
+            config::ENV_CONTEXT_LIMIT => "Context limit",
+            config::ENV_INPUT_PRICE => "Input price / 1M",
+            config::ENV_OUTPUT_PRICE => "Output price / 1M",
+            other => other,
+        }
+    }
+
+    let mut lines = vec!["Your message has not been sent.".to_string()];
+    if let FoundryStatus::Unconfigured { missing, invalid } = status {
+        for (title, fields) in [("Missing", missing), ("Invalid", invalid)] {
+            if !fields.is_empty() {
+                let names = fields.iter().map(|f| label(f)).collect::<Vec<_>>();
+                lines.push(format!("{title}: {}.", names.join(", ")));
+            }
+        }
+    }
+    lines.push(
+        "Open Settings to update Azure AI Foundry. Environment variables override saved values."
+            .to_string(),
+    );
+    lines.push("Your draft and attachments will stay in Chat. Save settings, then send again.".into());
+    lines.join("\n\n")
+}
+
 impl ChatPanel {
     pub fn new(
         app: Entity<AppModel>,
@@ -152,8 +188,13 @@ impl ChatPanel {
             rendered: count,
             image_loading: false,
             image_error: None,
+            settings_prompt_open: false,
             _subs: subs,
         }
+    }
+
+    pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.input.read(cx).focus_handle(cx), cx);
     }
 
     /// Sends `text` as if typed (debug automation, see `dev.rs`).
@@ -166,6 +207,7 @@ impl ChatPanel {
         let text = self.input.read(cx).value().trim().to_string();
         let chat = self.chat.read(cx);
         if self.image_loading
+            || self.settings_prompt_open
             || chat.streaming()
             || (text.is_empty() && chat.attachments.is_empty())
         {
@@ -173,10 +215,26 @@ impl ChatPanel {
         }
         let a = self.app.read(cx);
         let Some(config) = a.config.clone() else {
-            self.app.update(cx, |a, cx| {
-                a.error = Some("Foundry is not configured: open Settings.".into());
-                cx.notify();
-            });
+            let detail = settings_prompt_detail(&a.foundry);
+            self.settings_prompt_open = true;
+            let answer = window.prompt(
+                PromptLevel::Warning,
+                "Check your AI settings",
+                Some(&detail),
+                &["Open Settings", "Cancel"],
+                cx,
+            );
+            cx.spawn(async move |this, cx| {
+                let open_settings = matches!(answer.await, Ok(0));
+                let _ = this.update(cx, |this, cx| {
+                    this.settings_prompt_open = false;
+                    if open_settings {
+                        this.app.update(cx, |a, cx| a.open_settings(cx));
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
             return;
         };
         let auto = a.settings.chat.model_picks_files;
@@ -844,7 +902,7 @@ impl Render for ChatPanel {
                                                     d.child(
                                                         Button::new("send", "Send")
                                                             .variant(ButtonVariant::Primary)
-                                                            .disabled(self.image_loading)
+                                                            .disabled(self.image_loading || self.settings_prompt_open)
                                                             .on_click(cx.listener(
                                                                 |t, _, w, cx| t.send(w, cx),
                                                             )),
@@ -855,5 +913,32 @@ impl Render for ChatPanel {
                             ),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_prompt_names_missing_and_invalid_fields() {
+        let detail = settings_prompt_detail(&FoundryStatus::Unconfigured {
+            missing: vec![config::ENV_API_KEY.into(), config::ENV_DEPLOYMENT.into()],
+            invalid: vec![config::ENV_ENDPOINT.into()],
+        });
+        assert!(detail.contains("Missing: API key, Deployment."));
+        assert!(detail.contains("Invalid: Endpoint."));
+        assert!(detail.contains("Your message has not been sent."));
+        assert!(!detail.contains(".env.example"));
+    }
+
+    #[test]
+    fn settings_prompt_omits_empty_problem_lists() {
+        let detail = settings_prompt_detail(&FoundryStatus::Unconfigured {
+            missing: vec![config::ENV_API_VERSION.into()],
+            invalid: Vec::new(),
+        });
+        assert!(detail.contains("Missing: API version."));
+        assert!(!detail.contains("Invalid:"));
     }
 }
