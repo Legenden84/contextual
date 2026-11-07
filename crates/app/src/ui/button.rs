@@ -1,3 +1,4 @@
+use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
@@ -29,6 +30,7 @@ type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 pub struct Button {
     id: ElementId,
     label: SharedString,
+    icon: Option<IconName>,
     variant: ButtonVariant,
     size: ButtonSize,
     selected: bool,
@@ -41,12 +43,17 @@ impl Button {
         Self {
             id: id.into(),
             label: label.into(),
+            icon: None,
             variant: ButtonVariant::default(),
             size: ButtonSize::default(),
             selected: false,
             disabled: false,
             on_click: None,
         }
+    }
+    pub fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
     }
     pub fn variant(mut self, v: ButtonVariant) -> Self {
         self.variant = v;
@@ -128,6 +135,9 @@ impl RenderOnce for Button {
             })
             .when_some(self.on_click.filter(|_| !disabled), |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
+            })
+            .when_some(self.icon, |d, icon| {
+                d.child(Icon::new(icon).size(sp(4)))
             })
             .child(self.label)
     }

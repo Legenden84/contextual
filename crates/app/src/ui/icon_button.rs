@@ -17,6 +17,7 @@ pub struct IconButton {
     id: ElementId,
     icon: IconName,
     label: SharedString,
+    disabled: bool,
     on_click: Option<OnClick>,
 }
 
@@ -26,8 +27,13 @@ impl IconButton {
             id: id.into(),
             icon,
             label: label.into(),
+            disabled: false,
             on_click: None,
         }
+    }
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
     }
     pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Box::new(f));
@@ -47,14 +53,17 @@ impl RenderOnce for IconButton {
             .justify_center()
             .size(row_height())
             .rounded(px(contextual_theme::radius::SM))
-            .text_color(hsla(c.ink_muted))
-            .cursor_pointer()
-            .hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
+            .text_color(hsla(if self.disabled { c.ink_faint } else { c.ink_muted }))
+            .when(self.disabled, |d| d.cursor_not_allowed())
+            .when(!self.disabled, |d| {
+                d.cursor_pointer()
+                    .hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
+            })
             .tooltip(move |window, cx| {
                 gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
             })
             .child(Icon::new(self.icon).size(px(GLYPH)))
-            .when_some(self.on_click, |d, f| {
+            .when_some(self.on_click.filter(|_| !self.disabled), |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
             })
     }

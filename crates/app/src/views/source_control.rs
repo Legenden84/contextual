@@ -63,11 +63,12 @@ impl SourceControl {
             cx.observe(&scm, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
             cx.subscribe_in(&message, window, |this, _, e: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter {
-                    secondary: true, ..
-                } = e
-                {
-                    this.commit(window, cx);
+                match e {
+                    InputEvent::Change => cx.notify(),
+                    InputEvent::PressEnter {
+                        secondary: true, ..
+                    } => this.commit(window, cx),
+                    _ => {}
                 }
             }),
         ];
@@ -111,15 +112,20 @@ impl SourceControl {
             None => (String::new(), e.path.clone()),
         };
         let (open_path, act_path) = (e.path.clone(), e.path.clone());
+        let full_path = SharedString::from(e.path.clone());
         div()
             .id((if staged { "staged" } else { "change" }, i))
             .flex()
             .items_center()
-            .gap(px(6.0))
+            .gap(sp(1))
             .h(row_height())
             .pl(sp(6))
             .pr(sp(2))
+            .type_style(contextual_theme::type_style::UI_SMALL)
             .cursor_pointer()
+            .tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(full_path.clone()).build(window, cx)
+            })
             .when(active, |d| d.bg(hsla(c.surface_selected)))
             .when(!active, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
             .on_click(cx.listener(move |t, _, _, cx| {
@@ -132,7 +138,10 @@ impl SourceControl {
             .child(file_glyph(&name, cx))
             .child(
                 div()
-                    .flex_none()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
                     .when(e.letter == ChangeLetter::D, |d| d.line_through())
                     .child(SharedString::from(name)),
             )
@@ -143,37 +152,36 @@ impl SourceControl {
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .text_size(px(11.0))
+                    .type_style(contextual_theme::type_style::CODE_SMALL)
                     .text_color(hsla(c.ink_muted))
                     .child(SharedString::from(dir)),
             )
-            .when(!busy, |d| {
-                d.child(
-                    IconButton::new(
-                        (if staged { "unstage" } else { "stage" }, i),
-                        if staged {
-                            IconName::Minus
-                        } else {
-                            IconName::Plus
-                        },
-                        if staged { "Unstage" } else { "Stage" },
-                    )
-                    .on_click(cx.listener(move |t, _, _, cx| {
-                        cx.stop_propagation();
-                        let p = vec![act_path.clone()];
-                        t.scm.update(cx, |s, cx| {
-                            if staged {
-                                s.unstage(p, cx)
-                            } else {
-                                s.stage(p, cx)
-                            }
-                        })
-                    })),
+            .child(
+                IconButton::new(
+                    (if staged { "unstage" } else { "stage" }, i),
+                    if staged {
+                        IconName::Minus
+                    } else {
+                        IconName::Plus
+                    },
+                    if staged { "Unstage changes" } else { "Stage changes" },
                 )
-            })
+                .disabled(busy)
+                .on_click(cx.listener(move |t, _, _, cx| {
+                    cx.stop_propagation();
+                    let p = vec![act_path.clone()];
+                    t.scm.update(cx, |s, cx| {
+                        if staged {
+                            s.unstage(p, cx)
+                        } else {
+                            s.stage(p, cx)
+                        }
+                    })
+                })),
+            )
             .child(
                 div()
-                    .w(px(12.0))
+                    .w(sp(3))
                     .flex_none()
                     .type_style(contextual_theme::type_style::CODE_SMALL)
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -222,11 +230,14 @@ impl SourceControl {
                     .items_center()
                     .gap(sp(1))
                     .h(row_height())
-                    .pl(px(6.0))
+                    .pl(sp(1))
                     .pr(sp(2))
                     .cursor_pointer()
-                    .type_style(contextual_theme::type_style::UI_CAPTION)
-                    .text_color(hsla(c.ink_muted))
+                    .bg(hsla(c.surface_100))
+                    .hover(|s| s.bg(hsla(c.surface_hover)))
+                    .type_style(contextual_theme::type_style::UI_SMALL)
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(hsla(c.ink))
                     .on_click(cx.listener(move |t, _, _, cx| {
                         if staged {
                             t.staged_open = !t.staged_open
@@ -241,39 +252,32 @@ impl SourceControl {
                         } else {
                             IconName::ChevronRight
                         })
-                        .size(px(14.0)),
+                        .size(sp(4)),
                     )
+                    .child(div().flex_1().child(title))
                     .child(
-                        div()
-                            .flex_1()
-                            .child(SharedString::from(title.to_uppercase())),
-                    )
-                    .when(!busy, |d| {
-                        d.child(
-                            IconButton::new(
-                                if staged { "unstage-all" } else { "stage-all" },
-                                if staged {
-                                    IconName::Minus
-                                } else {
-                                    IconName::Plus
-                                },
-                                if staged { "Unstage all" } else { "Stage all" },
-                            )
-                            .on_click(cx.listener(
-                                move |t, _, _, cx| {
-                                    cx.stop_propagation();
-                                    let p = paths.clone();
-                                    t.scm.update(cx, |s, cx| {
-                                        if staged {
-                                            s.unstage(p, cx)
-                                        } else {
-                                            s.stage(p, cx)
-                                        }
-                                    })
-                                },
-                            )),
+                        IconButton::new(
+                            if staged { "unstage-all" } else { "stage-all" },
+                            if staged {
+                                IconName::Minus
+                            } else {
+                                IconName::Plus
+                            },
+                            if staged { "Unstage all changes" } else { "Stage all changes" },
                         )
-                    })
+                        .disabled(busy)
+                        .on_click(cx.listener(move |t, _, _, cx| {
+                            cx.stop_propagation();
+                            let p = paths.clone();
+                            t.scm.update(cx, |s, cx| {
+                                if staged {
+                                    s.unstage(p, cx)
+                                } else {
+                                    s.stage(p, cx)
+                                }
+                            })
+                        })),
+                    )
                     .child(count(entries.len(), cx)),
             )
             .children(rows)
@@ -289,6 +293,21 @@ impl Render for SourceControl {
         }
         let c = &cx.tokens().colors;
         let s = self.scm.read(cx);
+        let configured = self.app.read(cx).config.is_some();
+        let has_changes = s
+            .status
+            .as_ref()
+            .is_some_and(|st| !st.staged.is_empty() || !st.changes.is_empty());
+        let can_draft = configured && s.busy.is_none() && has_changes;
+        let draft_hint = if !configured {
+            "Configure Foundry in Settings to draft a commit message"
+        } else if s.busy == Some("Drafting") {
+            "Drafting commit message…"
+        } else if !has_changes {
+            "No changes to draft a commit message for"
+        } else {
+            "Draft commit message with AI"
+        };
         let header = div()
             .flex()
             .flex_none()
@@ -304,7 +323,17 @@ impl Render for SourceControl {
                     .child("SOURCE CONTROL"),
             )
             .child(
-                IconButton::new("scm-refresh", IconName::Redo, "Refresh")
+                IconButton::new("draft", IconName::Bot, draft_hint)
+                    .disabled(!can_draft)
+                    .on_click(cx.listener(|t, _, _, cx| {
+                        if let Some(cfg) = t.app.read(cx).config.clone() {
+                            t.scm.update(cx, |s, cx| s.draft_message(cfg, cx));
+                        }
+                    })),
+            )
+            .child(
+                IconButton::new("scm-refresh", IconName::Redo, "Refresh changes")
+                    .disabled(s.busy.is_some())
                     .on_click(cx.listener(|t, _, _, cx| t.scm.update(cx, |s, cx| s.refresh(cx)))),
             );
         let Some(st) = s.status.clone() else {
@@ -349,9 +378,6 @@ impl Render for SourceControl {
             ),
             (_, None) => "Publish branch".into(),
         };
-        let can_draft = self.app.read(cx).config.is_some()
-            && busy.is_none()
-            && (!st.staged.is_empty() || !st.changes.is_empty());
         let empty = st.staged.is_empty() && st.changes.is_empty() && st.conflicts.is_empty();
         let ahead_behind = (st.upstream.is_some() && (st.ahead > 0 || st.behind > 0)).then(|| {
             let mut s = String::new();
@@ -369,6 +395,9 @@ impl Render for SourceControl {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
+            .type_style(contextual_theme::type_style::UI_BODY)
+            .text_color(hsla(c.ink))
             .child(header)
             .child(
                 div()
@@ -377,32 +406,36 @@ impl Render for SourceControl {
                     .flex_none()
                     .gap(sp(2))
                     .px(sp(3))
-                    .pb(sp(2))
+                    .pb(sp(3))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(6.0))
+                            .gap(sp(2))
                             .type_style(contextual_theme::type_style::UI_SMALL)
                             .text_color(hsla(c.ink_muted))
                             .child(
                                 div()
                                     .id("scm-branch")
                                     .flex()
+                                    .flex_1()
                                     .items_center()
-                                    .gap(px(6.0))
+                                    .gap(sp(1))
                                     .min_w_0()
+                                    .h(row_height())
+                                    .rounded(px(contextual_theme::radius::SM))
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(hsla(c.ink)))
+                                    .hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
                                     .on_click(cx.listener(|t, _, _, cx| {
                                         t.scm.update(cx, |s, cx| s.open_branch_picker(cx))
                                     }))
                                     .child(
                                         Icon::new(gpui_kit::assets::IconName::GitBranch)
-                                            .size(px(14.0)),
+                                            .size(sp(4)),
                                     )
                                     .child(
                                         div()
+                                            .min_w_0()
                                             .overflow_hidden()
                                             .text_ellipsis()
                                             .whitespace_nowrap()
@@ -414,51 +447,22 @@ impl Render for SourceControl {
                                                     .unwrap_or_else(|| "(detached)".into()),
                                             )),
                                     )
-                                    .child(Icon::new(IconName::ChevronDown).size(px(12.0))),
+                                    .child(Icon::new(IconName::ChevronDown).size(sp(3))),
                             )
                             .when_some(ahead_behind, |d, ab| {
                                 d.child(
                                     div()
+                                        .flex_none()
                                         .type_style(contextual_theme::type_style::CODE_SMALL)
                                         .child(SharedString::from(ab)),
                                 )
-                            })
-                            .when(st.upstream.is_none() && st.branch.is_some(), |d| {
-                                d.child("· not published")
                             }),
                     )
+                    .child(Textarea::new(&self.message))
                     .child(
-                        div()
-                            .relative()
-                            .rounded(px(contextual_theme::radius::MD))
-                            .border_1()
-                            .border_color(hsla(c.border_strong))
-                            .bg(hsla(c.surface_100))
-                            .child(Textarea::new(&self.message).appearance(false))
-                            .when(can_draft, |d| {
-                                d.child(
-                                    div().absolute().top(px(2.0)).right(px(2.0)).child(
-                                        IconButton::new(
-                                            "draft",
-                                            IconName::Bot,
-                                            "Draft the message with AI",
-                                        )
-                                        .on_click(
-                                            cx.listener(|t, _, _, cx| {
-                                                if let Some(cfg) = t.app.read(cx).config.clone() {
-                                                    t.scm.update(cx, |s, cx| {
-                                                        s.draft_message(cfg, cx)
-                                                    });
-                                                }
-                                            }),
-                                        ),
-                                    ),
-                                )
-                            }),
-                    )
-                    .child(
-                        div().flex().child(
+                        div().flex().flex_col().child(
                             Button::new("commit", commit_label)
+                                .icon(IconName::Check)
                                 .variant(ButtonVariant::Primary)
                                 .disabled(!can_commit)
                                 .on_click(cx.listener(|t, _, w, cx| t.commit(w, cx))),
@@ -467,15 +471,16 @@ impl Render for SourceControl {
                     .when(all && busy.is_none(), |d| {
                         d.child(
                             div()
-                                .text_size(px(11.0))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
                                 .text_color(hsla(c.ink_muted))
-                                .child("Nothing is staged, so all changes will be committed."),
+                                .child("Nothing staged. Commit all includes every change."),
                         )
                     })
                     .when(show_push, |d| {
                         d.child(
-                            div().flex().child(
+                            div().flex().flex_col().child(
                                 Button::new("push", push_label)
+                                    .icon(IconName::ArrowUp)
                                     .disabled(busy.is_some())
                                     .on_click(cx.listener(|t, _, _, cx| {
                                         t.scm.update(cx, |s, cx| s.push(cx))
@@ -520,6 +525,8 @@ impl Render for SourceControl {
                                 .px(sp(2))
                                 .py(sp(1))
                                 .rounded(px(contextual_theme::radius::SM))
+                                .border_1()
+                                .border_color(hsla(c.warning_border))
                                 .bg(hsla(c.warning_bg))
                                 .type_style(contextual_theme::type_style::UI_SMALL)
                                 .child(SharedString::from(format!(
@@ -538,11 +545,15 @@ impl Render for SourceControl {
                     .when(empty, |d| {
                         d.child(
                             div()
+                                .flex()
+                                .items_center()
+                                .gap(sp(2))
                                 .px(sp(3))
-                                .py(sp(2))
+                                .py(sp(3))
                                 .type_style(contextual_theme::type_style::UI_SMALL)
                                 .text_color(hsla(c.ink_muted))
-                                .child("No changes. The working tree matches the last commit."),
+                                .child(Icon::new(IconName::Check).size(sp(4)))
+                                .child("No pending changes."),
                         )
                     }),
             )
