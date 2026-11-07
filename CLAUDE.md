@@ -50,7 +50,8 @@ Rust is in `~/.cargo/bin`. Development is Linux-only; the app runs through WSLg.
 - Static agent: `cargo build -p contextual-agent --release --target x86_64-unknown-linux-musl`.
 - Checking flows without clicking (debug builds only, `crates/app/src/dev.rs`):
   `CONTEXTUAL_DEV_SEND="…" CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats|inspect`,
-  `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<msg>|switch:<branch>`,
+  `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<msg>|switch:<branch>`
+  (`envfile` with `--settings`: the env-file picker),
   `CONTEXTUAL_DEV_REMOTE=1` (serve projects through a local agent: the WSL code path). Point
   `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand.
 - Test fixtures were recorded from the old TypeScript app; see `crates/core/tests/fixtures/README.md`.

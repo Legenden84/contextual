@@ -9,6 +9,7 @@ pub mod context_bar;
 pub mod diff_cache;
 pub mod diff_rows;
 pub mod diff_screen;
+pub mod env_file_dialog;
 pub mod explorer;
 pub mod folder_dialog;
 pub mod git_diff;

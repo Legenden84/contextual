@@ -3,6 +3,7 @@
 //! sends `text`; `CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats|inspect` then takes one action after the
 //! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<message>|switch:<branch>`
 //! opens that view, or runs that Source Control action, at startup.
+//! `CONTEXTUAL_DEV_OPEN=envfile` with `--settings` opens the env-file picker in Settings.
 
 use contextual_core::chat::Role;
 use gpui_kit::{App, Entity, Window};

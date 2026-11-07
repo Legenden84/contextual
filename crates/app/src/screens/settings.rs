@@ -13,6 +13,7 @@ use gpui_kit::{
 use crate::state::{AppModel, ConnectionTest};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, LinkButton, Switch};
+use crate::views::env_file_dialog::{EnvFileDialog, EnvFileEvent};
 use crate::views::presets_editor::PresetsEditor;
 
 const LABEL_W: f32 = 200.0;
@@ -51,6 +52,8 @@ pub struct SettingsScreen {
     /// An API key read from `.env.local`, stored on Save (unless one was typed).
     imported_key: Option<String>,
     status: Option<String>,
+    /// The env-file picker, while open.
+    env_dialog: Option<(Entity<EnvFileDialog>, Subscription)>,
     _sub: Subscription,
 }
 
@@ -161,6 +164,13 @@ impl SettingsScreen {
             .unwrap_or_default();
         let presets = cx.new(|_| PresetsEditor::new(s.workspace.presets.clone(), detected));
         let sub = cx.observe(&app, |_, _, cx| cx.notify());
+        if cfg!(debug_assertions)
+            && std::env::var("CONTEXTUAL_DEV_OPEN").as_deref() == Ok("envfile")
+        {
+            cx.defer_in(window, |this: &mut Self, window, cx| {
+                this.browse_env(window, cx)
+            });
+        }
         Self {
             endpoint,
             api_key,
@@ -184,6 +194,7 @@ impl SettingsScreen {
             env_path,
             imported_key: None,
             status: None,
+            env_dialog: None,
             app,
             _sub: sub,
         }
@@ -230,6 +241,24 @@ impl SettingsScreen {
                 .or_else(|| self.imported_key.clone())
         };
         Ok((s, key))
+    }
+
+    /// Opens the env-file picker at the path typed so far.
+    fn browse_env(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let start = self.env_path.read(cx).value().trim().to_string();
+        let dialog = cx.new(|cx| EnvFileDialog::new(Some(start), window, cx));
+        let sub = cx.subscribe_in(&dialog, window, |this, _, e: &EnvFileEvent, window, cx| {
+            if let EnvFileEvent::Picked(path) = e {
+                let path = path.clone();
+                this.env_path
+                    .update(cx, |i, cx| i.set_value(path, window, cx));
+                this.import_env(window, cx);
+            }
+            this.env_dialog = None;
+            cx.notify();
+        });
+        self.env_dialog = Some((dialog, sub));
+        cx.notify();
     }
 
     /// Fills the Foundry fields from the old app's `.env.local` (review, then Save).
@@ -508,7 +537,8 @@ impl Render for SettingsScreen {
         })
         .collect::<Vec<_>>();
 
-        div()
+        let env_dialog = self.env_dialog.as_ref().map(|(d, _)| d.clone());
+        let page = div()
             .id("settings")
             .flex()
             .flex_col()
@@ -545,6 +575,7 @@ impl Render for SettingsScreen {
                             .text_color(hsla(c.ink_muted))
                             .child("Import from the old app:")
                             .child(div().flex_1().child(Input::new(&self.env_path)))
+                            .child(Button::new("browse-env", "Browse…").on_click(cx.listener(|t, _, w, cx| t.browse_env(w, cx))))
                             .child(Button::new("import-env", "Import .env.local").on_click(cx.listener(|t, _, w, cx| t.import_env(w, cx)))),
                     )
                     .when(self.imported_key.is_some(), |d| {
@@ -670,7 +701,15 @@ impl Render for SettingsScreen {
                     .child(div().type_style(contextual_theme::type_style::CODE_SMALL).child(Textarea::new(&self.output_prompt)))
                     .child(section("Appearance", cx))
                     .child(div().flex().gap(sp(1)).children(theme_buttons)),
-            )
+            );
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .child(page)
+            .when_some(env_dialog, |d, dialog| d.child(dialog))
     }
 }
 

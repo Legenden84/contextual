@@ -82,9 +82,85 @@ pub fn list_dirs(input: Option<&str>, show_hidden: bool) -> Result<DirListing> {
     })
 }
 
+/// A file in the env-file picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    /// Looks like a dotenv file (`.env`, `.env.local`, `local.env`).
+    pub env: bool,
+}
+
+/// Whether a file name looks like a dotenv file: `.env`, `.env.<anything>`, `<anything>.env`.
+pub fn is_env_file(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n == ".env" || n.starts_with(".env.") || n.ends_with(".env")
+}
+
+/// Files of `input` for the env-file picker (`None` = home): dotenv files always (they are hidden
+/// on Unix), other files only with `all` (hidden ones only with `show_hidden`).
+pub fn list_files(input: Option<&str>, show_hidden: bool, all: bool) -> Result<Vec<FileEntry>> {
+    let dir = normalize_input_path(input);
+    let shown_dir = path_string(&dir);
+    let rd = fs::read_dir(&dir)
+        .map_err(|_| Error::forbidden(format!("Cannot read folder: {shown_dir}")))?;
+    let mut files: Vec<FileEntry> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| !t.is_dir()))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let env = is_env_file(&name);
+            let shown = env || (all && (show_hidden || !platform::is_hidden(&name, Some(&e))));
+            shown.then(|| FileEntry {
+                path: path_string(&dir.join(&name)),
+                name,
+                env,
+            })
+        })
+        .collect();
+    files.sort_by(|a, b| {
+        b.env
+            .cmp(&a.env)
+            .then_with(|| locale_cmp_base(&a.name, &b.name))
+    });
+    files.truncate(MAX_DIRS);
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lists_env_files_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        for f in [
+            ".env.local",
+            "notes.txt",
+            ".env",
+            "prod.env",
+            ".bashrc",
+            ".envrc",
+        ] {
+            fs::write(root.join(f), "").unwrap();
+        }
+        fs::create_dir(root.join("sub.env")).unwrap();
+        let names = |all, hidden| -> Vec<String> {
+            list_files(Some(&path_string(root)), hidden, all)
+                .unwrap()
+                .into_iter()
+                .map(|f| f.name)
+                .collect()
+        };
+        assert_eq!(names(false, false), [".env", ".env.local", "prod.env"]);
+        assert_eq!(
+            names(true, false),
+            [".env", ".env.local", "prod.env", "notes.txt"]
+        );
+        assert_eq!(names(true, true).len(), 6);
+        assert!(!is_env_file(".envrc") && is_env_file("Local.ENV"));
+    }
 
     #[test]
     fn lists_sub_folders() {
