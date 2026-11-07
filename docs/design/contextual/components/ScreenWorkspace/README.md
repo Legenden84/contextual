@@ -13,11 +13,11 @@ The main workspace with a project open, files selected and a finished assistant 
   feature selects its existing tab rather than adding a duplicate.
 - Switching tabs preserves the composer draft and the feature view state.
 - Diff and Inspect use the full area beneath the header, hiding the right sidebar.
-  Chat and file previews use a stable, left-anchored column capped at the 820px reading
-  width plus horizontal padding. Its width depends only on window size, with one standard
-  sidebar width always reserved on the right—even when neither panel is visible.
+  Chat and file previews use a stable column capped at the 820px reading width plus
+  horizontal padding, centred between the explorer and one reserved right sidebar.
+  Its width and position depend only on window size, even when neither panel is visible.
 - Changes and chat history dock side by side when two standard sidebar widths fit to the
-  right of that column, with history rightmost. Otherwise they share one sidebar:
+  right of that centred column, with history rightmost. Otherwise they share one sidebar:
   history takes priority while open, and closing it reveals Changes when available.
   Neither panel overlays the other or resizes/recentres the chat when toggled.
 - Closing the active tab selects its next neighbour, then its previous neighbour,

@@ -37,20 +37,25 @@ use contextual_core::logic::git_tabs::parse_git_tab;
 const TABS_H: f32 = 36.0;
 
 struct ChatLayout {
+    left_inset: f32,
     width: f32,
     show_changes: bool,
     show_history: bool,
 }
 
-/// `available` is the width after the fixed explorer column. Reserve one sidebar even
-/// when it is empty, and cap the chat at its reading width plus message/composer padding.
-/// Panel visibility must never participate in sizing the chat.
+/// `available` is the width after the fixed explorer column. Centre the chat in the
+/// space before one reserved sidebar, capped at its reading width plus padding.
+/// Panels may use the remaining right gutter, but never move or resize the chat.
 fn chat_layout(available: f32, has_changes: bool, history_open: bool) -> ChatLayout {
     let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
-    let width = (available - layout::CHANGES_WIDTH).clamp(0.0, max_width);
-    let fits_both = available - width >= 2.0 * layout::CHANGES_WIDTH;
+    let center_width = (available - layout::CHANGES_WIDTH).max(0.0);
+    let width = center_width.min(max_width);
+    let left_inset = (center_width - width) / 2.0;
+    let right_width = available - left_inset - width;
+    let fits_both = right_width >= 2.0 * layout::CHANGES_WIDTH;
 
     ChatLayout {
+        left_inset,
         width,
         show_changes: has_changes && (!history_open || fits_both),
         show_history: history_open,
@@ -479,6 +484,9 @@ impl Render for WorkspaceScreen {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
+                    .when(!feature_view, |d| {
+                        d.child(div().flex_none().w(px(panes.left_inset)))
+                    })
                     .child(
                         div()
                             .flex()
@@ -533,19 +541,31 @@ mod tests {
     }
 
     #[test]
-    fn panel_visibility_never_changes_chat_width() {
+    fn panel_visibility_never_changes_chat_position_or_width() {
         for available in [
             full_chat_width(),
             full_chat_width() + layout::CHANGES_WIDTH,
             full_chat_width() + 2.0 * layout::CHANGES_WIDTH,
             full_chat_width() + 3.0 * layout::CHANGES_WIDTH,
+            full_chat_width() + 4.0 * layout::CHANGES_WIDTH,
         ] {
-            let expected = chat_layout(available, false, false).width;
+            let expected = chat_layout(available, false, false);
             for has_changes in [false, true] {
                 for history_open in [false, true] {
+                    let panes = chat_layout(available, has_changes, history_open);
+                    assert_eq!(panes.width, expected.width);
+                    assert_eq!(panes.left_inset, expected.left_inset);
                     assert_eq!(
-                        chat_layout(available, has_changes, history_open).width,
-                        expected,
+                        panes.left_inset + panes.width / 2.0,
+                        (available - layout::CHANGES_WIDTH) / 2.0,
+                    );
+                    let panel_count =
+                        usize::from(panes.show_changes) + usize::from(panes.show_history);
+                    assert!(
+                        panes.left_inset
+                            + panes.width
+                            + panel_count as f32 * layout::CHANGES_WIDTH
+                            <= available
                     );
                 }
             }
@@ -553,8 +573,10 @@ mod tests {
     }
 
     #[test]
-    fn both_panels_require_two_full_sidebar_widths_beside_chat() {
-        let threshold = full_chat_width() + 2.0 * layout::CHANGES_WIDTH;
+    fn both_panels_require_two_full_sidebar_widths_after_centering() {
+        // Half the spare centre space becomes the left inset; only the other half
+        // can supplement the reserved right sidebar.
+        let threshold = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
 
         let below = chat_layout(threshold - 1.0, true, true);
         assert!(!below.show_changes);
@@ -576,6 +598,7 @@ mod tests {
             for history_open in [false, true] {
                 let panes = chat_layout(available, has_changes, history_open);
                 assert_eq!(panes.width, available - layout::CHANGES_WIDTH);
+                assert_eq!(panes.left_inset, 0.0);
                 assert_eq!(panes.show_changes, has_changes && !history_open);
                 assert_eq!(panes.show_history, history_open);
             }
