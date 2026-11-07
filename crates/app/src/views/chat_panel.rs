@@ -2,21 +2,26 @@
 //! context bar and the composer. Ctrl+Enter sends; pictures can be pasted or dropped.
 
 use std::collections::HashSet;
+use std::io::Read as _;
+use std::path::PathBuf;
 
 use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
 use contextual_core::logic::format::fmt_k;
-use contextual_core::logic::images::{IMAGE_TYPES, to_attachment};
+use contextual_core::logic::images::{
+    Attachment, IMAGE_TYPES, MAX_SOURCE_BYTES, attachment_name, to_attachment,
+};
 use contextual_theme::layout;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
-    ImageFormat, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list,
-    px,
+    ImageFormat, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
+    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, div, list, px,
 };
 
+use crate::runtime;
 use crate::state::chat::{CenterView, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
@@ -33,7 +38,53 @@ pub struct ChatPanel {
     /// Code blocks the user expanded ("Show N more lines").
     expanded: HashSet<String>,
     rendered: usize,
+    image_loading: bool,
+    image_error: Option<String>,
     _subs: Vec<Subscription>,
+}
+
+/// These are explicitly chosen local attachments, not project paths resolved through the host.
+enum ImageSource {
+    File(PathBuf),
+    Clipboard {
+        bytes: Vec<u8>,
+        mime: &'static str,
+        name: String,
+    },
+}
+
+/// File I/O and image decoding run on the blocking pool, never on the UI thread.
+fn prepare_image(source: ImageSource) -> contextual_core::Result<Attachment> {
+    let (bytes, mime, name) = match source {
+        ImageSource::Clipboard { bytes, mime, name } => (bytes, mime, name),
+        ImageSource::File(path) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            let mime = mime_for_path(&path).ok_or_else(|| {
+                contextual_core::Error::invalid(format!(
+                    "{name}: only PNG, JPEG, GIF and WebP pictures can be sent."
+                ))
+            })?;
+            let mut bytes = Vec::new();
+            let file = std::fs::File::open(&path).map_err(|e| {
+                contextual_core::Error::invalid(format!("Could not open {name}: {e}"))
+            })?;
+            file.take(MAX_SOURCE_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| {
+                    contextual_core::Error::invalid(format!("Could not read {name}: {e}"))
+                })?;
+            (bytes, mime, name)
+        }
+    };
+    to_attachment(
+        &bytes,
+        mime,
+        &name,
+        &contextual_core::chat::new_id("img"),
+    )
 }
 
 fn mime_for_format(f: ImageFormat) -> Option<&'static str> {
@@ -104,6 +155,8 @@ impl ChatPanel {
             list: ListState::new(count, ListAlignment::Bottom, px(400.0)),
             expanded: HashSet::new(),
             rendered: count,
+            image_loading: false,
+            image_error: None,
             _subs: subs,
         }
     }
@@ -117,7 +170,10 @@ impl ChatPanel {
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).value().trim().to_string();
         let chat = self.chat.read(cx);
-        if chat.streaming() || (text.is_empty() && chat.attachments.is_empty()) {
+        if self.image_loading
+            || chat.streaming()
+            || (text.is_empty() && chat.attachments.is_empty())
+        {
             return;
         }
         let a = self.app.read(cx);
@@ -142,47 +198,164 @@ impl ChatPanel {
         self.chat.update(cx, |c, cx| c.send(text, env, rules, cx));
     }
 
-    fn add_image(&mut self, bytes: &[u8], mime: &str, name: &str, cx: &mut Context<Self>) {
-        let id = format!("img-{}", self.chat.read(cx).attachments.len());
-        match to_attachment(bytes, mime, name, &id) {
-            Ok(a) => self.chat.update(cx, |c, cx| c.add_attachment(a, cx)),
-            Err(e) => self.app.update(cx, |a, cx| {
-                a.error = Some(e.message);
+    fn load_images(&mut self, sources: Vec<ImageSource>, cx: &mut Context<Self>) {
+        if sources.is_empty() {
+            return;
+        }
+        if self.image_loading || self.chat.read(cx).streaming() {
+            self.image_error =
+                Some("Wait for the current operation to finish before attaching images.".into());
+            cx.notify();
+            return;
+        }
+        self.image_loading = true;
+        self.image_error = None;
+        let thread = self.chat.read(cx).thread.id.clone();
+        cx.notify();
+        let job = runtime::spawn(cx, async move {
+            tokio::task::spawn_blocking(move || {
+                sources.into_iter().map(prepare_image).collect::<Vec<_>>()
+            })
+            .await
+            .map_err(|e| {
+                contextual_core::Error::internal(format!("Could not prepare images: {e}"))
+            })
+        });
+        cx.spawn(async move |this, cx| {
+            let result = job.await;
+            this.update(cx, |this, cx| {
+                this.image_loading = false;
+                // A picker or decode operation must never attach to a different conversation.
+                if this.chat.read(cx).thread.id != thread {
+                    cx.notify();
+                    return;
+                }
+                let mut errors = Vec::new();
+                match result {
+                    Ok(results) => {
+                        for result in results {
+                            match result {
+                                Ok(image) => {
+                                    this.chat.update(cx, |c, cx| c.add_attachment(image, cx));
+                                }
+                                Err(e) => errors.push(e.message),
+                            }
+                        }
+                    }
+                    Err(e) => errors.push(e.message),
+                }
+                this.image_error = (!errors.is_empty()).then(|| errors.join("\n"));
                 cx.notify();
-            }),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn choose_images(&mut self, cx: &mut Context<Self>) {
+        if self.image_loading || self.chat.read(cx).streaming() {
+            return;
+        }
+        let thread = self.chat.read(cx).thread.id.clone();
+        let picker = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Attach images".into()),
+        });
+        self.image_loading = true;
+        self.image_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = picker.await;
+            this.update(cx, |this, cx| {
+                this.image_loading = false;
+                if this.chat.read(cx).thread.id != thread {
+                    cx.notify();
+                    return;
+                }
+                match result {
+                    Ok(Ok(Some(paths))) => {
+                        this.load_images(paths.into_iter().map(ImageSource::File).collect(), cx);
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(e)) => {
+                        this.image_error = Some(format!(
+                            "Could not open the file picker: {e}. You can also paste or drop images."
+                        ));
+                    }
+                    Err(_) => {
+                        this.image_error = Some(
+                            "The file picker closed unexpectedly. You can also paste or drop images."
+                                .into(),
+                        );
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn paste_image(&mut self, cx: &mut Context<Self>) {
+        let handled = cx
+            .read_from_clipboard()
+            .is_some_and(|item| self.paste(&item, cx));
+        if !handled {
+            self.image_error = Some(
+                "No supported image on the clipboard. Copy an image or choose Attach images…"
+                    .into(),
+            );
+            cx.notify();
         }
     }
 
     fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
-        let mut took = false;
+        let mut sources = Vec::new();
+        let mut unsupported = false;
         for entry in item.entries() {
             match entry {
                 ClipboardEntry::Image(img) => {
                     if let Some(mime) = mime_for_format(img.format) {
-                        self.add_image(&img.bytes, mime, "Pasted image", cx);
-                        took = true;
+                        sources.push(ImageSource::Clipboard {
+                            bytes: img.bytes.to_vec(),
+                            mime,
+                            name: attachment_name("", runtime::now_local().time()),
+                        });
+                    } else {
+                        unsupported = true;
                     }
                 }
                 ClipboardEntry::ExternalPaths(paths) => {
-                    self.drop_paths(paths, cx);
-                    took = true;
+                    sources.extend(
+                        paths
+                            .paths()
+                            .iter()
+                            .filter(|p| mime_for_path(p).is_some())
+                            .cloned()
+                            .map(ImageSource::File),
+                    );
                 }
                 _ => {}
             }
         }
-        took
+        let handled = !sources.is_empty() || unsupported;
+        self.load_images(sources, cx);
+        if unsupported {
+            self.image_error =
+                Some("Clipboard image format not supported. Use PNG, JPEG, GIF or WebP.".into());
+            cx.notify();
+        }
+        // Ordinary text (including non-image file paths) keeps the textarea's default paste.
+        handled
     }
 
     fn drop_paths(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
-        for p in paths.paths() {
-            let name = p
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if let (Some(mime), Ok(bytes)) = (mime_for_path(p), std::fs::read(p)) {
-                self.add_image(&bytes, mime, &name, cx);
-            }
-        }
+        self.load_images(
+            paths.paths().iter().cloned().map(ImageSource::File).collect(),
+            cx,
+        );
     }
 }
 
@@ -443,7 +616,7 @@ impl Render for ChatPanel {
         let attachments: Vec<_> = chat
             .attachments
             .iter()
-            .map(|a| (a.name.clone(), a.width, a.height, a.tokens))
+            .map(|a| (a.id.clone(), a.name.clone(), a.width, a.height, a.tokens))
             .collect();
         let entity = cx.entity().downgrade();
         let weak = entity.clone();
@@ -490,7 +663,7 @@ impl Render for ChatPanel {
         let chips = attachments
             .into_iter()
             .enumerate()
-            .map(|(i, (name, w, h, tokens))| {
+            .map(|(i, (id, name, w, h, tokens))| {
                 div()
                     .flex()
                     .items_center()
@@ -504,17 +677,18 @@ impl Render for ChatPanel {
                         fmt_k(tokens)
                     )))
                     .child(
-                        div()
-                            .id(("rm-img", i))
-                            .px(sp(1))
-                            .cursor_pointer()
+                        Button::new(("rm-img", i), "Remove")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .disabled(streaming)
                             .on_click(cx.listener(move |t, _, _, cx| {
                                 t.chat.update(cx, |c, cx| {
-                                    c.attachments.remove(i);
-                                    cx.notify();
+                                    if !c.streaming() {
+                                        c.attachments.retain(|a| a.id != id);
+                                        cx.notify();
+                                    }
                                 })
-                            }))
-                            .child(Icon::new(IconName::Close).size(px(12.0))),
+                            })),
                     )
             })
             .collect::<Vec<_>>();
@@ -561,6 +735,51 @@ impl Render for ChatPanel {
                                     .on_drop(cx.listener(|t, paths: &ExternalPaths, _, cx| {
                                         t.drop_paths(paths, cx)
                                     }))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_wrap()
+                                            .items_center()
+                                            .gap(sp(2))
+                                            .child(
+                                                Button::new("attach-images", "Attach images…")
+                                                    .size(ButtonSize::Xs)
+                                                    .disabled(streaming || self.image_loading)
+                                                    .on_click(cx.listener(|t, _, _, cx| {
+                                                        t.choose_images(cx)
+                                                    })),
+                                            )
+                                            .child(
+                                                Button::new("paste-image", "Paste image")
+                                                    .size(ButtonSize::Xs)
+                                                    .variant(ButtonVariant::Ghost)
+                                                    .disabled(streaming || self.image_loading)
+                                                    .on_click(cx.listener(|t, _, _, cx| {
+                                                        t.paste_image(cx)
+                                                    })),
+                                            )
+                                            .child(
+                                                div()
+                                                    .type_style(
+                                                        contextual_theme::type_style::UI_SMALL,
+                                                    )
+                                                    .text_color(hsla(c.ink_muted))
+                                                    .child(if self.image_loading {
+                                                        "Preparing images…"
+                                                    } else {
+                                                        "PNG, JPEG, GIF or WebP · up to 20 MiB each"
+                                                    }),
+                                            ),
+                                    )
+                                    .when_some(self.image_error.clone(), |d, error| {
+                                        d.child(
+                                            div()
+                                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                                .text_color(hsla(c.danger))
+                                                .whitespace_normal()
+                                                .child(SharedString::from(error)),
+                                        )
+                                    })
                                     .when(!chips.is_empty(), |d| {
                                         d.child(div().flex().flex_wrap().gap(sp(1)).children(chips))
                                     })
@@ -618,6 +837,7 @@ impl Render for ChatPanel {
                                                     d.child(
                                                         Button::new("send", "Send")
                                                             .variant(ButtonVariant::Primary)
+                                                            .disabled(self.image_loading)
                                                             .on_click(cx.listener(
                                                                 |t, _, w, cx| t.send(w, cx),
                                                             )),

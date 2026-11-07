@@ -734,6 +734,41 @@ mod tests {
     }
 
     #[test]
+    fn image_only_turn_survives_saved_thread_roundtrip() {
+        use crate::llm::types::ContentPart;
+
+        let mut thread = ThreadState::fresh();
+        let images = vec![MessageImage {
+            name: "screenshot.png".into(),
+            url: "data:image/png;base64,AA==".into(),
+        }];
+        let turn = prepare_turn(
+            &thread,
+            &[],
+            &HashSet::new(),
+            "",
+            &images,
+            0,
+            TurnOptions::default(),
+        );
+        let MessageContent::Parts(parts) = to_message_content(&turn.input) else {
+            panic!("An image attachment must produce multipart content");
+        };
+        assert!(parts.iter().any(|part| matches!(
+            part,
+            ContentPart::ImageUrl { image_url } if image_url.url == images[0].url
+        )));
+        let user = UiMessage::user("", &turn, "10:00");
+        assert_eq!(user.images.as_ref(), Some(&images));
+        thread.record_round(turn.input, "system", false, "I see the image.".into(), None);
+        let saved = SavedThread::new(thread, vec![user]);
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(restored, saved);
+        assert_eq!(history(&restored.thread)[0].content, MessageContent::Parts(parts));
+    }
+
+    #[test]
     fn saved_thread_reads_the_old_format() {
         let old = serde_json::json!({
             "version": 1, "id": "t1", "responseId": "resp_1", "api": "responses",

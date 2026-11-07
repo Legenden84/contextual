@@ -998,6 +998,7 @@ impl ChatModel {
                         this.contents.entry(c.path.clone()).or_insert(c.old.clone());
                     }
                 }
+                this.attachments.clear();
                 this.thread = saved.thread;
                 this.messages = saved
                     .messages

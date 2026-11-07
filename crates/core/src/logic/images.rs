@@ -14,6 +14,9 @@ use crate::{Error, Result};
 /// MIME types that can be sent.
 pub const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
+/// Maximum encoded source size, before decoding or resizing (20 MiB per attachment).
+pub const MAX_SOURCE_BYTES: usize = 20 * 1024 * 1024;
+
 /// Longest side sent; larger pictures are scaled down (the service would do so anyway).
 pub const MAX_SIDE: u32 = 2048;
 /// PNGs larger than this after scaling are re-encoded as JPEG.
@@ -50,7 +53,7 @@ pub fn vision_tokens(width: u32, height: u32) -> u64 {
 /// Size after scaling the longest side down to [`MAX_SIDE`] (rounded like `Math.round`).
 pub fn scaled_size(width: u32, height: u32) -> (u32, u32) {
     let scale = (f64::from(MAX_SIDE) / f64::from(width.max(height))).min(1.0);
-    let r = |v: u32| js::round(f64::from(v) * scale) as u32;
+    let r = |v: u32| (js::round(f64::from(v) * scale) as u32).max(1);
     (r(width), r(height))
 }
 
@@ -99,6 +102,11 @@ pub fn to_attachment(bytes: &[u8], mime: &str, name: &str, id: &str) -> Result<A
             "{name}: only PNG, JPEG, GIF and WebP pictures can be sent."
         )));
     }
+    if bytes.len() > MAX_SOURCE_BYTES {
+        return Err(Error::invalid(format!(
+            "{name}: images must be 20 MiB or smaller."
+        )));
+    }
     let img = image::load_from_memory(bytes)
         .map_err(|_| Error::invalid(format!("Not a readable image: {name}")))?;
     let (width, height) = scaled_size(img.width(), img.height());
@@ -135,6 +143,15 @@ mod tests {
     fn scaling_rounds_half_up() {
         assert_eq!(scaled_size(4096, 2049), (2048, 1025));
         assert_eq!(scaled_size(100, 50), (100, 50));
+        assert_eq!(scaled_size(10_000, 1), (2048, 1));
+        assert_eq!(scaled_size(1, 10_000), (1, 2048));
+    }
+
+    #[test]
+    fn rejects_oversized_sources_before_decoding() {
+        let bytes = vec![0; MAX_SOURCE_BYTES + 1];
+        let error = to_attachment(&bytes, "image/png", "large.png", "1").unwrap_err();
+        assert!(error.message.contains("20 MiB"));
     }
 
     #[test]
