@@ -22,8 +22,8 @@ use crate::views::changes_panel::ChangesPanel;
 use crate::views::chat_panel::ChatPanel;
 use crate::views::chats_menu::ChatsMenu;
 use crate::views::code_preview::CodePreview;
-use crate::views::context_bar::context_bar;
-use crate::views::diff_cache::DiffCache;
+use crate::views::context_bar::{ContextCache, context_bar};
+use crate::views::diff_cache::DiffStore;
 use crate::views::diff_screen::DiffScreen;
 use crate::views::git_diff::GitDiffView;
 use crate::views::inspect_screen::InspectScreen;
@@ -51,6 +51,7 @@ pub struct WorkspaceScreen {
     inspect: Entity<InspectScreen>,
     chats: Entity<ChatsMenu>,
     save_dialog: Option<Entity<SaveDialog>>,
+    context: ContextCache,
     _subs: Vec<Subscription>,
 }
 
@@ -115,7 +116,7 @@ impl WorkspaceScreen {
             cx.new(|cx| ScmModel::new(project, host, cx))
         });
         let chat = cx.new(|cx| ChatModel::new(project.clone(), host, cx));
-        let diffs = DiffCache::default();
+        let diffs = cx.new(|_| DiffStore::default());
         let mut subs = subs;
         subs.push(
             cx.observe_in(&chat, window, |this: &mut Self, chat, window, cx| {
@@ -151,8 +152,16 @@ impl WorkspaceScreen {
                 cx.notify();
             }),
         );
-        let chat_panel =
-            cx.new(|cx| ChatPanel::new(app.clone(), project.clone(), chat.clone(), window, cx));
+        let chat_panel = cx.new(|cx| {
+            ChatPanel::new(
+                app.clone(),
+                project.clone(),
+                chat.clone(),
+                diffs.clone(),
+                window,
+                cx,
+            )
+        });
         let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
@@ -173,6 +182,7 @@ impl WorkspaceScreen {
             app,
             project,
             previews: HashMap::new(),
+            context: ContextCache::default(),
             _subs: subs,
         }
     }
@@ -279,7 +289,7 @@ impl Render for WorkspaceScreen {
             .collect();
 
         let chat = self.chat.read(cx);
-        let has_changes = !chat.changes().is_empty();
+        let has_changes = chat.change_message().is_some();
         let diff_view = chat.center == CenterView::Diff && has_changes;
         let inspect_view = chat.center == CenterView::Inspect;
         let can_inspect = !chat.thread.transcript.is_empty() || chat.live.is_some();
@@ -305,7 +315,13 @@ impl Render for WorkspaceScreen {
                             .px(sp(4))
                             .pb(sp(2))
                             .child(div().w_full().max_w(px(layout::CONTENT_MAX_WIDTH)).child(
-                                context_bar(&self.app, &self.project, Some(&self.chat), cx),
+                                context_bar(
+                                    &self.app,
+                                    &self.project,
+                                    Some(&self.chat),
+                                    &self.context,
+                                    cx,
+                                ),
                             )),
                     )
                     .into_any_element()

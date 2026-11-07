@@ -126,6 +126,10 @@ pub struct ChatModel {
     store: Option<Arc<ThreadStore>>,
     pub thread: ThreadState,
     pub messages: Vec<UiMessage>,
+    /// Changes when context accounting inputs in the stored thread change, not on deltas.
+    pub context_revision: u64,
+    /// Changes on every thread replacement, including reopening the same saved thread.
+    pub thread_generation: u64,
     pub attachments: Vec<Attachment>,
     /// "Resend full context" for the next message.
     pub resend_all: bool,
@@ -191,6 +195,8 @@ impl ChatModel {
             store: ThreadStore::open_default().ok().map(Arc::new),
             thread: ThreadState::fresh(),
             messages: Vec::new(),
+            context_revision: 0,
+            thread_generation: 0,
             attachments: Vec::new(),
             resend_all: false,
             cancel: None,
@@ -217,15 +223,31 @@ impl ChatModel {
         self.cancel.is_some()
     }
 
-    /// The changes of the latest reply that proposed any.
+    /// Published changes are immutable for the lifetime of their message in this generation.
+    pub fn change_message(&self) -> Option<&UiMessage> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| m.changes.as_ref().is_some_and(|changes| !changes.is_empty()))
+    }
+
+    /// Borrowed changes for render paths; do not clone file contents just to show counts.
+    pub fn changes_ref(&self) -> &[Change] {
+        self.change_message()
+            .and_then(|m| m.changes.as_deref())
+            .unwrap_or_default()
+    }
+
+    /// An owned snapshot for operations that need to outlive a model borrow.
     pub fn changes(&self) -> Vec<Change> {
-        SavedThread::last_changes(&self.messages)
+        self.changes_ref().to_vec()
     }
 
     pub fn included(&self) -> Vec<Change> {
-        self.changes()
-            .into_iter()
+        self.changes_ref()
+            .iter()
             .filter(|c| self.include.get(&c.path).copied().unwrap_or(false))
+            .cloned()
             .collect()
     }
 
@@ -495,6 +517,7 @@ impl ChatModel {
                 if let Some(v) = &tree_version {
                     this.thread.tree_version = Some(v.clone());
                 }
+                this.context_revision = this.context_revision.wrapping_add(1);
             }
             this.live = None;
             if !(env.auto && completed && !truncated) {
@@ -891,6 +914,8 @@ impl ChatModel {
             cx.notify()
         });
         self.thread = ThreadState::fresh();
+        self.context_revision = self.context_revision.wrapping_add(1);
+        self.thread_generation = self.thread_generation.wrapping_add(1);
         self.messages.clear();
         self.include.clear();
         self.attachments.clear();
@@ -1003,6 +1028,8 @@ impl ChatModel {
                 }
                 this.attachments.clear();
                 this.thread = saved.thread;
+                this.context_revision = this.context_revision.wrapping_add(1);
+                this.thread_generation = this.thread_generation.wrapping_add(1);
                 this.messages = saved
                     .messages
                     .into_iter()
@@ -1124,6 +1151,7 @@ impl ChatModel {
                             }
                         }
                         chat::record_saved(&mut this.thread, &picked);
+                        this.context_revision = this.context_revision.wrapping_add(1);
                         let (title, detail) = chat::saved_toast(&picked, branch.as_deref());
                         this.toast = Some(Toast {
                             title,

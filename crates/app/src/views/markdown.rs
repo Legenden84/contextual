@@ -3,10 +3,12 @@
 //! whole files use the kit's highlighted code block. `### EDIT:` blocks show the rebuilt file,
 //! never the edit format (CLAUDE.md).
 
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
+use std::rc::Rc;
 
-use contextual_core::logic::diff::compute_diff;
+use contextual_core::logic::diff::Diff;
 use contextual_core::logic::markdown::{Align, Block, Inline, ListItem, parse_markdown};
 use contextual_core::logic::types::{Change, ChangeStatus};
 use gpui_kit::base::text::TextView;
@@ -24,6 +26,54 @@ use crate::ui::{Tag, TagTone};
 const MAX_LINES: usize = 28;
 const MAX_LINES_MODIFIED: usize = 9;
 const LIST_INDENT: f32 = 18.0;
+
+const MAX_CACHED_REPLIES: usize = 16;
+const MAX_CACHED_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+
+struct CachedReply {
+    id: String,
+    source: String,
+    blocks: Rc<Vec<Block>>,
+}
+
+/// Cache parsed data, not themed GPUI elements. Changed text (including equal-length
+/// replacements) invalidates it. One oversized reply may occupy the cache alone.
+#[derive(Default)]
+pub struct ReplyCache(RefCell<VecDeque<CachedReply>>);
+
+impl ReplyCache {
+    pub fn get(&self, id: &str, source: &str) -> Rc<Vec<Block>> {
+        let mut entries = self.0.borrow_mut();
+        if let Some(index) = entries.iter().position(|entry| entry.id == id) {
+            let entry = entries.remove(index).expect("located cache entry");
+            if entry.source == source {
+                let blocks = entry.blocks.clone();
+                entries.push_back(entry);
+                return blocks;
+            }
+        }
+        let blocks = Rc::new(parse_markdown(source));
+        entries.push_back(CachedReply {
+            id: id.into(),
+            source: source.into(),
+            blocks: blocks.clone(),
+        });
+        while entries.len() > 1
+            && (entries.len() > MAX_CACHED_REPLIES
+                || entries.iter().map(|entry| entry.source.len()).sum::<usize>()
+                    > MAX_CACHED_SOURCE_BYTES)
+        {
+            entries.pop_front();
+        }
+        blocks
+    }
+
+    pub fn clear(&self) {
+        self.0.borrow_mut().clear();
+    }
+}
+
+type ChangeEntry<'a> = (&'a Change, Option<&'a Diff>);
 
 /// Flattens inline runs into one string with highlight ranges.
 fn runs(inline: &[Inline], cx: &App) -> (String, Vec<(Range<usize>, HighlightStyle)>) {
@@ -172,17 +222,20 @@ fn list(items: &[ListItem], cx: &App) -> impl IntoElement + use<> {
         }))
 }
 
-fn badge(change: &Change) -> AnyElement {
+fn badge(change: &Change, diff: Option<&Diff>) -> AnyElement {
     if change.status == ChangeStatus::A {
         return Tag::new("new file").tone(TagTone::Add).into_any_element();
     }
-    let d = compute_diff(&change.old, &change.new);
     let letter = if change.status == ChangeStatus::D {
         "D"
     } else {
         "M"
     };
-    Tag::new(format!("{letter} +{} −{}", d.adds, d.dels)).into_any_element()
+    let label = match diff {
+        Some(d) => format!("{letter} +{} −{}", d.adds, d.dels),
+        None => letter.to_string(),
+    };
+    Tag::new(label).into_any_element()
 }
 
 /// A code block: header with path or language and an optional badge, then highlighted code,
@@ -276,21 +329,32 @@ fn lang_name(path: Option<&str>, fence_lang: &str) -> String {
     }
 }
 
-/// Renders a reply. `expanded` holds the ids of blocks the user has expanded.
+/// Renders cached reply data. `expanded` holds the ids of expanded blocks.
+#[allow(clippy::too_many_arguments)]
 pub fn render_reply(
     message_id: &str,
-    source: &str,
+    parsed: &[Block],
     changes: &[Change],
+    diffs: Option<&[Diff]>,
     streaming: bool,
     expanded: &HashSet<String>,
     on_expand: impl Fn(String, &mut App) + Clone + 'static,
     cx: &App,
 ) -> Vec<AnyElement> {
-    let by_path: HashMap<&str, &Change> = changes.iter().map(|c| (c.path.as_str(), c)).collect();
+    let by_path: HashMap<&str, ChangeEntry<'_>> = changes
+        .iter()
+        .enumerate()
+        .map(|(i, change)| {
+            (
+                change.path.as_str(),
+                (change, diffs.and_then(|diffs| diffs.get(i))),
+            )
+        })
+        .collect();
     let mut shown_edits = HashSet::new();
     let mut out = Vec::new();
     blocks(
-        &parse_markdown(source),
+        parsed,
         message_id,
         &by_path,
         &mut shown_edits,
@@ -307,7 +371,7 @@ pub fn render_reply(
 fn blocks(
     blocks_in: &[Block],
     message_id: &str,
-    by_path: &HashMap<&str, &Change>,
+    by_path: &HashMap<&str, ChangeEntry<'_>>,
     shown_edits: &mut HashSet<String>,
     streaming: bool,
     expanded: &HashSet<String>,
@@ -426,7 +490,8 @@ fn blocks(
                 if !shown_edits.insert(path.clone()) {
                     continue;
                 }
-                let change = by_path.get(path.as_str()).copied();
+                let entry = by_path.get(path.as_str()).copied();
+                let change = entry.map(|(change, _)| change);
                 out.push(header(format!("### FILE: {path}")));
                 match change {
                     Some(ch)
@@ -438,7 +503,7 @@ fn blocks(
                             &ch.new,
                             &lang_name(Some(path), ""),
                             path,
-                            Some(badge(ch)),
+                            Some(badge(ch, entry.and_then(|(_, diff)| diff))),
                             MAX_LINES_MODIFIED,
                             expanded.contains(&key),
                             expand,
@@ -467,7 +532,8 @@ fn blocks(
                 }
             }
             Block::Code { code, lang, path } => {
-                let change = path.as_deref().and_then(|p| by_path.get(p).copied());
+                let entry = path.as_deref().and_then(|p| by_path.get(p).copied());
+                let change = entry.map(|(change, _)| change);
                 let max = if change.is_some_and(|c| c.status == ChangeStatus::M) {
                     MAX_LINES_MODIFIED
                 } else {
@@ -479,7 +545,7 @@ fn blocks(
                     code,
                     &lang_name(path.as_deref(), &format!("{lang:?}").to_lowercase()),
                     &label,
-                    change.map(badge),
+                    entry.map(|(change, diff)| badge(change, diff)),
                     max,
                     expanded.contains(&key),
                     expand,
@@ -489,5 +555,33 @@ fn blocks(
             }
         };
         out.push(el);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replies_reuse_parsing_but_not_stale_text() {
+        let cache = ReplyCache::default();
+        let first = cache.get("a", "**one**");
+        assert!(Rc::ptr_eq(&first, &cache.get("a", "**one**")));
+        let changed = cache.get("a", "**two**");
+        assert!(!Rc::ptr_eq(&first, &changed));
+        assert_eq!(*changed, parse_markdown("**two**"));
+        cache.clear();
+        assert!(!Rc::ptr_eq(&changed, &cache.get("a", "**two**")));
+    }
+
+    #[test]
+    fn reply_cache_does_not_grow_with_the_whole_thread() {
+        let cache = ReplyCache::default();
+        let first = cache.get("first", "hello");
+        for i in 0..MAX_CACHED_REPLIES {
+            cache.get(&i.to_string(), "hello");
+        }
+        assert_eq!(cache.0.borrow().len(), MAX_CACHED_REPLIES);
+        assert!(!Rc::ptr_eq(&first, &cache.get("first", "hello")));
     }
 }

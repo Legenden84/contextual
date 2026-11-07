@@ -13,12 +13,12 @@ use gpui_kit::{
 use crate::state::chat::{CenterView, ChatModel};
 use crate::theme::{ActiveTheme, TypeExt, hsla, row_height, sp};
 use crate::ui::{Button, ButtonVariant, Checkbox, pane_header};
-use crate::views::diff_cache::DiffCache;
+use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 
 pub struct ChangesPanel {
     chat: Entity<ChatModel>,
     diffs: DiffCache,
-    _sub: Subscription,
+    _subs: Vec<Subscription>,
 }
 
 pub fn status_color(s: ChangeStatus, c: &contextual_theme::Colors) -> contextual_theme::Rgba {
@@ -39,20 +39,27 @@ pub fn status_letter(s: ChangeStatus) -> &'static str {
 
 impl ChangesPanel {
     pub fn new(chat: Entity<ChatModel>, diffs: DiffCache, cx: &mut Context<Self>) -> Self {
-        let sub = cx.observe(&chat, |_, _, cx| cx.notify());
+        let subs = vec![
+            cx.observe(&chat, |_, _, cx| cx.notify()),
+            cx.observe(&diffs, |_, _, cx| cx.notify()),
+        ];
         Self {
             chat,
             diffs,
-            _sub: sub,
+            _subs: subs,
         }
     }
 }
 
 impl Render for ChangesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        ensure_message(&self.diffs, &self.chat, None, cx);
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
-        let changes = chat.changes();
+        let changes = chat.changes_ref();
+        let ready = chat
+            .change_message()
+            .and_then(|m| self.diffs.read(cx).get(&message_key(chat, m)));
         let picked = changes
             .iter()
             .filter(|ch| chat.include.get(&ch.path).copied().unwrap_or(false))
@@ -63,9 +70,11 @@ impl Render for ChangesPanel {
             .iter()
             .enumerate()
             .map(|(i, ch)| {
-                let d = self.diffs.get(ch);
-                adds += d.adds;
-                dels += d.dels;
+                let diff = ready.as_ref().and_then(|diffs| diffs.get(i));
+                if let Some(diff) = diff {
+                    adds += diff.adds;
+                    dels += diff.dels;
+                }
                 let on = chat.include.get(&ch.path).copied().unwrap_or(false);
                 let (dir, name) = match ch.path.rsplit_once('/') {
                     Some((dir, name)) => (dir.to_string(), name.to_string()),
@@ -134,12 +143,18 @@ impl Render for ChangesPanel {
                             .child(
                                 div()
                                     .text_color(hsla(c.success))
-                                    .child(SharedString::from(format!("+{}", d.adds))),
+                                    .child(SharedString::from(
+                                        diff.map(|d| format!("+{}", d.adds))
+                                            .unwrap_or_else(|| "…".into()),
+                                    )),
                             )
                             .child(
                                 div()
                                     .text_color(hsla(c.danger))
-                                    .child(SharedString::from(format!("−{}", d.dels))),
+                                    .child(SharedString::from(
+                                        diff.map(|d| format!("−{}", d.dels))
+                                            .unwrap_or_else(|| "…".into()),
+                                    )),
                             ),
                     )
             })
@@ -176,8 +191,12 @@ impl Render for ChangesPanel {
                     .text_color(hsla(c.ink_muted))
                     .child(SharedString::from(summary))
                     .child(div().flex_1())
-                    .child(div().text_color(hsla(c.success)).child(SharedString::from(format!("+{adds}"))))
-                    .child(div().text_color(hsla(c.danger)).child(SharedString::from(format!("−{dels}")))),
+                    .child(div().text_color(hsla(c.success)).child(SharedString::from(
+                        if ready.is_some() { format!("+{adds}") } else { "…".into() },
+                    )))
+                    .child(div().text_color(hsla(c.danger)).child(SharedString::from(
+                        if ready.is_some() { format!("−{dels}") } else { "…".into() },
+                    ))),
             )
             .child(div().id("changes-list").flex_1().min_h_0().overflow_y_scroll().children(rows))
             .when(conflicts, |d| {

@@ -75,7 +75,76 @@ impl DiffItem {
     }
 }
 
+/// At most 4 MB for an exact LCS table. Large inputs first shed their identical edges;
+/// an oversized remaining region is represented as removals followed by additions.
+const MAX_LCS_CELLS: usize = 1_000_000;
+
+fn fits_lcs_budget(n: usize, m: usize) -> bool {
+    n.checked_add(1)
+        .zip(m.checked_add(1))
+        .and_then(|(n, m)| n.checked_mul(m))
+        .is_some_and(|cells| cells <= MAX_LCS_CELLS)
+}
+
+fn same_line(a: &[String], ai: usize, bi: usize) -> DiffOp {
+    DiffOp {
+        k: OpKind::Same,
+        a: Some(ai + 1),
+        b: Some(bi + 1),
+        t: a[ai].clone(),
+        r: None,
+    }
+}
+
 fn lcs_ops(a: &[String], b: &[String]) -> Vec<DiffOp> {
+    // Preserve the original matching/tie-breaking for ordinary files and fixture parity.
+    if fits_lcs_budget(a.len(), b.len()) {
+        return exact_lcs_ops(a, b);
+    }
+
+    let prefix = a.iter().zip(b).take_while(|(a, b)| a == b).count();
+    let suffix = a[prefix..]
+        .iter()
+        .rev()
+        .zip(b[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let a_end = a.len() - suffix;
+    let b_end = b.len() - suffix;
+    let (middle_a, middle_b) = (&a[prefix..a_end], &b[prefix..b_end]);
+    let mut out = Vec::new();
+    out.extend((0..prefix).map(|i| same_line(a, i, i)));
+
+    if fits_lcs_budget(middle_a.len(), middle_b.len()) {
+        out.extend(exact_lcs_ops(middle_a, middle_b).into_iter().map(|mut op| {
+            op.a = op.a.map(|n| n + prefix);
+            op.b = op.b.map(|n| n + prefix);
+            op
+        }));
+    } else {
+        // Exact contents and line numbers, but deliberately not necessarily a minimal diff.
+        // This bounds both table memory and comparison work for unrelated large files.
+        out.extend((prefix..a_end).map(|i| DiffOp {
+            k: OpKind::Del,
+            a: Some(i + 1),
+            b: None,
+            t: a[i].clone(),
+            r: None,
+        }));
+        out.extend((prefix..b_end).map(|i| DiffOp {
+            k: OpKind::Add,
+            a: None,
+            b: Some(i + 1),
+            t: b[i].clone(),
+            r: None,
+        }));
+    }
+
+    out.extend((0..suffix).map(|i| same_line(a, a_end + i, b_end + i)));
+    out
+}
+
+fn exact_lcs_ops(a: &[String], b: &[String]) -> Vec<DiffOp> {
     let (n, m) = (a.len(), b.len());
     let w = m + 1;
     let mut dp = vec![0u32; (n + 1) * w];
@@ -358,6 +427,62 @@ mod tests {
             panic!()
         };
         assert_eq!(hunk_header(lines, &new), "@@ -5,2 +5,2 @@ public class A");
+    }
+
+    fn assert_reconstructs(diff: &Diff) {
+        let old: Vec<_> = diff
+            .ops
+            .iter()
+            .filter(|op| op.k != OpKind::Add)
+            .collect();
+        let new: Vec<_> = diff
+            .ops
+            .iter()
+            .filter(|op| op.k != OpKind::Del)
+            .collect();
+        assert_eq!(old.len(), diff.old_lines.len());
+        assert_eq!(new.len(), diff.new_lines.len());
+        for (i, op) in old.iter().enumerate() {
+            assert_eq!(op.a, Some(i + 1));
+            assert_eq!(op.t, diff.old_lines[i]);
+        }
+        for (i, op) in new.iter().enumerate() {
+            assert_eq!(op.b, Some(i + 1));
+            assert_eq!(op.t, diff.new_lines[i]);
+        }
+    }
+
+    #[test]
+    fn large_local_edit_keeps_unchanged_edges() {
+        let old: Vec<_> = (0..10_000).map(|i| format!("line {i}")).collect();
+        let mut new = old.clone();
+        new[5_000] = "changed".into();
+        let diff = compute_diff(&old.join("\n"), &new.join("\n"));
+        assert_eq!((diff.adds, diff.dels), (1, 1));
+        assert_reconstructs(&diff);
+    }
+
+    #[test]
+    fn oversized_replacement_is_complete_and_numbered() {
+        let old = format!("prefix\n{}suffix\n", "old\n".repeat(1_500));
+        let new = format!("prefix\n{}suffix\n", "new\n".repeat(1_600));
+        let diff = compute_diff(&old, &new);
+        assert_eq!((diff.adds, diff.dels), (1_600, 1_500));
+        assert_eq!(diff.ops.first().unwrap().k, OpKind::Same);
+        assert_eq!(diff.ops.last().unwrap().k, OpKind::Same);
+        assert_reconstructs(&diff);
+    }
+
+    #[test]
+    fn large_identical_and_one_sided_inputs() {
+        let text = "same\n".repeat(10_000);
+        let identical = compute_diff(&text, &text);
+        assert_eq!((identical.adds, identical.dels), (0, 0));
+        assert_reconstructs(&identical);
+        assert_reconstructs(&compute_diff("", &text));
+        assert_reconstructs(&compute_diff(&text, ""));
+        assert!(!fits_lcs_budget(usize::MAX, 1));
+        assert!(!fits_lcs_budget(10_000, 10_000));
     }
 
     #[test]

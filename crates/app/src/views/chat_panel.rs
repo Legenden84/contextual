@@ -28,8 +28,9 @@ use crate::state::chat::{CenterView, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
-use crate::views::context_bar::context_bar;
-use crate::views::markdown::render_reply;
+use crate::views::context_bar::{ContextCache, context_bar};
+use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
+use crate::views::markdown::{ReplyCache, render_reply};
 
 pub struct ChatPanel {
     app: Entity<AppModel>,
@@ -40,6 +41,10 @@ pub struct ChatPanel {
     /// Code blocks the user expanded ("Show N more lines").
     expanded: HashSet<String>,
     rendered: usize,
+    thread_generation: u64,
+    replies: ReplyCache,
+    context: ContextCache,
+    diffs: DiffCache,
     image_loading: bool,
     image_error: Option<String>,
     settings_prompt_open: bool,
@@ -145,6 +150,7 @@ impl ChatPanel {
         app: Entity<AppModel>,
         project: Entity<Project>,
         chat: Entity<ChatModel>,
+        diffs: DiffCache,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -154,10 +160,18 @@ impl ChatPanel {
                 .placeholder("Ask for a change… (Ctrl+Enter to send)")
         });
         let count = chat.read(cx).messages.len();
+        let thread_generation = chat.read(cx).thread_generation;
         let subs = vec![
             cx.observe(&chat, |this: &mut Self, chat, cx| {
-                let n = chat.read(cx).messages.len();
-                if n != this.rendered {
+                let chat = chat.read(cx);
+                let n = chat.messages.len();
+                let replaced = chat.thread_generation != this.thread_generation;
+                if replaced {
+                    this.thread_generation = chat.thread_generation;
+                    this.expanded.clear();
+                    this.replies.clear();
+                }
+                if replaced || n != this.rendered {
                     this.list.reset(n);
                     this.list.scroll_to_end();
                 } else if n > 0 {
@@ -167,6 +181,7 @@ impl ChatPanel {
                 this.rendered = n;
                 cx.notify();
             }),
+            cx.observe(&diffs, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.subscribe_in(&input, window, |this, _, e: &InputEvent, window, cx| {
@@ -186,6 +201,10 @@ impl ChatPanel {
             list: ListState::new(count, ListAlignment::Bottom, px(400.0)),
             expanded: HashSet::new(),
             rendered: count,
+            thread_generation,
+            replies: ReplyCache::default(),
+            context: ContextCache::default(),
+            diffs,
             image_loading: false,
             image_error: None,
             settings_prompt_open: false,
@@ -467,12 +486,15 @@ fn render_message(
                 }),
         ),
         Role::Assistant => {
-            let changes = m.changes.clone().unwrap_or_default();
+            let changes = m.changes.as_deref().unwrap_or_default();
+            let parsed = this.replies.get(&m.id, &m.text);
+            let diffs = this.diffs.read(cx).get(&message_key(chat, m));
             let weak = entity.clone();
             let body = render_reply(
                 &m.id,
-                &m.text,
-                &changes,
+                &parsed,
+                changes,
+                diffs.as_ref().map(|diffs| diffs.as_slice()),
                 m.streaming,
                 &this.expanded,
                 move |key, cx| {
@@ -706,8 +728,10 @@ impl Render for ChatPanel {
                 let Some(this) = weak.upgrade() else {
                     return div().into_any_element();
                 };
-                let panel = this.read(cx);
-                render_message(panel, ix, &weak, cx)
+                this.update(cx, |panel, cx| {
+                    ensure_message(&panel.diffs, &panel.chat, Some(ix), cx);
+                    render_message(panel, ix, &weak, cx)
+                })
             })
             .flex_1()
             .min_h_0()
@@ -780,7 +804,13 @@ impl Render for ChatPanel {
                         div()
                             .w_full()
                             .max_w(px(layout::CONTENT_MAX_WIDTH))
-                            .child(context_bar(&self.app, &self.project, Some(&self.chat), cx))
+                            .child(context_bar(
+                                &self.app,
+                                &self.project,
+                                Some(&self.chat),
+                                &self.context,
+                                cx,
+                            ))
                             .child(
                                 div()
                                     .id("composer")

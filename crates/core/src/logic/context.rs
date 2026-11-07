@@ -87,7 +87,29 @@ fn file_tokens(nodes: &[TreeNode], out: &mut HashMap<String, u64>) {
     }
 }
 
+/// Estimate a stored message without copying ordinary text or image data URLs.
+pub fn content_tokens(content: &ApiContent) -> u64 {
+    match content {
+        ApiContent::Text(text) => estimate_tokens(text),
+        ApiContent::Parts(_) => {
+            estimate_tokens(&content_text(content))
+                + content_images(content) as u64 * PICTURE_TOKENS
+        }
+    }
+}
+
 pub fn totals(input: &ContextInput<'_>) -> Totals {
+    totals_with_conversation_tokens(
+        input,
+        input.transcript.iter().map(content_tokens).sum(),
+    )
+}
+
+/// As `totals`, but with an already counted conversation. `input.transcript` is not read.
+pub fn totals_with_conversation_tokens(
+    input: &ContextInput<'_>,
+    conversation_tokens: u64,
+) -> Totals {
     let (mut files, mut file_tok) = (0, 0);
     for n in input.tree {
         let s = node_stats(n, input.selected);
@@ -95,11 +117,6 @@ pub fn totals(input: &ContextInput<'_>) -> Totals {
         file_tok += s.selected_tokens;
     }
     let rule_tokens = input.rules_on.iter().map(|r| r.tokens).sum();
-    let conversation_tokens: u64 = input
-        .transcript
-        .iter()
-        .map(|c| estimate_tokens(&content_text(c)) + content_images(c) as u64 * PICTURE_TOKENS)
-        .sum();
     let mut sizes = HashMap::new();
     file_tokens(input.tree, &mut sizes);
     let new_file_tokens: u64 = input
@@ -206,6 +223,60 @@ mod tests {
             ..input
         });
         assert!(t2.new_tokens < 1_000);
+    }
+
+    #[test]
+    fn pre_counted_conversation_matches_totals() {
+        use crate::logic::prompt::{ContextImage, with_images};
+
+        let transcript = [
+            ApiContent::Text("An earlier reply with Unicode: 😀".into()),
+            with_images(
+                "Look at this".into(),
+                &[ContextImage {
+                    name: "image.png".into(),
+                    url: "data:image/png;base64,AAAA".into(),
+                }],
+            ),
+        ];
+        let selected = Selection::new();
+        let versions = HashMap::new();
+        let stale = HashSet::new();
+        let deployment = Deployment {
+            limit: 128_000,
+            ..Deployment::default()
+        };
+        let input = ContextInput {
+            tree: &[],
+            selected: &selected,
+            rules_on: &[],
+            output_format: "",
+            transcript: &transcript,
+            file_versions: &versions,
+            stale: &stale,
+            resend_all: false,
+            picture_tokens: 0,
+            auto_tokens: 0,
+            deployment: &deployment,
+        };
+        let counted = transcript.iter().map(content_tokens).sum();
+        assert_eq!(
+            totals(&input),
+            totals_with_conversation_tokens(
+                &ContextInput {
+                    transcript: &[],
+                    ..input
+                },
+                counted,
+            )
+        );
+        for content in &transcript {
+            assert_eq!(
+                content_tokens(content),
+                estimate_tokens(&content_text(content))
+                    + content_images(content) as u64 * PICTURE_TOKENS
+            );
+        }
     }
 
     #[test]
