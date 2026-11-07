@@ -440,7 +440,8 @@ impl ChatPanel {
                         .bg(hsla(c.surface_200))
                         .shadow(vec![shadow(cx.tokens().shadows.popover)])
                         .child(
-                            Button::new("attach-images", "Images…")
+                            Button::new("attach-images", "Images")
+                                .icon(gpui_kit::assets::IconName::Image)
                                 .variant(ButtonVariant::Ghost)
                                 .on_click(cx.listener(|t, _, window, cx| {
                                     t.choose_images(cx);

@@ -8,7 +8,7 @@ duplicating their contents in the new turn. The model can request additional fil
 There is no context-mode selector. Ctrl+Enter sends.
 
 An icon-only **+** control beside Send opens a small attachment menu, initially containing
-**Images…**, which opens the native file picker with multiple selection. Its tooltip is
+**Images** with a leading image icon, which opens the native file picker with multiple selection. Its tooltip is
 **Add attachment**. Enter or Space opens the menu and activates its item; Escape closes it.
 Clicking outside dismisses the menu. More attachment types can be added here later.
 
@@ -21,7 +21,7 @@ Attachments are read on the UI machine, independently of the project's location.
 runs, Windows paths delivered by a drop, picker or clipboard are translated with `wslpath`,
 which respects configured drive mounts. This requires the desktop to deliver the file event:
 WSLg does not reliably forward Windows Explorer drags. When no drop reaches the app, use
-**+ → Images…** to select the file on a mounted Windows drive, or run the Windows build.
+**+ → Images** to select the file on a mounted Windows drive, or run the Windows build.
 
 Supported formats are PNG, JPEG, GIF and WebP, up to 20 MiB per source image. Images are prepared
 off the UI thread and scaled to a maximum side of 2048 pixels. GIFs are sent as a still image.
