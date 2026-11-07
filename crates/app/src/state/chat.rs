@@ -138,6 +138,10 @@ pub struct ChatModel {
     reference_only: HashSet<String>,
     /// Which proposed changes are ticked for saving.
     pub include: HashMap<String, bool>,
+    /// Immutable cumulative snapshot for the shared diff cache, separate from historical replies.
+    change_snapshot: Option<UiMessage>,
+    /// Changes belonging to the currently offered undo snapshot.
+    undo_changes: Vec<Change>,
     pub diff_mode: DiffMode,
     pub save_dialog_open: bool,
     pub pr_open: bool,
@@ -210,6 +214,8 @@ impl ChatModel {
             contents: HashMap::new(),
             reference_only: HashSet::new(),
             include: HashMap::new(),
+            change_snapshot: None,
+            undo_changes: Vec::new(),
             diff_mode: DiffMode::Unified,
             save_dialog_open: false,
             pr_open: false,
@@ -253,13 +259,30 @@ impl ChatModel {
         cx.notify();
     }
 
-    /// Published changes are immutable for the lifetime of their message in this generation.
+    /// The cumulative pending set, with its own immutable identity for background diffs.
+    /// Historical messages retain their own changes and cache keys.
     pub fn change_message(&self) -> Option<&UiMessage> {
-        self.messages.iter().rev().find(|m| {
-            m.changes
-                .as_ref()
-                .is_some_and(|changes| !changes.is_empty())
-        })
+        self.change_snapshot.as_ref()
+    }
+
+    fn set_changes(&mut self, changes: Vec<Change>) {
+        self.include
+            .retain(|path, _| changes.iter().any(|c| &c.path == path));
+        for change in &changes {
+            let included = self.include.entry(change.path.clone()).or_insert(true);
+            if change.conflict.is_some() {
+                *included = false;
+            }
+        }
+        self.thread.pending_changes = Some(changes.clone());
+        self.change_snapshot = if changes.is_empty() {
+            None
+        } else {
+            let mut snapshot = UiMessage::assistant("", "");
+            snapshot.streaming = false;
+            snapshot.changes = Some(changes);
+            Some(snapshot)
+        };
     }
 
     /// Borrowed changes for render paths; do not clone file contents just to show counts.
@@ -304,7 +327,7 @@ impl ChatModel {
         rules_on: Vec<Rule>,
         cx: &mut Context<Self>,
     ) {
-        if self.streaming() {
+        if self.streaming() || self.saving {
             return;
         }
         self.pending = None;
@@ -606,7 +629,12 @@ impl ChatModel {
                 contents: &this.contents,
                 reference_only: &this.reference_only,
             };
-            chat::proposed_changes(&reply, truncated, &ctx)
+            if completed {
+                chat::proposed_changes_on_top(&reply, truncated, &ctx, this.changes_ref())
+            } else {
+                // An interrupted or failed reply must not supersede reviewed proposals.
+                Vec::new()
+            }
         }) else {
             return;
         };
@@ -679,10 +707,8 @@ impl ChatModel {
                 );
             }
             if !changes.is_empty() {
-                this.include = changes
-                    .iter()
-                    .map(|c| (c.path.clone(), c.conflict.is_none()))
-                    .collect();
+                let merged = chat::merge_pending_changes(this.changes_ref(), &changes);
+                this.set_changes(merged);
             }
             this.cancel = None;
             cx.notify();
@@ -931,7 +957,7 @@ impl ChatModel {
 
     /// A new, empty chat with no files selected or context carried over.
     pub fn start_fresh(&mut self, cx: &mut Context<Self>) {
-        if self.streaming() {
+        if self.streaming() || self.saving {
             return;
         }
         self.contents.clear();
@@ -948,6 +974,10 @@ impl ChatModel {
         self.thread_generation = self.thread_generation.wrapping_add(1);
         self.messages.clear();
         self.include.clear();
+        self.change_snapshot = None;
+        self.undo_changes.clear();
+        self.toast = None;
+        self.save_dialog_open = false;
         self.attachments.clear();
         cx.notify();
     }
@@ -1021,9 +1051,10 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        if self.streaming() {
+        if self.streaming() || self.saving {
             return;
         }
+        let generation = self.thread_generation;
         let root = self.thread_key(cx);
         let job = runtime::spawn(cx, async move { store.load(&root, &id).await });
         cx.spawn(async move |this, cx| {
@@ -1032,6 +1063,10 @@ impl ChatModel {
                 return;
             };
             this.update(cx, |this, cx| {
+                if this.streaming() || this.saving || this.thread_generation != generation {
+                    return;
+                }
+                let changes = saved.pending_changes();
                 // Re-tick the files the model has from this chat.
                 let paths: Vec<String> = saved.thread.file_versions.keys().cloned().collect();
                 let loaded = saved.thread.loaded.clone();
@@ -1044,17 +1079,20 @@ impl ChatModel {
                     cx.notify()
                 });
                 this.pending = None;
-                this.include = SavedThread::last_changes(&saved.messages)
-                    .iter()
-                    .map(|c| (c.path.clone(), c.conflict.is_none()))
-                    .collect();
-                for c in SavedThread::last_changes(&saved.messages) {
+                this.include.clear();
+                this.contents.clear();
+                this.reference_only.clear();
+                this.undo_changes.clear();
+                this.toast = None;
+                this.save_dialog_open = false;
+                for c in &changes {
                     if c.status != ChangeStatus::A {
-                        this.contents.entry(c.path.clone()).or_insert(c.old.clone());
+                        this.contents.insert(c.path.clone(), c.old.clone());
                     }
                 }
                 this.attachments.clear();
                 this.thread = saved.thread;
+                this.set_changes(changes);
                 this.context_revision = this.context_revision.wrapping_add(1);
                 this.thread_generation = this.thread_generation.wrapping_add(1);
                 this.messages = saved
@@ -1136,7 +1174,7 @@ impl ChatModel {
         cx: &mut Context<Self>,
     ) {
         let picked = self.included();
-        if picked.is_empty() || self.saving {
+        if picked.is_empty() || self.saving || self.streaming() {
             return;
         }
         self.saving = true;
@@ -1177,6 +1215,14 @@ impl ChatModel {
                             }
                         }
                         chat::record_saved(&mut this.thread, &picked);
+                        let remaining = this
+                            .changes_ref()
+                            .iter()
+                            .filter(|c| !picked.iter().any(|saved| saved.path == c.path))
+                            .cloned()
+                            .collect();
+                        this.set_changes(remaining);
+                        this.undo_changes = picked.clone();
                         this.context_revision = this.context_revision.wrapping_add(1);
                         let (title, detail) = chat::saved_toast(&picked, branch.as_deref());
                         this.toast = Some(Toast {
@@ -1203,9 +1249,14 @@ impl ChatModel {
         on_undone: impl FnOnce(&mut gpui_kit::App) + 'static,
         cx: &mut Context<Self>,
     ) {
+        if self.streaming() || self.saving {
+            return;
+        }
         let Some(backup_id) = self.toast.as_ref().and_then(|t| t.backup_id.clone()) else {
             return;
         };
+        self.saving = true;
+        cx.notify();
         let req = Undo {
             root: self.root(cx),
             backup_id,
@@ -1215,9 +1266,24 @@ impl ChatModel {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                this.saving = false;
                 this.toast = Some(match result {
                     Ok(r) => {
+                        let restored =
+                            chat::merge_pending_changes(&this.undo_changes, this.changes_ref());
+                        for change in &this.undo_changes {
+                            this.thread.file_versions.remove(&change.path);
+                        }
                         this.contents.clear();
+                        for change in &restored {
+                            if change.status != ChangeStatus::A {
+                                this.contents.insert(change.path.clone(), change.old.clone());
+                            }
+                        }
+                        this.set_changes(restored);
+                        this.undo_changes.clear();
+                        this.context_revision = this.context_revision.wrapping_add(1);
+                        this.save_thread(cx);
                         Toast {
                             title: "Changes undone".into(),
                             detail: format!("Restored {}, removed {}", r.restored, r.removed),

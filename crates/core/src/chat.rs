@@ -79,6 +79,10 @@ pub struct ThreadState {
     /// Skills and skill files the model loaded: kept in context like ticked files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loaded: Vec<String>,
+    /// Cumulative unsaved proposals. `None` means an older chat: recover from its messages.
+    /// An explicit empty list must survive saving so historical changes don't reappear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_changes: Option<Vec<Change>>,
 }
 
 impl ThreadState {
@@ -94,6 +98,7 @@ impl ThreadState {
             pull_requests: Vec::new(),
             tree_version: None,
             loaded: Vec::new(),
+            pending_changes: Some(Vec::new()),
         }
     }
 
@@ -389,13 +394,25 @@ impl SavedThread {
         self.thread.transcript.len() / 2
     }
 
-    /// The changes of the latest reply that had any (what the Changes panel shows).
+    /// Legacy chats stored only per-reply proposals. Keep the latest version of every path,
+    /// in first-seen order. Their `old` contents already refer to disk, not another proposal.
     pub fn last_changes(messages: &[UiMessage]) -> Vec<Change> {
-        messages
-            .iter()
-            .rev()
-            .find_map(|m| m.changes.clone().filter(|c| !c.is_empty()))
-            .unwrap_or_default()
+        let mut changes: Vec<Change> = Vec::new();
+        for change in messages.iter().filter_map(|m| m.changes.as_ref()).flatten() {
+            if let Some(previous) = changes.iter_mut().find(|c| c.path == change.path) {
+                *previous = change.clone();
+            } else {
+                changes.push(change.clone());
+            }
+        }
+        changes
+    }
+
+    pub fn pending_changes(&self) -> Vec<Change> {
+        self.thread
+            .pending_changes
+            .clone()
+            .unwrap_or_else(|| Self::last_changes(&self.messages))
     }
 }
 
@@ -434,12 +451,55 @@ pub fn prepare_turn(
     rules_on: usize,
     opts: TurnOptions,
 ) -> PreparedTurn {
+    // The model works on an in-memory proposal, not an implicit disk write. Always keep
+    // pending paths in context, including new files that don't exist in the project tree.
+    let mut read = read.to_vec();
+    let mut selected = selected.clone();
+    let mut pending_paths = Vec::new();
+    let mut deleted_paths = Vec::new();
+    for change in thread.pending_changes.iter().flatten().filter(|c| usable_proposal(c)) {
+        selected.insert(change.path.clone());
+        read.retain(|f| f.path != change.path);
+        if change.status == ChangeStatus::D {
+            deleted_paths.push(change.path.clone());
+            read.push(FileContent {
+                path: change.path.clone(),
+                error: Some("pending deletion (not saved)".into()),
+                ..Default::default()
+            });
+        } else {
+            pending_paths.push(change.path.clone());
+            read.push(FileContent {
+                path: change.path.clone(),
+                content: Some(change.new.clone()),
+                ..Default::default()
+            });
+        }
+    }
+    let mut text = text.to_string();
+    if !pending_paths.is_empty() || !deleted_paths.is_empty() {
+        let mut note = String::from(
+            "# Pending changes\n\nThese changes are in memory only, not saved to disk. \
+             Continue from the latest proposed contents supplied as context, not the older disk copies. \
+             Return only files you change; other pending changes are kept.",
+        );
+        if !pending_paths.is_empty() {
+            note.push_str(&format!("\n\nPending file versions:\n- {}", pending_paths.join("\n- ")));
+        }
+        if !deleted_paths.is_empty() {
+            note.push_str(&format!(
+                "\n\nPending deletions (use FILE to recreate):\n- {}",
+                deleted_paths.join("\n- ")
+            ));
+        }
+        text = format!("{note}\n\n{text}");
+    }
     let force_all = opts.force_all;
     let followup = opts.followup;
     let mut versions = thread.file_versions.clone();
     let mut changed = Vec::new();
     let mut unchanged = Vec::new();
-    for f in read {
+    for f in &read {
         let unavailable = format!("unavailable:{}", f.error.as_deref().unwrap_or(""));
         let version = hash_text(
             f.image
@@ -552,6 +612,92 @@ pub fn proposed_changes(reply: &str, truncated: bool, ctx: &dyn ChangeContext) -
     } else {
         parse_changes(reply, ctx)
     }
+}
+
+fn usable_proposal(change: &Change) -> bool {
+    change.conflict.is_none() && change.unplaced.as_ref().is_none_or(Vec::is_empty)
+}
+
+/// Resolve SEARCH/REPLACE against the latest valid proposal. The returned changes are
+/// relative to that version, including the `old` used by edit repair.
+pub fn proposed_changes_on_top(
+    reply: &str,
+    truncated: bool,
+    ctx: &dyn ChangeContext,
+    pending: &[Change],
+) -> Vec<Change> {
+    struct Proposed<'a> {
+        disk: &'a dyn ChangeContext,
+        pending: &'a [Change],
+    }
+
+    impl Proposed<'_> {
+        fn get(&self, path: &str) -> Option<&Change> {
+            self.pending
+                .iter()
+                .find(|c| c.path == path && usable_proposal(c))
+        }
+    }
+
+    impl ChangeContext for Proposed<'_> {
+        fn exists(&self, path: &str) -> bool {
+            self.get(path)
+                .map_or_else(|| self.disk.exists(path), |c| c.status != ChangeStatus::D)
+        }
+
+        fn original(&self, path: &str) -> Option<String> {
+            match self.get(path) {
+                Some(c) => (c.status != ChangeStatus::D).then(|| c.new.clone()),
+                None => self.disk.original(path),
+            }
+        }
+
+        fn changed_on_disk(&self, path: &str) -> bool {
+            self.disk.changed_on_disk(path)
+        }
+
+        fn read_only(&self, path: &str) -> bool {
+            self.disk.read_only(path)
+        }
+    }
+
+    proposed_changes(reply, truncated, &Proposed { disk: ctx, pending })
+}
+
+/// Compose successive proposals into one disk-relative change per path. Newer contents win,
+/// but the original disk baseline remains the Save precondition until that file is saved.
+pub fn merge_pending_changes(pending: &[Change], updates: &[Change]) -> Vec<Change> {
+    let mut merged = pending.to_vec();
+    for update in updates {
+        let Some(index) = merged.iter().position(|c| c.path == update.path) else {
+            merged.push(update.clone());
+            continue;
+        };
+        let previous = &merged[index];
+        if previous.status == ChangeStatus::A
+            && update.status == ChangeStatus::D
+            && update.conflict.is_none()
+        {
+            // Creating and then deleting an unsaved file cancels the creation.
+            merged.remove(index);
+            continue;
+        }
+        let mut next = update.clone();
+        next.old = previous.old.clone();
+        next.status = if previous.status == ChangeStatus::A {
+            ChangeStatus::A
+        } else if update.status == ChangeStatus::D {
+            ChangeStatus::D
+        } else {
+            ChangeStatus::M
+        };
+        // A follow-up must not silently remove an existing safety warning.
+        if next.conflict.is_none() {
+            next.conflict = previous.conflict.clone();
+        }
+        merged[index] = next;
+    }
+    visible_changes(merged)
 }
 
 /// Drops no-op modifications (same content, no conflict).
@@ -824,6 +970,173 @@ mod tests {
         record_saved(&mut t, &saved);
         assert!(t.file_versions.contains_key("a") && !t.file_versions.contains_key("d"));
         assert_eq!(t.applied.len(), 3);
+    }
+
+    fn proposal(path: &str, status: ChangeStatus, old: &str, new: &str) -> Change {
+        Change {
+            path: path.into(),
+            status,
+            old: old.into(),
+            new: new.into(),
+            conflict: None,
+            edits: None,
+            unplaced: None,
+        }
+    }
+
+    struct ProposalDisk;
+
+    impl ChangeContext for ProposalDisk {
+        fn exists(&self, path: &str) -> bool {
+            path == "a.txt"
+        }
+
+        fn original(&self, path: &str) -> Option<String> {
+            (path == "a.txt").then(|| "one\ntwo\n".into())
+        }
+
+        fn changed_on_disk(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn consecutive_edits_keep_other_files_and_the_disk_baseline() {
+        let first = vec![
+            proposal("a.txt", ChangeStatus::M, "one\ntwo\n", "ONE\ntwo\n"),
+            proposal("b.txt", ChangeStatus::A, "", "keep"),
+        ];
+        let next = proposed_changes_on_top(
+            "### EDIT: a.txt\n<<<<<<< SEARCH\nONE\n=======\nFIRST\n>>>>>>> REPLACE",
+            false,
+            &ProposalDisk,
+            &first,
+        );
+        assert_eq!(next[0].old, "ONE\ntwo\n");
+        assert_eq!(next[0].new, "FIRST\ntwo\n");
+        assert!(next[0].unplaced.as_ref().unwrap().is_empty());
+        let merged = merge_pending_changes(&first, &next);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].old, "one\ntwo\n");
+        assert_eq!(merged[0].new, "FIRST\ntwo\n");
+        assert_eq!(merged[1], first[1]);
+        assert_eq!(merge_pending_changes(&merged, &[]), merged);
+
+        let cut_off = proposed_changes_on_top(
+            "### DELETE: b.txt",
+            true,
+            &ProposalDisk,
+            &merged,
+        );
+        assert_eq!(merge_pending_changes(&merged, &cut_off), merged);
+    }
+
+    #[test]
+    fn pending_creation_can_be_edited_or_cancelled() {
+        let first = vec![proposal("new.txt", ChangeStatus::A, "", "first")];
+        let next = proposed_changes_on_top(
+            "### EDIT: new.txt\n<<<<<<< SEARCH\nfirst\n=======\nsecond\n>>>>>>> REPLACE",
+            false,
+            &ProposalDisk,
+            &first,
+        );
+        let merged = merge_pending_changes(&first, &next);
+        assert_eq!(merged, vec![proposal("new.txt", ChangeStatus::A, "", "second")].into_iter().map(|mut c| {
+            c.edits = next[0].edits.clone();
+            c.unplaced = next[0].unplaced.clone();
+            c
+        }).collect::<Vec<_>>());
+        let deleted = proposed_changes_on_top(
+            "### DELETE: new.txt",
+            false,
+            &ProposalDisk,
+            &merged,
+        );
+        assert!(merge_pending_changes(&merged, &deleted).is_empty());
+    }
+
+    #[test]
+    fn delete_recreate_and_revert_compose_against_disk() {
+        let deleted = vec![proposal("a.txt", ChangeStatus::D, "one\ntwo\n", "")];
+        let recreated = proposed_changes_on_top(
+            "### FILE: a.txt\n```\nreplacement\n```",
+            false,
+            &ProposalDisk,
+            &deleted,
+        );
+        let merged = merge_pending_changes(&deleted, &recreated);
+        assert_eq!(merged[0].status, ChangeStatus::M);
+        assert_eq!(merged[0].old, "one\ntwo\n");
+        assert_eq!(merged[0].new, "replacement");
+
+        let reverted = proposal("a.txt", ChangeStatus::M, "replacement", "one\ntwo\n");
+        assert!(merge_pending_changes(&merged, &[reverted]).is_empty());
+    }
+
+    #[test]
+    fn followup_context_uses_unsaved_versions_including_new_files() {
+        let mut thread = ThreadState::fresh();
+        thread.pending_changes = Some(vec![
+            proposal("a.txt", ChangeStatus::M, "disk", "pending"),
+            proposal("new.txt", ChangeStatus::A, "", "created"),
+            proposal("gone.txt", ChangeStatus::D, "old", ""),
+        ]);
+        let turn = prepare_turn(
+            &thread,
+            &[file("a.txt", "disk"), file("gone.txt", "old")],
+            &HashSet::new(),
+            "continue",
+            &[],
+            0,
+            TurnOptions::default(),
+        );
+        let text = crate::logic::prompt::content_text(&turn.input);
+        assert!(text.contains("pending"));
+        assert!(text.contains("created"));
+        assert!(text.contains("Pending deletions"));
+        assert_eq!(turn.versions["a.txt"], hash_text("pending"));
+        assert_eq!(turn.versions["new.txt"], hash_text("created"));
+        assert!(!text.contains("# Removed from context"));
+    }
+
+    #[test]
+    fn pending_state_roundtrips_and_legacy_replies_accumulate() {
+        let a = proposal("a.txt", ChangeStatus::M, "old", "first");
+        let b = proposal("b.txt", ChangeStatus::A, "", "keep");
+        let newer = proposal("a.txt", ChangeStatus::M, "old", "second");
+        let mut first = UiMessage::assistant("model", "10:00");
+        first.changes = Some(vec![a, b.clone()]);
+        let mut second = UiMessage::assistant("model", "10:01");
+        second.changes = Some(vec![newer.clone()]);
+        let mut thread = ThreadState::fresh();
+        thread.pending_changes = None;
+        let mut saved = SavedThread::new(thread, vec![first, second]);
+        assert_eq!(saved.pending_changes(), vec![newer.clone(), b.clone()]);
+
+        // After a partial Save, only the unsaved path returns on reopening.
+        saved.thread.pending_changes = Some(vec![b.clone()]);
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(restored.pending_changes(), vec![b]);
+
+        // After saving everything, historical replies must not resurrect changes.
+        saved.thread.pending_changes = Some(Vec::new());
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert!(restored.pending_changes().is_empty());
+    }
+
+    #[test]
+    fn undo_restores_saved_baselines_without_losing_followup_work() {
+        let saved = vec![proposal("a.txt", ChangeStatus::M, "disk", "saved")];
+        let pending = vec![
+            proposal("a.txt", ChangeStatus::M, "saved", "latest"),
+            proposal("b.txt", ChangeStatus::A, "", "keep"),
+        ];
+        let restored = merge_pending_changes(&saved, &pending);
+        assert_eq!(restored[0].old, "disk");
+        assert_eq!(restored[0].new, "latest");
+        assert_eq!(restored[1], pending[1]);
     }
 
     #[test]
