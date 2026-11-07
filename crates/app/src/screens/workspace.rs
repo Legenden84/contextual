@@ -13,7 +13,7 @@ use gpui_kit::{
 };
 
 use crate::state::chat::{CenterView, ChatModel};
-use crate::state::scm::ScmModel;
+use crate::state::scm::{OpenPullRequest, ScmModel};
 use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, file_glyph};
@@ -131,6 +131,7 @@ impl WorkspaceScreen {
                 }
                 let pr = chat.read(cx).pr_open;
                 if pr && this.pr_dialog.is_none() {
+                    this.sidebar.update(cx, |sidebar, cx| sidebar.show_scm(cx));
                     let (app, project, chat) =
                         (this.app.clone(), this.project.clone(), chat.clone());
                     this.pr_dialog =
@@ -153,6 +154,15 @@ impl WorkspaceScreen {
                 cx.notify();
             }),
         );
+        subs.push(cx.subscribe(
+            &scm,
+            |this: &mut Self, _, _: &OpenPullRequest, cx| {
+                this.chat.update(cx, |chat, cx| {
+                    chat.pr_open = true;
+                    cx.notify();
+                });
+            },
+        ));
         let chat_panel = cx.new(|cx| {
             ChatPanel::new(
                 app.clone(),
@@ -358,17 +368,6 @@ impl Render for WorkspaceScreen {
                     .items_center()
                     .gap(sp(1))
                     .px(sp(2))
-                    .child(
-                        Button::new("pr", "Pull request…")
-                            .size(ButtonSize::Xs)
-                            .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(|t, _, _, cx| {
-                                t.chat.update(cx, |c, cx| {
-                                    c.pr_open = true;
-                                    cx.notify();
-                                })
-                            })),
-                    )
                     .child(
                         Button::new("inspect", "Inspect")
                             .size(ButtonSize::Xs)

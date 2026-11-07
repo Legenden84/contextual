@@ -1,6 +1,6 @@
-//! Source Control tab (VS Code-style): branch with ahead/behind, commit message (drafted by the
-//! model on request), Commit / Commit all, Push / Publish, then staged and unstaged changes.
-//! Clicking a file opens its diff in a tab.
+//! Source Control: branch with ahead/behind, commit message (drafted by the model on request),
+//! Commit / Commit all, Push / Publish, and comparison before opening a pull request.
+//! Clicking a staged or unstaged file opens its diff in a tab.
 
 use contextual_core::logic::git_tabs::git_tab_id;
 use contextual_protocol::git::{ChangeLetter, StatusEntry};
@@ -389,6 +389,14 @@ impl Render for SourceControl {
             (_, None) => "Publish branch".into(),
         };
         let empty = st.staged.is_empty() && st.changes.is_empty() && st.conflicts.is_empty();
+        let can_compare = st.branch.is_some() && busy.is_none();
+        let pr_hint = if st.branch.is_none() {
+            "Switch to a branch to compare changes and open a pull request."
+        } else if !empty {
+            "Review committed changes for a pull request. Uncommitted changes are not included."
+        } else {
+            "Compare your branch with a base branch, then create or update a pull request."
+        };
         let ahead_behind = (st.upstream.is_some() && (st.ahead > 0 || st.behind > 0)).then(|| {
             let mut s = String::new();
             if st.ahead > 0 {
@@ -473,7 +481,11 @@ impl Render for SourceControl {
                         div().flex().flex_col().child(
                             Button::new("commit", commit_label)
                                 .icon(IconName::Check)
-                                .variant(ButtonVariant::Primary)
+                                .variant(if has_changes {
+                                    ButtonVariant::Primary
+                                } else {
+                                    ButtonVariant::Secondary
+                                })
                                 .disabled(!can_commit)
                                 .on_click(cx.listener(|t, _, w, cx| t.commit(w, cx))),
                         ),
@@ -491,6 +503,11 @@ impl Render for SourceControl {
                             div().flex().flex_col().child(
                                 Button::new("push", push_label)
                                     .icon(IconName::ArrowUp)
+                                    .variant(if empty {
+                                        ButtonVariant::Primary
+                                    } else {
+                                        ButtonVariant::Secondary
+                                    })
                                     .disabled(busy.is_some())
                                     .on_click(cx.listener(|t, _, _, cx| {
                                         t.scm.update(cx, |s, cx| s.push(cx))
@@ -516,6 +533,42 @@ impl Render for SourceControl {
                             )
                         })
                     }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .gap(sp(2))
+                    .px(sp(3))
+                    .py(sp(3))
+                    .border_t_1()
+                    .border_color(hsla(c.border))
+                    .child(
+                        div()
+                            .type_style(contextual_theme::type_style::UI_CAPTION)
+                            .text_color(hsla(c.ink_muted))
+                            .child("PULL REQUEST"),
+                    )
+                    .child(
+                        div()
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(pr_hint),
+                    )
+                    .child(
+                        Button::new("scm-pull-request", "Compare & pull request")
+                            .icon(IconName::Github)
+                            .variant(if empty && !show_push {
+                                ButtonVariant::Primary
+                            } else {
+                                ButtonVariant::Secondary
+                            })
+                            .disabled(!can_compare)
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                t.scm.update(cx, |s, cx| s.open_pull_request(cx))
+                            })),
+                    ),
             )
             .child(
                 div()

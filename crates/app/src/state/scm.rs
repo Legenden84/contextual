@@ -10,11 +10,14 @@ use contextual_protocol::git::{
     BranchList, BranchesRequest, CommitRequest, CreateBranchRequest, GitStatus, PathsRequest,
     RootRequest, SwitchRequest,
 };
-use gpui_kit::{Context, Entity, Subscription};
+use gpui_kit::{Context, Entity, EventEmitter, Subscription};
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
 use crate::state::Project;
+
+/// Open the branch comparison from Source Control without coupling it to the chat view.
+pub struct OpenPullRequest;
 
 pub struct ScmModel {
     project: Entity<Project>,
@@ -34,6 +37,8 @@ pub struct ScmModel {
     seen_rescans: u64,
     _sub: Subscription,
 }
+
+impl EventEmitter<OpenPullRequest> for ScmModel {}
 
 impl ScmModel {
     pub fn new(
@@ -212,6 +217,16 @@ impl ScmModel {
             |this, message| this.drafted = Some(message),
             cx,
         );
+    }
+
+    /// Review committed changes before explicitly pushing or creating a pull request.
+    pub fn open_pull_request(&mut self, cx: &mut Context<Self>) {
+        if self.busy.is_some()
+            || !self.status.as_ref().is_some_and(|s| s.branch.is_some())
+        {
+            return;
+        }
+        cx.emit(OpenPullRequest);
     }
 
     // ------------------------------------------------------------------ branches

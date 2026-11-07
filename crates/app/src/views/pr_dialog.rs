@@ -575,7 +575,9 @@ impl Render for PrDialog {
             (_, true) => "Working…".to_string(),
             (Some(e), _) if unpushed > 0 => format!("Push to #{}", e.number),
             (Some(_), _) => "Up to date".into(),
+            (None, _) if self.draft && unpushed > 0 => "Push & create draft pull request".into(),
             (None, _) if self.draft => "Create draft pull request".into(),
+            (None, _) if unpushed > 0 => "Push & create pull request".into(),
             (None, _) => "Create pull request".into(),
         };
         let weak = cx.entity().downgrade();
@@ -626,7 +628,7 @@ impl Render for PrDialog {
                             .pl(sp(4))
                             .child(
                                 div().flex_1().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child(SharedString::from(
-                                    existing.as_ref().map(|e| format!("Pull request #{}", e.number)).unwrap_or_else(|| "Open a pull request".into()),
+                                    existing.as_ref().map(|e| format!("Pull request #{}", e.number)).unwrap_or_else(|| "Compare changes".into()),
                                 )),
                             )
                             .child(IconButton::new("pr-close", gpui_kit::component::IconName::Close, "Close").on_click(cx.listener(|t, _, _, cx| t.close(cx)))),
@@ -726,20 +728,32 @@ impl Render for PrDialog {
                                         }),
                                 )
                             })
-                            .when_some(existing.clone().filter(|_| ready), |d, e| {
-                                d.child(small(
-                                    format!(
-                                        "This branch already has an open pull request: #{} ({}). {}",
-                                        e.number,
-                                        e.url,
-                                        if unpushed > 0 {
-                                            format!("Push {unpushed} new {} to update it.", if unpushed == 1 { "commit" } else { "commits" })
-                                        } else {
-                                            "It is up to date.".into()
-                                        }
-                                    ),
-                                    c.ink,
-                                ))
+                            .when_some(existing.clone().filter(|_| !self.loading), |d, e| {
+                                d.child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(sp(2))
+                                        .child(small(
+                                            format!(
+                                                "This branch already has an open pull request: #{}. {}",
+                                                e.number,
+                                                if unpushed > 0 {
+                                                    format!("Push {unpushed} new {} to update it.", if unpushed == 1 { "commit" } else { "commits" })
+                                                } else {
+                                                    "It is up to date.".into()
+                                                }
+                                            ),
+                                            c.ink,
+                                        ))
+                                        .child(
+                                            div().flex().child(
+                                                Button::new("pr-open-github", "Open on GitHub")
+                                                    .icon(gpui_kit::component::IconName::Github)
+                                                    .on_click(move |_, _, cx| cx.open_url(&e.url)),
+                                            ),
+                                        ),
+                                )
                             })
                             .when(ready && existing.is_none(), |d| {
                                 d.child(
