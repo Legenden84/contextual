@@ -60,17 +60,15 @@ pub fn install(
         }
         chat_for_obs.update(cx, |c, cx| match after.as_str() {
             "inspect" => {
-                c.center = CenterView::Inspect;
-                cx.notify();
+                c.set_center(CenterView::Inspect, cx);
             }
             "diff" | "split" => {
-                c.center = CenterView::Diff;
                 c.diff_mode = if after == "split" {
                     DiffMode::Split
                 } else {
                     DiffMode::Unified
                 };
-                cx.notify();
+                c.set_center(CenterView::Diff, cx);
             }
             "save" | "undo" => {
                 let undo = after == "undo";
@@ -129,8 +127,7 @@ pub fn open(
             cx.notify();
         }),
         "inspect" => chat.update(cx, |c, cx| {
-            c.center = CenterView::Inspect;
-            cx.notify();
+            c.set_center(CenterView::Inspect, cx);
         }),
         other => {
             if let Some(message) = other.strip_prefix("commit:") {

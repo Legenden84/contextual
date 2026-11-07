@@ -1,6 +1,6 @@
-//! Workspace (design spec: ScreenWorkspace): sidebar, centre tabs (Chat plus read-only previews)
-//! with the chat and composer, and the Changes panel when a reply proposes changes. The diff view
-//! and the Inspect view replace the centre and right columns.
+//! Workspace (design spec: ScreenWorkspace): sidebar and persistent tabs for Chat, file previews,
+//! Diff and Inspect. Feature tabs use the centre and right columns beneath the shared tab bar;
+//! Chat and previews show the Changes panel when a reply proposes changes.
 
 use std::collections::HashMap;
 
@@ -16,7 +16,7 @@ use crate::state::chat::{CenterView, ChatModel};
 use crate::state::scm::{OpenPullRequest, ScmModel};
 use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, file_glyph};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, Tag, file_glyph};
 use crate::views::branch_picker::BranchPicker;
 use crate::views::changes_panel::ChangesPanel;
 use crate::views::chat_panel::ChatPanel;
@@ -64,10 +64,14 @@ impl WorkspaceScreen {
     ) -> Self {
         let subs = vec![
             cx.observe_in(&project, window, |this: &mut Self, project, window, cx| {
-                // Create previews for new tabs, drop closed ones.
+                // Feature tabs have their own persistent entities, not file previews.
                 let tabs = project.read(cx).tabs.clone();
-                this.previews.retain(|p, _| tabs.contains(p));
-                for t in tabs {
+                this.previews
+                    .retain(|p, _| tabs.contains(&Tab::Preview(p.clone())));
+                for tab in tabs {
+                    let Tab::Preview(t) = tab else {
+                        continue;
+                    };
                     if !this.previews.contains_key(&t) {
                         let host = this.app.update(cx, |a, _| a.host());
                         let view: AnyView = match parse_git_tab(&t) {
@@ -100,10 +104,6 @@ impl WorkspaceScreen {
             cx.subscribe_in(&app, window, |this, _, _: &ReturnToChat, window, cx| {
                 this.project.update(cx, |p, cx| {
                     p.activate(Tab::Chat);
-                    cx.notify();
-                });
-                this.chat.update(cx, |chat, cx| {
-                    chat.center = CenterView::Chat;
                     cx.notify();
                 });
                 this.chat_panel
@@ -211,14 +211,17 @@ impl WorkspaceScreen {
             .id(id)
             .relative()
             .flex()
+            .flex_none()
             .items_center()
-            .gap(px(6.0))
+            .gap(sp(2))
+            .whitespace_nowrap()
             .px(sp(3))
             .h_full()
             .border_r_1()
             .border_color(hsla(c.border))
             .cursor_pointer()
             .text_color(hsla(if active { c.ink_strong } else { c.ink_muted }))
+            .when(!active, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
             .when(active, |d| {
                 d.bg(hsla(c.surface_100)).child(
                     div()
@@ -242,11 +245,13 @@ impl Render for WorkspaceScreen {
 
         let chat_tab = self
             .tab("tab-chat".into(), active == Tab::Chat, cx)
-            .on_click(cx.listener(|t, _, _, cx| {
+            .on_click(cx.listener(|t, _, window, cx| {
                 t.project.update(cx, |p, cx| {
                     p.activate(Tab::Chat);
                     cx.notify()
-                })
+                });
+                t.chat_panel
+                    .update(cx, |panel, cx| panel.focus_input(window, cx));
             }))
             .child(
                 div()
@@ -254,57 +259,84 @@ impl Render for WorkspaceScreen {
                     .child(Icon::new(IconName::Bot).size(px(14.0))),
             )
             .child("Chat");
-        let preview_tabs: Vec<_> = tabs
+        let open_tabs: Vec<_> = tabs
             .iter()
-            .map(|path| {
-                let git = parse_git_tab(path);
-                let shown = git
-                    .as_ref()
-                    .map(|g| g.path.clone())
-                    .unwrap_or_else(|| path.clone());
-                let name = shown.rsplit('/').next().unwrap_or(&shown).to_string();
-                let tag = match &git {
-                    Some(g) if g.staged => "staged",
-                    Some(_) => "changes",
-                    None => "read-only",
+            .map(|tab| {
+                let (id, name, tag, glyph) = match tab {
+                    Tab::Preview(path) => {
+                        let git = parse_git_tab(path);
+                        let shown = git
+                            .as_ref()
+                            .map(|g| g.path.as_str())
+                            .unwrap_or(path);
+                        let name = shown.rsplit('/').next().unwrap_or(shown).to_string();
+                        let tag = match &git {
+                            Some(g) if g.staged => "staged",
+                            Some(_) => "changes",
+                            None => "read-only",
+                        };
+                        let glyph = file_glyph(&name, cx).into_any_element();
+                        (format!("preview:{path}"), name, Some(tag), glyph)
+                    }
+                    Tab::Diff => (
+                        "diff".into(),
+                        "Diff".into(),
+                        None,
+                        Icon::new(IconName::File).size(sp(4)).into_any_element(),
+                    ),
+                    Tab::Inspect => (
+                        "inspect".into(),
+                        "Inspect".into(),
+                        None,
+                        Icon::new(IconName::Eye).size(sp(4)).into_any_element(),
+                    ),
+                    Tab::Chat => (
+                        "chat".into(),
+                        "Chat".into(),
+                        None,
+                        Icon::new(IconName::Bot).size(sp(4)).into_any_element(),
+                    ),
                 };
-                let (pa, pb) = (path.clone(), path.clone());
+                let (activate, close) = (tab.clone(), tab.clone());
+                let close_label = format!("Close {name}");
                 self.tab(
-                    SharedString::from(format!("tab:{path}")),
-                    active == Tab::Preview(path.clone()),
+                    SharedString::from(format!("tab:{id}")),
+                    &active == tab,
                     cx,
                 )
                 .on_click(cx.listener(move |t, _, _, cx| {
                     t.project.update(cx, |p, cx| {
-                        p.activate(Tab::Preview(pa.clone()));
+                        p.activate(activate.clone());
                         cx.notify()
                     })
                 }))
-                .child(file_glyph(&name, cx))
+                .child(glyph)
                 .child(SharedString::from(name))
-                .child(Tag::new(tag))
+                .when_some(tag, |d, tag| d.child(Tag::new(tag)))
                 .child(
-                    div()
-                        .id(SharedString::from(format!("close:{path}")))
-                        .rounded(px(contextual_theme::radius::SM))
-                        .text_color(hsla(c.ink_muted))
-                        .hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
-                        .on_click(cx.listener(move |t, _, _, cx| {
-                            cx.stop_propagation();
-                            t.project.update(cx, |p, cx| {
-                                p.close_tab(&pb);
-                                cx.notify()
-                            })
-                        }))
-                        .child(Icon::new(IconName::Close).size(px(14.0))),
+                    IconButton::new(
+                        SharedString::from(format!("close:{id}")),
+                        IconName::Close,
+                        close_label,
+                    )
+                    .on_click(cx.listener(move |t, _, window, cx| {
+                        cx.stop_propagation();
+                        t.project.update(cx, |p, cx| {
+                            p.close_tab(&close);
+                            cx.notify()
+                        });
+                        if t.project.read(cx).active == Tab::Chat {
+                            t.chat_panel
+                                .update(cx, |panel, cx| panel.focus_input(window, cx));
+                        }
+                    })),
                 )
             })
             .collect();
 
         let chat = self.chat.read(cx);
         let has_changes = chat.change_message().is_some();
-        let diff_view = chat.center == CenterView::Diff && has_changes;
-        let inspect_view = chat.center == CenterView::Inspect;
+        let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
         let can_inspect = !chat.thread.transcript.is_empty() || chat.live.is_some();
 
         let body = match &active {
@@ -340,6 +372,8 @@ impl Render for WorkspaceScreen {
                     .into_any_element()
             }
             Tab::Chat => self.chat_panel.clone().into_any_element(),
+            Tab::Diff => self.diff.clone().into_any_element(),
+            Tab::Inspect => self.inspect.clone().into_any_element(),
         };
 
         let tab_bar = div()
@@ -359,7 +393,7 @@ impl Render for WorkspaceScreen {
                     .min_w_0()
                     .overflow_x_scroll()
                     .child(chat_tab)
-                    .children(preview_tabs),
+                    .children(open_tabs),
             )
             .child(
                 div()
@@ -375,8 +409,7 @@ impl Render for WorkspaceScreen {
                             .disabled(!can_inspect)
                             .on_click(cx.listener(|t, _, _, cx| {
                                 t.chat.update(cx, |c, cx| {
-                                    c.center = CenterView::Inspect;
-                                    cx.notify();
+                                    c.set_center(CenterView::Inspect, cx);
                                 })
                             })),
                     )
@@ -390,35 +423,41 @@ impl Render for WorkspaceScreen {
                     ),
             );
 
-        let main = if inspect_view {
-            div().flex().flex_1().min_w_0().child(self.inspect.clone())
-        } else if diff_view {
-            div().flex().flex_1().min_w_0().child(self.diff.clone())
-        } else {
-            div()
-                .flex()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .relative()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .bg(hsla(c.surface_100))
-                        .child(tab_bar)
-                        .child(body)
-                        .child(
-                            div()
-                                .absolute()
-                                .top(px(TABS_H))
-                                .right_0()
-                                .child(self.chats.clone()),
-                        ),
-                )
-                .when(has_changes, |d| d.child(self.changes.clone()))
-        };
+        let main = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .bg(hsla(c.surface_100))
+            .child(tab_bar)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .child(body),
+                    )
+                    .when(has_changes && !feature_view, |d| {
+                        d.child(self.changes.clone())
+                    }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(px(TABS_H))
+                    .right_0()
+                    .child(self.chats.clone()),
+            );
 
         div()
             .relative()

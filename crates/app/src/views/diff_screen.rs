@@ -47,13 +47,13 @@ impl DiffScreen {
     pub fn new(chat: Entity<ChatModel>, diffs: DiffCache, cx: &mut Context<Self>) -> Self {
         let subs = vec![
             cx.observe(&chat, |this: &mut Self, _, cx| {
-                if this.chat.read(cx).center == CenterView::Diff {
+                if this.chat.read(cx).center(cx) == CenterView::Diff {
                     this.refresh(cx);
                     cx.notify();
                 }
             }),
             cx.observe(&diffs, |this: &mut Self, _, cx| {
-                if this.chat.read(cx).center == CenterView::Diff {
+                if this.chat.read(cx).center(cx) == CenterView::Diff {
                     this.refresh(cx);
                     cx.notify();
                 }
@@ -84,7 +84,7 @@ impl DiffScreen {
     /// Hidden screens do no work; entering the screen catches up with the current source.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let chat = self.chat.read(cx);
-        if chat.center != CenterView::Diff {
+        if chat.center(cx) != CenterView::Diff {
             return;
         }
         let source = chat.change_message().map(|m| message_key(chat, m));
@@ -350,16 +350,6 @@ impl Render for DiffScreen {
                     .border_color(hsla(c.border))
                     .bg(hsla(c.surface_000))
                     .type_style(contextual_theme::type_style::UI_SMALL)
-                    .child(
-                        Button::new("back", "Back to chat")
-                            .size(ButtonSize::Xs)
-                            .on_click(cx.listener(|t, _, _, cx| {
-                                t.chat.update(cx, |c, cx| {
-                                    c.center = CenterView::Chat;
-                                    cx.notify();
-                                })
-                            })),
-                    )
                     .child(SharedString::from(format!(
                         "{} {}",
                         self.changes.len(),

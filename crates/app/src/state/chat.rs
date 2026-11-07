@@ -23,11 +23,11 @@ use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
 use contextual_core::threads::{ThreadStore, ThreadSummary};
 use contextual_protocol::fs::{Apply, ApplyChange, ChangeStatus as WireStatus, ReadFiles, Undo};
 use futures::StreamExt as _;
-use gpui_kit::{Context, Entity, Task};
+use gpui_kit::{App, Context, Entity, Subscription, Task};
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
-use crate::state::Project;
+use crate::state::{Project, Tab};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CenterView {
@@ -138,7 +138,6 @@ pub struct ChatModel {
     reference_only: HashSet<String>,
     /// Which proposed changes are ticked for saving.
     pub include: HashMap<String, bool>,
-    pub center: CenterView,
     pub diff_mode: DiffMode,
     pub save_dialog_open: bool,
     pub pr_open: bool,
@@ -150,6 +149,7 @@ pub struct ChatModel {
     pub pending: Option<PendingReads>,
     /// The round streaming now, as sent (the Inspect view shows it before it completes).
     pub live: Option<LiveRound>,
+    _navigation_sub: Subscription,
     _tasks: Vec<Task<()>>,
 }
 
@@ -187,6 +187,16 @@ impl ChatModel {
         host: Arc<dyn WorkspaceHost>,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Project owns the active tab. Notify feature views when navigation changes,
+        // including opening previews from the explorer or Source Control.
+        let mut active = project.read(cx).active.clone();
+        let navigation_sub = cx.observe(&project, move |_, project, cx| {
+            let next = &project.read(cx).active;
+            if &active != next {
+                active = next.clone();
+                cx.notify();
+            }
+        });
         let mut this = Self {
             project,
             host,
@@ -200,7 +210,6 @@ impl ChatModel {
             contents: HashMap::new(),
             reference_only: HashSet::new(),
             include: HashMap::new(),
-            center: CenterView::Chat,
             diff_mode: DiffMode::Unified,
             save_dialog_open: false,
             pr_open: false,
@@ -210,6 +219,7 @@ impl ChatModel {
             threads: Vec::new(),
             pending: None,
             live: None,
+            _navigation_sub: navigation_sub,
             _tasks: Vec::new(),
         };
         this.refresh_threads(true, cx);
@@ -218,6 +228,29 @@ impl ChatModel {
 
     pub fn streaming(&self) -> bool {
         self.cancel.is_some()
+    }
+
+    /// Feature visibility is derived from the workspace's single active tab.
+    pub fn center(&self, cx: &App) -> CenterView {
+        match &self.project.read(cx).active {
+            Tab::Diff => CenterView::Diff,
+            Tab::Inspect => CenterView::Inspect,
+            Tab::Chat | Tab::Preview(_) => CenterView::Chat,
+        }
+    }
+
+    /// Existing feature entry points open or activate a workspace tab.
+    pub fn set_center(&mut self, center: CenterView, cx: &mut Context<Self>) {
+        let tab = match center {
+            CenterView::Chat => Tab::Chat,
+            CenterView::Diff => Tab::Diff,
+            CenterView::Inspect => Tab::Inspect,
+        };
+        self.project.update(cx, |p, cx| {
+            p.activate(tab);
+            cx.notify();
+        });
+        cx.notify();
     }
 
     /// Published changes are immutable for the lifetime of their message in this generation.
@@ -907,6 +940,7 @@ impl ChatModel {
         self.project.update(cx, |p, cx| {
             p.clear_selection();
             p.clear_model_marks();
+            p.reset_chat_tabs();
             cx.notify()
         });
         self.thread = ThreadState::fresh();
@@ -915,7 +949,6 @@ impl ChatModel {
         self.messages.clear();
         self.include.clear();
         self.attachments.clear();
-        self.center = CenterView::Chat;
         cx.notify();
     }
 
@@ -1010,6 +1043,7 @@ impl ChatModel {
                     p.clear_model_marks();
                     p.model_loaded
                         .extend(loaded.into_iter().filter(|f| f.ends_with("SKILL.md")));
+                    p.reset_chat_tabs();
                     cx.notify()
                 });
                 this.pending = None;
@@ -1034,7 +1068,6 @@ impl ChatModel {
                         m
                     })
                     .collect();
-                this.center = CenterView::Chat;
                 cx.notify();
             })
             .ok();

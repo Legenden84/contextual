@@ -6,6 +6,19 @@ The main workspace with a project open, files selected and a finished assistant 
 - Centre: chat thread with the Response/Diff toggle per assistant message, then the composer with the context bar at rest.
 - Right: Changes panel, 5 files, 4 selected; the conflicting file is left out.
 
+## Native workspace tabs
+
+- A persistent header spans the centre and right columns, with Chat pinned first.
+- File previews, Diff and Inspect open as closable tabs in opening order. Reopening a
+  feature selects its existing tab rather than adding a duplicate.
+- Switching tabs preserves the composer draft and the feature view state.
+- Diff and Inspect use the full area beneath the header, hiding the Changes panel.
+  Chat and file previews restore it when proposed changes are available.
+- Closing the active tab selects its next neighbour, then its previous neighbour,
+  falling back to Chat. Closing an inactive tab does not change the selection.
+- Starting or opening another conversation closes Diff and Inspect and selects Chat;
+  project file previews remain open.
+
 ## Native Source Control workflow
 
 - Pull requests belong in the Source Control sidebar, not the centre tab bar.

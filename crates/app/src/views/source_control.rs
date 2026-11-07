@@ -212,7 +212,7 @@ impl SourceControl {
         let busy = self.scm.read(cx).busy.is_some();
         let active = match &self.project.read(cx).active {
             Tab::Preview(t) => Some(t.clone()),
-            Tab::Chat => None,
+            _ => None,
         };
         let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
         let rows: Vec<_> = if open {

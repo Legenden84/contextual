@@ -743,8 +743,7 @@ fn render_message(
                                     .size(ButtonSize::Xs)
                                     .on_click(move |_, _, cx| {
                                         chat_entity.update(cx, |c, cx| {
-                                            c.center = CenterView::Diff;
-                                            cx.notify();
+                                            c.set_center(CenterView::Diff, cx);
                                         })
                                     }),
                             ),

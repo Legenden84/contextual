@@ -1,4 +1,4 @@
-//! The open project: scanned tree, file selection, Skills & Rules and preview tabs.
+//! The open project: scanned tree, file selection, Skills & Rules and workspace tabs.
 //! Selection rules and sums come from `contextual_core::logic::tree`; this model only holds state.
 //! Methods are plain state changes (testable without a window); views call `cx.notify()`.
 
@@ -25,6 +25,8 @@ pub struct Row {
 pub enum Tab {
     Chat,
     Preview(String),
+    Diff,
+    Inspect,
 }
 
 pub struct Project {
@@ -58,7 +60,8 @@ pub struct Project {
     /// Skills the model loaded in this chat.
     pub model_loaded: HashSet<String>,
     pub rule_preview: Option<String>,
-    pub tabs: Vec<String>,
+    /// Open tabs in insertion order. Chat is pinned and is not stored here.
+    pub tabs: Vec<Tab>,
     pub active: Tab,
     stats: HashMap<String, NodeStats>,
     rows: Vec<Row>,
@@ -180,10 +183,16 @@ impl Project {
             .retain(|p| self.rules.iter().any(|r| &r.path == p));
         self.selected.retain(|p| pickable.contains(p));
         self.rescans += 1;
-        self.tabs.retain(|t| self.index.contains_key(t));
-        if let Tab::Preview(p) = &self.active
-            && !self.index.contains_key(p)
-        {
+        self.tabs.retain(|tab| match tab {
+            // Git tabs can also show deleted files, absent from the scanned tree.
+            Tab::Preview(path) => {
+                self.index.contains_key(path)
+                    || contextual_core::logic::git_tabs::parse_git_tab(path).is_some()
+            }
+            Tab::Diff | Tab::Inspect => true,
+            Tab::Chat => false,
+        });
+        if self.active != Tab::Chat && !self.tabs.contains(&self.active) {
             self.active = Tab::Chat;
         }
         self.recompute();
@@ -424,31 +433,36 @@ impl Project {
     }
 
     pub fn open_preview(&mut self, path: &str) {
-        if !self.tabs.iter().any(|t| t == path) {
-            self.tabs.push(path.to_string());
-        }
-        self.active = Tab::Preview(path.to_string());
+        self.activate(Tab::Preview(path.to_string()));
     }
 
-    pub fn close_tab(&mut self, path: &str) {
-        let Some(i) = self.tabs.iter().position(|t| t == path) else {
+    pub fn close_tab(&mut self, tab: &Tab) {
+        let Some(i) = self.tabs.iter().position(|t| t == tab) else {
             return;
         };
         self.tabs.remove(i);
-        if self.active == Tab::Preview(path.to_string()) {
-            self.active = match self
+        if &self.active == tab {
+            self.active = self
                 .tabs
                 .get(i)
                 .or_else(|| self.tabs.get(i.wrapping_sub(1)))
-            {
-                Some(t) => Tab::Preview(t.clone()),
-                None => Tab::Chat,
-            };
+                .cloned()
+                .unwrap_or(Tab::Chat);
         }
     }
 
+    /// Opens a tab once, or selects it without changing its position.
     pub fn activate(&mut self, tab: Tab) {
+        if tab != Tab::Chat && !self.tabs.contains(&tab) {
+            self.tabs.push(tab.clone());
+        }
         self.active = tab;
+    }
+
+    /// Feature tabs belong to the conversation; file previews belong to the project.
+    pub fn reset_chat_tabs(&mut self) {
+        self.tabs.retain(|tab| matches!(tab, Tab::Preview(_)));
+        self.active = Tab::Chat;
     }
 }
 
@@ -501,9 +515,52 @@ mod tests {
         p.open_preview("src/main.ts");
         p.open_preview("src/lower.ts");
         assert_eq!(p.active, Tab::Preview("src/lower.ts".into()));
-        p.close_tab("src/lower.ts");
+        p.close_tab(&Tab::Preview("src/lower.ts".into()));
         assert_eq!(p.active, Tab::Preview("src/main.ts".into()));
-        p.close_tab("src/main.ts");
+        p.close_tab(&Tab::Preview("src/main.ts".into()));
         assert_eq!(p.active, Tab::Chat);
+    }
+
+    #[test]
+    fn feature_tabs_share_navigation_and_close_behavior() {
+        let p = &mut Project::from_scan(fixture(), Location::Local);
+        let preview = Tab::Preview("src/main.ts".into());
+        p.open_preview("src/main.ts");
+        p.activate(Tab::Diff);
+        p.activate(Tab::Inspect);
+        p.activate(Tab::Diff);
+        assert_eq!(p.tabs, vec![preview.clone(), Tab::Diff, Tab::Inspect]);
+        assert_eq!(p.active, Tab::Diff);
+
+        p.activate(Tab::Chat);
+        assert_eq!(p.tabs.len(), 3);
+        p.activate(Tab::Inspect);
+        p.close_tab(&Tab::Diff);
+        assert_eq!(p.active, Tab::Inspect);
+
+        p.close_tab(&Tab::Inspect);
+        assert_eq!(p.active, preview);
+        p.close_tab(&preview);
+        assert_eq!(p.active, Tab::Chat);
+        p.close_tab(&Tab::Chat);
+        assert_eq!(p.active, Tab::Chat);
+    }
+
+    #[test]
+    fn rescan_preserves_feature_tabs_and_new_chat_clears_them() {
+        let p = &mut Project::from_scan(fixture(), Location::Local);
+        let preview = Tab::Preview("src/main.ts".into());
+        p.open_preview("src/main.ts");
+        p.activate(Tab::Diff);
+        p.activate(Tab::Inspect);
+        p.apply_rescan(fixture());
+        assert_eq!(p.tabs, vec![preview.clone(), Tab::Diff, Tab::Inspect]);
+        assert_eq!(p.active, Tab::Inspect);
+
+        p.reset_chat_tabs();
+        assert_eq!(p.tabs, vec![preview]);
+        assert_eq!(p.active, Tab::Chat);
+        p.activate(Tab::Inspect);
+        assert_eq!(p.tabs.len(), 2);
     }
 }

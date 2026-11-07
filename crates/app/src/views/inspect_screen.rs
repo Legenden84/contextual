@@ -1,7 +1,7 @@
 //! The Inspect view: every round of the chat exactly as sent and received. A list of rounds on
 //! the left; the selected round's input (message or system prompt) and raw output side by side.
-//! Replaces the centre and right columns, like the diff view. The round streaming now is shown
-//! live.
+//! Uses the centre and right columns beneath the workspace tabs, like the diff view.
+//! The round streaming now is shown live.
 
 use contextual_core::chat::Usage;
 use contextual_core::inspect::{Round, rounds};
@@ -32,8 +32,8 @@ enum InputMode {
 pub struct InspectScreen {
     chat: Entity<ChatModel>,
     rounds: Vec<Round>,
-    /// What `rounds` was built from: transcript length and whether a round was live.
-    built: (usize, bool),
+    /// What `rounds` was built from: thread generation, transcript length and a live round.
+    built: (u64, usize, bool),
     /// Index into `rounds`; `None` follows the newest round.
     selected: Option<usize>,
     mode: InputMode,
@@ -67,7 +67,7 @@ fn usage_text(u: &Usage) -> String {
 impl InspectScreen {
     pub fn new(chat: Entity<ChatModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sub = cx.observe_in(&chat, window, |this: &mut Self, _, window, cx| {
-            if this.chat.read(cx).center == CenterView::Inspect {
+            if this.chat.read(cx).center(cx) == CenterView::Inspect {
                 this.refresh(window, cx);
             }
         });
@@ -76,7 +76,7 @@ impl InspectScreen {
             output: editor(window, cx),
             chat,
             rounds: Vec::new(),
-            built: (usize::MAX, false),
+            built: (u64::MAX, usize::MAX, false),
             selected: None,
             mode: InputMode::Message,
             shown: None,
@@ -96,8 +96,15 @@ impl InspectScreen {
     /// Rebuilds the rounds when the transcript changed; while streaming, only the live reply.
     fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let chat = self.chat.read(cx);
-        let key = (chat.thread.transcript.len(), chat.live.is_some());
+        let key = (
+            chat.thread_generation,
+            chat.thread.transcript.len(),
+            chat.live.is_some(),
+        );
         if key != self.built {
+            if key.0 != self.built.0 {
+                self.selected = None;
+            }
             self.rounds = rounds(&chat.thread, chat.live.as_ref());
             self.built = key;
             self.shown = None;
@@ -289,16 +296,6 @@ impl Render for InspectScreen {
             .border_color(hsla(c.border))
             .bg(hsla(c.surface_000))
             .type_style(contextual_theme::type_style::UI_SMALL)
-            .child(
-                Button::new("inspect-back", "Back to chat")
-                    .size(ButtonSize::Xs)
-                    .on_click(cx.listener(|t, _, _, cx| {
-                        t.chat.update(cx, |c, cx| {
-                            c.center = CenterView::Chat;
-                            cx.notify();
-                        })
-                    })),
-            )
             .child(SharedString::from(format!(
                 "{n} {}",
                 if n == 1 { "round" } else { "rounds" }

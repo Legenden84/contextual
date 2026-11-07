@@ -217,8 +217,7 @@ impl Render for ChangesPanel {
                     .border_color(hsla(c.border))
                     .child(Button::new("open-diff", "Open diff").on_click(cx.listener(|t, _, _, cx| {
                         t.chat.update(cx, |c, cx| {
-                            c.center = CenterView::Diff;
-                            cx.notify();
+                            c.set_center(CenterView::Diff, cx);
                         })
                     })))
                     .child(div().flex_1())
