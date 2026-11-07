@@ -51,6 +51,27 @@ WSL has no keychain, so the app keeps the API key in memory only and loses it ev
 echo "export AZURE_OPENAI_API_KEY='...'" >> ~/.bashrc
 The other values (endpoint, deployment, API version) can go in ~/.bashrc the same way, or you can enter them in Settings. Settings saves them in ~/.config/contextual/settings.json.
 
+## Image drag-and-drop during development
+
+Drop PNG, JPEG, GIF or WebP files anywhere in the chat pane. They are attached to the draft,
+not sent until you press Send.
+
+The Linux app translates Windows attachment paths with `wslpath` when running in WSL.
+However, WSLg does not reliably forward file drags from Windows Explorer to Linux windows.
+Path translation cannot help if no drop event reaches the app. In that case:
+
+- Use **Attach images…** and browse to the Windows file under `/mnt/c/Users/...`
+  (or your configured drive mount).
+- For native Explorer drag-and-drop, build the Windows executable using the cross-compile
+  command above and launch `target/x86_64-pc-windows-gnu/debug/contextual.exe` from Windows.
+  That runs the Windows UI rather than the Linux UI through WSLg.
+
+Manual checks: drop multiple images over both an existing message and the composer; check that
+each appears once and can be removed. Try an unsupported file, an unreadable file and an image
+over 20 MiB. Verify that dropping while a response is running reports that you must wait.
+Test native Windows Explorer and macOS Finder separately from WSLg; a successful path-conversion
+unit test does not verify desktop drag-event forwarding.
+
 ## Notes
 
 **If the window doesn't open:** WSLg must be enabled. Make sure WSL is up to date by running wsl --update in Windows PowerShell.
