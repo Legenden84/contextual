@@ -131,8 +131,6 @@ pub struct ChatModel {
     /// Changes on every thread replacement, including reopening the same saved thread.
     pub thread_generation: u64,
     pub attachments: Vec<Attachment>,
-    /// "Resend full context" for the next message.
-    pub resend_all: bool,
     cancel: Option<CancellationToken>,
     /// File contents as sent (diff originals), by path.
     contents: HashMap<String, String>,
@@ -198,7 +196,6 @@ impl ChatModel {
             context_revision: 0,
             thread_generation: 0,
             attachments: Vec::new(),
-            resend_all: false,
             cancel: None,
             contents: HashMap::new(),
             reference_only: HashSet::new(),
@@ -305,7 +302,7 @@ impl ChatModel {
                 Ok(r) => {
                     this.record_read(&r.files);
                     let opts = TurnOptions {
-                        force_all: this.resend_all,
+                        force_all: false,
                         tree: tree.as_ref().map(|(t, _)| t.clone()),
                         followup: false,
                     };
@@ -372,7 +369,6 @@ impl ChatModel {
         if tree_sent {
             prepared.meta.push_str(" · project tree");
         }
-        self.resend_all = false;
         self.messages.push(UiMessage::user(text, &prepared, &now()));
         cx.notify();
         prepared
@@ -907,7 +903,6 @@ impl ChatModel {
         }
         self.contents.clear();
         self.reference_only.clear();
-        self.resend_all = false;
         self.pending = None;
         self.project.update(cx, |p, cx| {
             p.clear_selection();

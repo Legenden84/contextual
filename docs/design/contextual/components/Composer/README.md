@@ -1,8 +1,11 @@
 # Composer
 
-Message input: the context bar, a text box, the deployment picker and the per-message context mode.
+Message input: the context bar, a text box, image attachments and Send.
 
-"Resend full context" sends the selected files again with the message (use after editing files); "Only send new message" relies on what the conversation already holds. Ctrl+Enter sends.
+Messages always use incremental file context: only new or changed file contents are attached,
+based on their hashes. Unchanged files remain available through the conversation without
+duplicating their contents in the new turn. The model can request additional files as needed.
+There is no context-mode selector. Ctrl+Enter sends.
 
 **Attach images…** opens the native file picker with multiple selection. **Paste image** reads
 an image or copied image files from the clipboard; the text box also accepts the normal paste

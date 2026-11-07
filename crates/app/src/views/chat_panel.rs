@@ -246,14 +246,13 @@ impl ChatPanel {
             .detach();
             return;
         };
-        let auto = a.settings.chat.model_picks_files;
         let p = self.project.read(cx);
         let env = SendEnv {
             config,
             deployment: a.deployment(),
             output_prompt: a.settings.workspace.output_prompt.clone(),
-            auto,
-            skill_index: if auto { p.skill_index() } else { String::new() },
+            auto: true,
+            skill_index: p.skill_index(),
         };
         let rules = p.rules_on();
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
@@ -681,8 +680,6 @@ impl Render for ChatPanel {
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
         let streaming = chat.streaming();
-        let resend = chat.resend_all;
-        let auto = self.app.read(cx).settings.chat.model_picks_files;
         let empty = chat.messages.is_empty();
         let attachments: Vec<_> = chat
             .attachments
@@ -708,14 +705,12 @@ impl Render for ChatPanel {
                         .gap(sp(2))
                         .type_style(contextual_theme::type_style::UI_PROSE)
                         .text_color(hsla(c.ink_muted))
-                        .when(auto, |d| {
-                            d.child(div().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child("Ask for a change"))
-                                .child("The model gets the project tree and asks for the files and skills it needs. Tick files to include them yourself.")
-                        })
-                        .when(!auto, |d| {
-                            d.child(div().type_style(contextual_theme::type_style::UI_TITLE).text_color(hsla(c.ink_strong)).child("Pick the files the model should see"))
-                                .child("Tick files in the explorer, then ask for a change. Click a file to preview it.")
-                        }),
+                        .child(
+                            div()
+                                .type_style(contextual_theme::type_style::UI_TITLE)
+                                .text_color(hsla(c.ink_strong))
+                                .child("Ask for a change"),
+                        ),
                 )
                 .into_any_element()
         } else {
@@ -765,12 +760,6 @@ impl Render for ChatPanel {
                     )
             })
             .collect::<Vec<_>>();
-        let mode = |id: &'static str, label: &'static str, on: bool| {
-            Button::new(id, label)
-                .size(ButtonSize::Xs)
-                .variant(ButtonVariant::Ghost)
-                .selected(on)
-        };
 
         div()
             .id("chat-image-drop-target")
@@ -885,36 +874,6 @@ impl Render for ChatPanel {
                                             .flex()
                                             .items_center()
                                             .gap(sp(1))
-                                            .child(
-                                                mode("only-new", "Only send new message", !resend)
-                                                    .on_click(cx.listener(|t, _, _, cx| {
-                                                        t.chat.update(cx, |c, cx| {
-                                                            c.resend_all = false;
-                                                            cx.notify();
-                                                        })
-                                                    })),
-                                            )
-                                            .child(
-                                                mode("resend", "Resend full context", resend)
-                                                    .on_click(cx.listener(|t, _, _, cx| {
-                                                        t.chat.update(cx, |c, cx| {
-                                                            c.resend_all = true;
-                                                            cx.notify();
-                                                        })
-                                                    })),
-                                            )
-                                            .child(div().w(sp(2)))
-                                            .child(
-                                                mode("auto-pick", "Model picks files", auto)
-                                                    .on_click(cx.listener(|t, _, _, cx| {
-                                                        t.app.update(cx, |a, cx| {
-                                                            let mut s = a.settings.clone();
-                                                            s.chat.model_picks_files =
-                                                                !s.chat.model_picks_files;
-                                                            a.save_settings(s, None, cx);
-                                                        })
-                                                    })),
-                                            )
                                             .child(div().flex_1())
                                             .map(|d| {
                                                 if streaming {

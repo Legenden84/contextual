@@ -60,7 +60,7 @@ The **Screens** cards show the app end to end, using a sample .NET clean-archite
 The window is a title bar, a three-column body and a 24px status bar.
 
 - **Left, 312px:** Files tab (explorer with tri-state checkboxes, token counts, exclusions, changed-on-disk badges, search, Select all / Clear, Respect .gitignore) and a collapsible **Skills & Rules** section below it (auto-detected AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, `.cursor/rules/*`, `.claude/skills/*/SKILL.md`, each with a toggle and a Rule/Skill tag).
-- **Centre, flexible:** tabs (Chat plus read-only previews), the chat thread at a 820px reading width, and the composer: context bar, input, deployment picker, *Resend full context* / *Only send new message*.
+- **Centre, flexible:** tabs (Chat plus read-only previews), the chat thread at a 820px reading width, and the composer: context bar, input, image attachments and Send. File context is always incremental: new or changed contents are sent, unchanged contents are not duplicated.
 - **Right, 320px:** the Changes panel, shown when a response contains file edits: counts by status, per-file checkbox, +/− counts, conflict note, **Open diff** and **Apply N files…**.
 - **Diff view** replaces centre and right columns (the explorer stays): a toolbar with Back to chat, Unified / Split, Expand all and Apply; a file list; then one card per file with Copy file content, Copy diff and *Include in apply*.
 

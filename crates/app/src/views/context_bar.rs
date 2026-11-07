@@ -32,9 +32,7 @@ struct BudgetKey {
     rules_on: HashSet<String>,
     skills_never: HashSet<String>,
     context_revision: Option<u64>,
-    resend_all: bool,
     pictures: u64,
-    auto: bool,
     deployment: Deployment,
     output_format: String,
 }
@@ -52,9 +50,7 @@ impl BudgetKey {
             && self.rules_on == p.rules_on
             && self.skills_never == p.skills_never
             && self.context_revision == chat.map(|c| c.context_revision)
-            && self.resend_all == chat.is_some_and(|c| c.resend_all)
             && self.pictures == picture_tokens(chat)
-            && self.auto == a.settings.chat.model_picks_files
             && self.deployment == *deployment
             && self.output_format == a.settings.workspace.output_prompt
     }
@@ -85,9 +81,7 @@ impl ContextCache {
             rules_on: p.rules_on.clone(),
             skills_never: p.skills_never.clone(),
             context_revision: chat.map(|c| c.context_revision),
-            resend_all: chat.is_some_and(|c| c.resend_all),
             pictures: picture_tokens(chat),
-            auto: a.settings.chat.model_picks_files,
             deployment: deployment.clone(),
             output_format: a.settings.workspace.output_prompt.clone(),
         };
@@ -133,7 +127,7 @@ fn compute_totals(
         })
         .cloned()
         .collect();
-    let auto_tokens = if a.settings.chat.model_picks_files {
+    let auto_tokens = {
         use contextual_core::logic::format::estimate_tokens;
         use contextual_core::logic::reads;
 
@@ -147,8 +141,6 @@ fn compute_totals(
             } else {
                 estimate_tokens(&reads::tree_section(&p.model_tree))
             }
-    } else {
-        0
     };
     totals_with_conversation_tokens(
         &ContextInput {
@@ -159,7 +151,7 @@ fn compute_totals(
             transcript: &[],
             file_versions: &versions,
             stale: &stale,
-            resend_all: chat.is_some_and(|c| c.resend_all),
+            resend_all: false,
             picture_tokens: picture_tokens(chat),
             auto_tokens,
             deployment,
