@@ -103,6 +103,8 @@ pub mod layout {
     pub const CHANGES_WIDTH: f32 = 320.0;
     /// Chat thread reading width.
     pub const CONTENT_MAX_WIDTH: f32 = 820.0;
+    /// Compact warning before sending with incomplete AI settings.
+    pub const SETTINGS_PROMPT_WIDTH: f32 = 440.0;
     /// Tab width in code views.
     pub const TAB_SIZE: usize = 4;
 }

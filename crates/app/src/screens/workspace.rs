@@ -163,6 +163,8 @@ impl WorkspaceScreen {
                 cx,
             )
         });
+        // The settings warning is owned by the composer but overlays the whole workspace.
+        subs.push(cx.observe(&chat_panel, |_, _, cx| cx.notify()));
         let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
@@ -431,5 +433,9 @@ impl Render for WorkspaceScreen {
             .when_some(self.save_dialog.clone(), |d, s| d.child(s))
             .when_some(self.pr_dialog.clone(), |d, s| d.child(s))
             .when_some(self.branch_picker.clone(), |d, s| d.child(s))
+            .when_some(
+                self.chat_panel.update(cx, |panel, cx| panel.settings_prompt(cx)),
+                |d, prompt| d.child(prompt),
+            )
     }
 }

@@ -19,7 +19,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ListAlignment, ListState,
-    MouseButton, ParentElement, PathPromptOptions, PromptLevel, Render, SharedString,
+    MouseButton, ParentElement, PathPromptOptions, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list, px,
 };
 
@@ -50,6 +50,9 @@ pub struct ChatPanel {
     attachment_menu_open: bool,
     attachment_focus: FocusHandle,
     settings_prompt_open: bool,
+    settings_prompt_focus: FocusHandle,
+    settings_cancel_focus: FocusHandle,
+    settings_open_focus: FocusHandle,
     _subs: Vec<Subscription>,
 }
 
@@ -118,7 +121,7 @@ fn settings_prompt_detail(status: &FoundryStatus) -> String {
         }
     }
 
-    let mut lines = vec!["Your message has not been sent.".to_string()];
+    let mut lines = Vec::new();
     if let FoundryStatus::Unconfigured { missing, invalid } = status {
         for (title, fields) in [("Missing", missing), ("Invalid", invalid)] {
             if !fields.is_empty() {
@@ -127,14 +130,10 @@ fn settings_prompt_detail(status: &FoundryStatus) -> String {
             }
         }
     }
-    lines.push(
-        "Open Settings to update Azure AI Foundry. Environment variables override saved values."
-            .to_string(),
-    );
-    lines.push(
-        "Your draft and attachments will stay in Chat. Save settings, then send again.".into(),
-    );
-    lines.join("\n\n")
+    if lines.is_empty() {
+        lines.push("Azure AI Foundry is not configured.".into());
+    }
+    lines.join("\n")
 }
 
 impl ChatPanel {
@@ -179,7 +178,12 @@ impl ChatPanel {
             }),
             cx.observe(&diffs, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
-            cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.observe(&app, |this, app, cx| {
+                if app.read(cx).screen != crate::state::Screen::Workspace {
+                    this.settings_prompt_open = false;
+                }
+                cx.notify();
+            }),
             cx.subscribe_in(&input, window, |this, _, e: &InputEvent, window, cx| {
                 if let InputEvent::PressEnter {
                     secondary: true, ..
@@ -206,6 +210,9 @@ impl ChatPanel {
             attachment_menu_open: false,
             attachment_focus: cx.focus_handle(),
             settings_prompt_open: false,
+            settings_prompt_focus: cx.focus_handle(),
+            settings_cancel_focus: cx.focus_handle(),
+            settings_open_focus: cx.focus_handle(),
             _subs: subs,
         }
     }
@@ -232,26 +239,10 @@ impl ChatPanel {
         }
         let a = self.app.read(cx);
         let Some(config) = a.config.clone() else {
-            let detail = settings_prompt_detail(&a.foundry);
+            self.attachment_menu_open = false;
             self.settings_prompt_open = true;
-            let answer = window.prompt(
-                PromptLevel::Warning,
-                "Check your AI settings",
-                Some(&detail),
-                &["Open Settings", "Cancel"],
-                cx,
-            );
-            cx.spawn(async move |this, cx| {
-                let open_settings = matches!(answer.await, Ok(0));
-                let _ = this.update(cx, |this, cx| {
-                    this.settings_prompt_open = false;
-                    if open_settings {
-                        this.app.update(cx, |a, cx| a.open_settings(cx));
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
+            window.focus(&self.settings_open_focus, cx);
+            cx.notify();
             return;
         };
         let p = self.project.read(cx);
@@ -265,6 +256,159 @@ impl ChatPanel {
         let rules = p.rules_on();
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.chat.update(cx, |c, cx| c.send(text, env, rules, cx));
+    }
+
+    fn close_settings_prompt(
+        &mut self,
+        open_settings: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_prompt_open = false;
+        self.focus_input(window, cx);
+        if open_settings {
+            self.app.update(cx, |a, cx| a.open_settings(cx));
+        }
+        cx.notify();
+    }
+
+    /// Rendered above the whole workspace, not clipped to the chat column.
+    pub fn settings_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.settings_prompt_open {
+            return None;
+        }
+        let c = &cx.tokens().colors;
+        let detail = settings_prompt_detail(&self.app.read(cx).foundry);
+        let problem_rows = detail.lines().map(|line| {
+            div()
+                .whitespace_normal()
+                .child(SharedString::from(line.to_string()))
+        });
+
+        Some(
+            div()
+                .id("ai-settings-scrim")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(sp(4))
+                .bg(hsla(c.surface_scrim))
+                .track_focus(&self.settings_prompt_focus)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(|t, _, window, cx| {
+                    t.close_settings_prompt(false, window, cx);
+                }))
+                .on_key_down(cx.listener(|t, e: &KeyDownEvent, window, cx| {
+                    match e.keystroke.key.as_str() {
+                        "escape" => t.close_settings_prompt(false, window, cx),
+                        "tab" => {
+                            // Two actions: Tab and Shift+Tab both move to the other one.
+                            let next = if t.settings_open_focus.is_focused(window) {
+                                &t.settings_cancel_focus
+                            } else {
+                                &t.settings_open_focus
+                            };
+                            window.focus(next, cx);
+                        }
+                        "enter" | "space" => {
+                            let open = !t.settings_cancel_focus.is_focused(window);
+                            t.close_settings_prompt(open, window, cx);
+                        }
+                        _ => {}
+                    }
+                    cx.stop_propagation();
+                }))
+                .child(
+                    div()
+                        .id("ai-settings-dialog")
+                        .w_full()
+                        .max_w(px(layout::SETTINGS_PROMPT_WIDTH))
+                        .flex()
+                        .flex_col()
+                        .rounded(px(contextual_theme::radius::LG))
+                        .border_1()
+                        .border_color(hsla(c.border_strong))
+                        .bg(hsla(c.surface_100))
+                        .shadow(vec![shadow(cx.tokens().shadows.modal)])
+                        .type_style(contextual_theme::type_style::UI_BODY)
+                        .text_color(hsla(c.ink))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .p(sp(4))
+                                .flex()
+                                .flex_col()
+                                .gap(sp(3))
+                                .child(
+                                    div()
+                                        .type_style(contextual_theme::type_style::UI_TITLE)
+                                        .text_color(hsla(c.ink_strong))
+                                        .child("Check AI settings"),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(sp(1))
+                                        .children(problem_rows),
+                                )
+                                .child(
+                                    div()
+                                        .type_style(contextual_theme::type_style::UI_SMALL)
+                                        .text_color(hsla(c.ink_muted))
+                                        .whitespace_normal()
+                                        .child(
+                                            "Nothing sent. Your draft and attachments stay in Chat. Update settings, then send again.",
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap(sp(2))
+                                .px(sp(4))
+                                .py(sp(3))
+                                .border_t_1()
+                                .border_color(hsla(c.border))
+                                .child(
+                                    div()
+                                        .id("ai-settings-cancel-focus")
+                                        .track_focus(&self.settings_cancel_focus)
+                                        .rounded(px(contextual_theme::radius::MD))
+                                        .border_1()
+                                        .border_color(hsla(c.surface_100))
+                                        .focus(|s| s.border_color(hsla(c.focus_ring)))
+                                        .child(
+                                            Button::new("ai-settings-cancel", "Cancel")
+                                                .on_click(cx.listener(|t, _, window, cx| {
+                                                    t.close_settings_prompt(false, window, cx);
+                                                })),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("ai-settings-open-focus")
+                                        .track_focus(&self.settings_open_focus)
+                                        .rounded(px(contextual_theme::radius::MD))
+                                        .border_1()
+                                        .border_color(hsla(c.surface_100))
+                                        .focus(|s| s.border_color(hsla(c.focus_ring)))
+                                        .child(
+                                            Button::new("ai-settings-open", "Open settings")
+                                                .variant(ButtonVariant::Primary)
+                                                .on_click(cx.listener(|t, _, window, cx| {
+                                                    t.close_settings_prompt(true, window, cx);
+                                                })),
+                                        ),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn load_images(&mut self, sources: Vec<ImageSource>, cx: &mut Context<Self>) {
@@ -974,10 +1118,7 @@ mod tests {
             missing: vec![config::ENV_API_KEY.into(), config::ENV_DEPLOYMENT.into()],
             invalid: vec![config::ENV_ENDPOINT.into()],
         });
-        assert!(detail.contains("Missing: API key, Deployment."));
-        assert!(detail.contains("Invalid: Endpoint."));
-        assert!(detail.contains("Your message has not been sent."));
-        assert!(!detail.contains(".env.example"));
+        assert_eq!(detail, "Missing: API key, Deployment.\nInvalid: Endpoint.");
     }
 
     #[test]
@@ -986,7 +1127,14 @@ mod tests {
             missing: vec![config::ENV_API_VERSION.into()],
             invalid: Vec::new(),
         });
-        assert!(detail.contains("Missing: API version."));
-        assert!(!detail.contains("Invalid:"));
+        assert_eq!(detail, "Missing: API version.");
+    }
+
+    #[test]
+    fn settings_prompt_has_a_fallback_without_field_problems() {
+        assert_eq!(
+            settings_prompt_detail(&FoundryStatus::Checking),
+            "Azure AI Foundry is not configured."
+        );
     }
 }
