@@ -1,6 +1,7 @@
-//! Chats: saved conversations of this project (search, open, rename, delete, delete all) and
-//! New chat. Opened from the centre tab bar.
+//! Chat history: saved conversations of this project (search, open, rename, delete, delete all)
+//! and New chat. Docked on the right, open by default when a project opens.
 
+use contextual_theme::layout;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -11,11 +12,8 @@ use gpui_kit::{
 
 use crate::screens::welcome::ago;
 use crate::state::chat::ChatModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, shadow, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton};
-
-const W: f32 = 380.0;
-const MAX_H: f32 = 460.0;
+use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, pane_header};
 
 pub struct ChatsMenu {
     chat: Entity<ChatModel>,
@@ -42,7 +40,7 @@ impl ChatsMenu {
             search,
             rename: None,
             confirm_delete_all: false,
-            open: false,
+            open: true,
             _subs: subs,
         }
     }
@@ -175,23 +173,22 @@ impl Render for ChatsMenu {
 
         div()
             .id("chats-menu")
-            .absolute()
-            .top(px(4.0))
-            .right(sp(2))
-            .w(px(W))
-            .max_h(px(MAX_H))
+            .w(px(layout::CHANGES_WIDTH))
+            .h_full()
+            .min_h_0()
             .flex()
             .flex_col()
-            .rounded(px(contextual_theme::radius::MD))
-            .border_1()
-            .border_color(hsla(c.border_strong))
-            .bg(hsla(c.surface_200))
-            .shadow(vec![shadow(cx.tokens().shadows.popover)])
+            .flex_none()
+            .border_l_1()
+            .border_color(hsla(c.border))
+            .bg(hsla(c.surface_000))
             .type_style(contextual_theme::type_style::UI_BODY)
-            .on_mouse_down_out(cx.listener(|m, _, _, cx| {
-                m.open = false;
-                cx.notify();
-            }))
+            .child(pane_header(
+                "Chat history",
+                IconButton::new("close-history", IconName::Close, "Close chat history")
+                    .on_click(cx.listener(|m, _, _, cx| m.toggle(cx))),
+                cx,
+            ))
             .child(
                 div()
                     .flex()

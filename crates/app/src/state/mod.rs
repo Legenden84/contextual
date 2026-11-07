@@ -412,19 +412,11 @@ impl AppModel {
         cx.notify();
     }
 
-    /// The project to open on start: a CLI argument wins over the last open one, which
-    /// `no_restore` skips.
-    pub fn startup(&mut self, cli_path: Option<String>, no_restore: bool, cx: &mut Context<Self>) {
-        let last = self
-            .state
-            .last_open
-            .as_ref()
-            .filter(|_| !no_restore)
-            .map(|r| (r.path.clone(), Some(r.location.clone())));
-        // A CLI path is detected like a typed one; the last project knows its location.
-        let target = cli_path.map(|p| (p, None)).or(last);
-        if let Some((path, location)) = target {
-            self.open_folder(path, location, cx);
+    /// Stay on Welcome unless a project was explicitly requested on the command line.
+    /// Recent projects remain available there, but are never reopened automatically.
+    pub fn startup(&mut self, cli_path: Option<String>, cx: &mut Context<Self>) {
+        if let Some(path) = cli_path {
+            self.open_folder(path, None, cx);
         }
     }
 }

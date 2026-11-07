@@ -55,7 +55,10 @@ pub fn install(
         let app = app.clone();
         let after = after.clone();
         if after == "chats" {
-            chats.update(cx, |m, cx| m.toggle(cx));
+            chats.update(cx, |m, cx| {
+                m.open = true;
+                cx.notify();
+            });
             return;
         }
         chat_for_obs.update(cx, |c, cx| match after.as_str() {

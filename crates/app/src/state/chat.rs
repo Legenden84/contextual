@@ -222,7 +222,7 @@ impl ChatModel {
             _navigation_sub: navigation_sub,
             _tasks: Vec::new(),
         };
-        this.refresh_threads(true, cx);
+        this.refresh_threads(cx);
         this
     }
 
@@ -982,11 +982,11 @@ impl ChatModel {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| match result {
-                Ok(()) => this.refresh_threads(false, cx),
+                Ok(()) => this.refresh_threads(cx),
                 Err(_) => {
                     this.toast = Some(Toast {
                         title: "Could not save the conversation".into(),
-                        detail: "It stays open, but won’t be restored after a restart.".into(),
+                        detail: "It stays open, but won’t be available in chat history after a restart.".into(),
                         error: true,
                         backup_id: None,
                     });
@@ -998,8 +998,9 @@ impl ChatModel {
         .detach();
     }
 
-    /// Reloads the Chats list; with `restore`, opens the newest chat (as on opening a folder).
-    pub fn refresh_threads(&mut self, restore: bool, cx: &mut Context<Self>) {
+    /// Reloads chat history without replacing the current conversation.
+    /// Saved conversations are loaded only by an explicit `open_thread` action.
+    pub fn refresh_threads(&mut self, cx: &mut Context<Self>) {
         let Some(store) = self.store.clone() else {
             return;
         };
@@ -1008,11 +1009,7 @@ impl ChatModel {
         cx.spawn(async move |this, cx| {
             let list = job.await.unwrap_or_default();
             this.update(cx, |this, cx| {
-                let newest = list.first().map(|t| t.id.clone());
                 this.threads = list;
-                if restore && let Some(id) = newest {
-                    this.open_thread(id, cx);
-                }
                 cx.notify();
             })
             .ok();
@@ -1086,7 +1083,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.rename(&root, &id, &title).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(false, cx))
+            this.update(cx, |this, cx| this.refresh_threads(cx))
                 .ok();
         })
         .detach();
@@ -1103,7 +1100,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.delete(&root, &id).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(false, cx))
+            this.update(cx, |this, cx| this.refresh_threads(cx))
                 .ok();
         })
         .detach();
@@ -1118,7 +1115,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.delete_all(&root).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(false, cx))
+            this.update(cx, |this, cx| this.refresh_threads(cx))
                 .ok();
         })
         .detach();

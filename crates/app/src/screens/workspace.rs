@@ -1,6 +1,6 @@
 //! Workspace (design spec: ScreenWorkspace): sidebar and persistent tabs for Chat, file previews,
 //! Diff and Inspect. Feature tabs use the centre and right columns beneath the shared tab bar;
-//! Chat and previews show the Changes panel when a reply proposes changes.
+//! Chat and previews show chat history, or proposed changes when history is closed.
 
 use std::collections::HashMap;
 
@@ -176,6 +176,8 @@ impl WorkspaceScreen {
         // The settings warning is owned by the composer but overlays the whole workspace.
         subs.push(cx.observe(&chat_panel, |_, _, cx| cx.notify()));
         let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
+        // History visibility changes the workspace layout, not just the panel's contents.
+        subs.push(cx.observe(&chats, |_, _, cx| cx.notify()));
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
             cx.new(|cx| Sidebar::new(app.clone(), project.clone(), scm.clone(), window, cx));
@@ -346,6 +348,7 @@ impl Render for WorkspaceScreen {
         let chat = self.chat.read(cx);
         let has_changes = chat.change_message().is_some();
         let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
+        let history_open = self.chats.read(cx).open && !feature_view;
         let can_inspect = !chat.thread.transcript.is_empty() || chat.live.is_some();
 
         let body = match &active {
@@ -423,12 +426,23 @@ impl Render for WorkspaceScreen {
                             })),
                     )
                     .child(
-                        Button::new("chats", "Chats")
+                        Button::new("chats", if history_open { "Hide history" } else { "Chat history" })
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Ghost)
-                            .on_click(
-                                cx.listener(|t, _, _, cx| t.chats.update(cx, |m, cx| m.toggle(cx))),
-                            ),
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
+                                    t.project.update(cx, |p, cx| {
+                                        p.activate(Tab::Chat);
+                                        cx.notify();
+                                    });
+                                    t.chats.update(cx, |m, cx| {
+                                        m.open = true;
+                                        cx.notify();
+                                    });
+                                } else {
+                                    t.chats.update(cx, |m, cx| m.toggle(cx));
+                                }
+                            })),
                     ),
             );
 
@@ -456,16 +470,10 @@ impl Render for WorkspaceScreen {
                             .min_w_0()
                             .child(body),
                     )
-                    .when(has_changes && !feature_view, |d| {
+                    .when(history_open, |d| d.child(self.chats.clone()))
+                    .when(has_changes && !feature_view && !history_open, |d| {
                         d.child(self.changes.clone())
                     }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(px(TABS_H))
-                    .right_0()
-                    .child(self.chats.clone()),
             );
 
         div()

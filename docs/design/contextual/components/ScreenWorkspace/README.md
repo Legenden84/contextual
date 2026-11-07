@@ -12,12 +12,27 @@ The main workspace with a project open, files selected and a finished assistant 
 - File previews, Diff and Inspect open as closable tabs in opening order. Reopening a
   feature selects its existing tab rather than adding a duplicate.
 - Switching tabs preserves the composer draft and the feature view state.
-- Diff and Inspect use the full area beneath the header, hiding the Changes panel.
-  Chat and file previews restore it when proposed changes are available.
+- Diff and Inspect use the full area beneath the header, hiding the right sidebar.
+  Chat and file previews show chat history while it is open, otherwise the Changes panel
+  when proposed changes are available.
 - Closing the active tab selects its next neighbour, then its previous neighbour,
   falling back to Chat. Closing an inactive tab does not change the selection.
 - Starting or opening another conversation closes Diff and Inspect and selects Chat;
   project file previews remain open.
+
+## Native startup and chat history
+
+- Normal launches show Welcome with Open folder and recent projects. The last project
+  is never reopened automatically. Explicit CLI paths, project links and developer
+  screen flags remain supported; `--no-restore` is accepted as a compatibility no-op.
+- Opening a project, including a recent project, starts a fresh conversation with no
+  previous messages or file context. Loading the history list never loads a conversation.
+- Chat history is docked on the right and open by default. It uses the standard sidebar
+  width and a hairline separator, not a floating popover, and stays open while composing.
+- Selecting a saved chat explicitly loads it and closes history. New chat also closes
+  history. Search, rename and deletion remain available in the panel.
+- Close history or use the header toggle to reveal the Changes panel when available.
+  Opening history from Diff or Inspect returns to Chat.
 
 ## Native Source Control workflow
 
