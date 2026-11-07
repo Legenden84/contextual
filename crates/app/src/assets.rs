@@ -20,8 +20,8 @@ pub fn load_fonts(cx: &mut App) {
     }
 }
 
- // Icons beyond gpui-component's default set, embedded from the Lucide catalog.
-gpui_kit::assets::icon_assets!(ExtraIcons, [GitBranch, Image, Brain]);
+// Icons beyond gpui-component's default set, embedded from the Lucide catalog.
+gpui_kit::assets::icon_assets!(ExtraIcons, [GitBranch, Image, Brain, Send]);
 
 pub const MOSS_ICON_PATH: &str = "icons/contextual-moss.svg";
 
