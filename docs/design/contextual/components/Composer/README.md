@@ -7,6 +7,19 @@ based on their hashes. Unchanged files remain available through the conversation
 duplicating their contents in the new turn. The model can request additional files as needed.
 There is no context-mode selector. Ctrl+Enter sends.
 
+A single activity indicator sits between the attachment control and Send/Stop. Its fixed-size
+code-flow mark has three horizontal strokes; a soft accent highlight passes through them in
+a 1.8-second loop. Only stroke opacity changes: no bouncing, rotation, animated text, glow or
+layout movement. The steady small-text label follows actual work: Preparing context, Waiting
+for response, Writing response, Reading files, Checking edits, Saving changes, Undoing changes
+or Stopping. Writing a response never means writing project files.
+
+Image preparation uses the same indicator. The native image picker and an over-limit read
+request instead show static states, Choose images and Waiting for your approval. Idle, completed
+and failed operations have no activity mark. There is no duplicate Thinking label in the thread.
+The mark keeps its animation identity across phase changes and has no independent background
+timer. Settings → Appearance → Reduce motion uses a static mark with the same readable labels.
+
 An icon-only Lucide **brain** control sits at the right of the context bar above the message
 input, with the tooltip **Inspect conversation**. It opens the existing Inspect tab showing
 the raw inputs and outputs, not private model reasoning. It is disabled until the chat has

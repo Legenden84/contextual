@@ -15,7 +15,7 @@ pub use checkbox::Checkbox;
 pub use glyph::{file_glyph, folder_glyph};
 pub use icon_button::IconButton;
 pub use link::LinkButton;
-pub use logo::{logo, moss_mark};
+pub use logo::{activity_mark, logo, moss_mark};
 pub use pane::pane_header;
 pub use switch::Switch;
 pub use tag::{Tag, TagTone, count};

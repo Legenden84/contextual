@@ -37,6 +37,35 @@ pub enum CenterView {
     Inspect,
 }
 
+/// Observable work, not an inference about the model's private reasoning.
+/// This is transient UI state and is never stored in the conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatActivity {
+    PreparingContext,
+    WaitingForResponse,
+    WritingResponse,
+    ReadingFiles,
+    CheckingEdits,
+    SavingChanges,
+    UndoingChanges,
+    Stopping,
+}
+
+impl ChatActivity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PreparingContext => "Preparing context",
+            Self::WaitingForResponse => "Waiting for response",
+            Self::WritingResponse => "Writing response",
+            Self::ReadingFiles => "Reading files",
+            Self::CheckingEdits => "Checking edits",
+            Self::SavingChanges => "Saving changes",
+            Self::UndoingChanges => "Undoing changes",
+            Self::Stopping => "Stopping",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum DiffMode {
     #[default]
@@ -132,6 +161,7 @@ pub struct ChatModel {
     pub thread_generation: u64,
     pub attachments: Vec<Attachment>,
     cancel: Option<CancellationToken>,
+    activity: ChatActivity,
     /// File contents as sent (diff originals), by path.
     contents: HashMap<String, String>,
     /// Sent only as condensed references: never offered for saving.
@@ -211,6 +241,7 @@ impl ChatModel {
             thread_generation: 0,
             attachments: Vec::new(),
             cancel: None,
+            activity: ChatActivity::PreparingContext,
             contents: HashMap::new(),
             reference_only: HashSet::new(),
             include: HashMap::new(),
@@ -234,6 +265,20 @@ impl ChatModel {
 
     pub fn streaming(&self) -> bool {
         self.cancel.is_some()
+    }
+
+    /// Gate the last reported phase on the actual operation lifetime. Every existing
+    /// completion/error path clears `cancel` or `saving`, so no stale busy label remains.
+    pub fn activity(&self) -> Option<ChatActivity> {
+        if let Some(token) = &self.cancel {
+            Some(if token.is_cancelled() {
+                ChatActivity::Stopping
+            } else {
+                self.activity
+            })
+        } else {
+            self.saving.then_some(self.activity)
+        }
     }
 
     /// Feature visibility is derived from the workspace's single active tab.
@@ -333,6 +378,7 @@ impl ChatModel {
         self.pending = None;
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
+        self.activity = ChatActivity::PreparingContext;
         cx.notify();
 
         let p = self.project.read(cx);
@@ -447,6 +493,7 @@ impl ChatModel {
             let ai = UiMessage::assistant(&env.deployment.name, &now());
             let id = ai.id.clone();
             this.messages.push(ai);
+            this.activity = ChatActivity::WaitingForResponse;
             cx.notify();
             (this.thread.clone(), id)
         }) else {
@@ -505,6 +552,9 @@ impl ChatModel {
                     };
                     let alive = this
                         .update(cx, |this, cx| {
+                            if !text.is_empty() {
+                                this.activity = ChatActivity::WritingResponse;
+                            }
                             if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
                                 m.text = current;
                             }
@@ -573,6 +623,8 @@ impl ChatModel {
                 this.context_revision = this.context_revision.wrapping_add(1);
             }
             this.live = None;
+            this.activity = ChatActivity::CheckingEdits;
+            cx.notify();
             if !(env.auto && completed && !truncated) {
                 return None;
             }
@@ -815,6 +867,7 @@ impl ChatModel {
     ) {
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
+        self.activity = ChatActivity::ReadingFiles;
         let r = &step.resolved;
         self.project.update(cx, |p, cx| {
             p.add_model_picks(&r.files);
@@ -1178,6 +1231,7 @@ impl ChatModel {
             return;
         }
         self.saving = true;
+        self.activity = ChatActivity::SavingChanges;
         self.save_error = None;
         cx.notify();
         let root = self.root(cx);
@@ -1256,6 +1310,7 @@ impl ChatModel {
             return;
         };
         self.saving = true;
+        self.activity = ChatActivity::UndoingChanges;
         cx.notify();
         let req = Undo {
             root: self.root(cx),

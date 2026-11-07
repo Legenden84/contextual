@@ -8,3 +8,4 @@ Settings, user scope: the Azure AI Foundry connection, exclusion rules and the o
 - Exclusions: editable glob chips with the defaults, max file size, Respect .gitignore, Skip binary files, Include hidden files.
 - Output format: the editable system prompt that makes the model return full files under `### FILE:` headers so responses can be parsed into diffs.
 - Appearance: Dark, Light and Moss schemes, plus the existing System preference. Selection applies and saves immediately. The title-bar toggle cycles only the three explicit schemes; changing it while Settings is open updates the selected option without discarding form edits or letting Save restore an older scheme.
+- Reduce motion: an explicit app preference under Appearance, saved with the form. Activity marks become static while their labels continue to report work. Tab focuses the control; Enter or Space toggles it. This preference does not automatically detect the OS motion setting.

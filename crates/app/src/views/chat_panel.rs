@@ -27,7 +27,7 @@ use crate::runtime;
 use crate::state::chat::{CenterView, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, shadow, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 use crate::views::markdown::{ReplyCache, render_reply};
@@ -46,6 +46,7 @@ pub struct ChatPanel {
     context: ContextCache,
     diffs: DiffCache,
     image_loading: bool,
+    image_picker_open: bool,
     image_error: Option<String>,
     attachment_menu_open: bool,
     attachment_focus: FocusHandle,
@@ -207,6 +208,7 @@ impl ChatPanel {
             context: ContextCache::default(),
             diffs,
             image_loading: false,
+            image_picker_open: false,
             image_error: None,
             attachment_menu_open: false,
             attachment_focus: cx.focus_handle(),
@@ -235,6 +237,7 @@ impl ChatPanel {
         if self.image_loading
             || self.settings_prompt_open
             || chat.streaming()
+            || chat.saving
             || (text.is_empty() && chat.attachments.is_empty())
         {
             return;
@@ -494,12 +497,14 @@ impl ChatPanel {
             prompt: Some("Attach images".into()),
         });
         self.image_loading = true;
+        self.image_picker_open = true;
         self.image_error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = picker.await;
             this.update(cx, |this, cx| {
                 this.image_loading = false;
+                this.image_picker_open = false;
                 if this.chat.read(cx).thread.id != thread {
                     cx.notify();
                     return;
@@ -760,9 +765,6 @@ fn render_message(
             column
                 .child(header(m.model.as_deref().unwrap_or("Assistant"), m, cx))
                 .child(div().mt(sp(2)).children(body))
-                .when(m.streaming && m.text.is_empty(), |d| {
-                    d.child(div().text_color(hsla(c.ink_muted)).child("Thinking…"))
-                })
                 .when_some(m.reads.clone(), |d, log| {
                     d.child(read_row(this, &m.id, &log, entity, cx))
                 })
@@ -934,7 +936,26 @@ impl Render for ChatPanel {
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
         let streaming = chat.streaming();
+        let saving = chat.saving;
         let empty = chat.messages.is_empty();
+        let reduce_motion = self.app.read(cx).settings.reduce_motion;
+        // One stable location for all foreground work. User decisions are not busy work,
+        // so approval and the native picker show a static mark rather than an animation.
+        let activity = chat
+            .activity()
+            .map(|activity| (activity.label(), true))
+            .or_else(|| {
+                chat.pending
+                    .as_ref()
+                    .map(|_| ("Waiting for your approval", false))
+            })
+            .or_else(|| {
+                if self.image_picker_open {
+                    Some(("Choose images", false))
+                } else {
+                    self.image_loading.then_some(("Preparing images", true))
+                }
+            });
         let attachments: Vec<_> = chat
             .attachments
             .iter()
@@ -1125,17 +1146,36 @@ impl Render for ChatPanel {
                                             .items_center()
                                             .gap(sp(1))
                                             .child(attachment_control)
-                                            .when(self.image_loading, |d| {
-                                                d.child(
-                                                    div()
-                                                        .type_style(
-                                                            contextual_theme::type_style::UI_SMALL,
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .when_some(activity, |d, (label, animate)| {
+                                                        d.child(
+                                                            div()
+                                                                .flex()
+                                                                .items_center()
+                                                                .gap(sp(2))
+                                                                .px(sp(1))
+                                                                .type_style(
+                                                                    contextual_theme::type_style::UI_SMALL,
+                                                                )
+                                                                .text_color(hsla(c.ink_muted))
+                                                                .child(activity_mark(
+                                                                    "chat-activity",
+                                                                    animate && !reduce_motion,
+                                                                    cx,
+                                                                ))
+                                                                .child(
+                                                                    div()
+                                                                        .min_w_0()
+                                                                        .overflow_hidden()
+                                                                        .whitespace_nowrap()
+                                                                        .child(label),
+                                                                ),
                                                         )
-                                                        .text_color(hsla(c.ink_muted))
-                                                        .child("Preparing images…"),
-                                                )
-                                            })
-                                            .child(div().flex_1())
+                                                    }),
+                                            )
                                             .map(|d| {
                                                 if streaming {
                                                     d.child(Button::new("stop", "Stop").on_click(
@@ -1159,7 +1199,8 @@ impl Render for ChatPanel {
                                                                     .variant(ButtonVariant::Primary)
                                                                     .disabled(
                                                                         self.image_loading
-                                                                            || self.settings_prompt_open,
+                                                                            || self.settings_prompt_open
+                                                                            || saving,
                                                                     )
                                                                     .on_click(cx.listener(
                                                                         |t, _, w, cx| t.send(w, cx),

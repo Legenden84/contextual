@@ -10,6 +10,7 @@ use gpui_kit::{
 
 use crate::state::{AppModel, Screen};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::ui::activity_mark;
 
 const H: f32 = 24.0;
 const ICON: f32 = 14.0;
@@ -129,7 +130,21 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                         .child("Read-only: nothing is written until you save"),
                 )
                 .child(div().flex_1())
-                .when(a.scanning, |d| d.child(item(IconName::Loader, "Scanning…")))
+                .when(a.scanning, |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(sp(2))
+                            .whitespace_nowrap()
+                            .child(activity_mark(
+                                "scan-activity",
+                                !a.settings.reduce_motion,
+                                cx,
+                            ))
+                            .child("Scanning project"),
+                    )
+                })
                 .when(a.screen != Screen::Settings, |d| {
                     d.child(
                         div()

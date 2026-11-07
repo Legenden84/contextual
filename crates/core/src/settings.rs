@@ -189,6 +189,9 @@ pub struct Settings {
     pub workspace: WorkspaceSettings,
     #[serde(default)]
     pub theme: ThemePreference,
+    /// Use static activity marks instead of looping animations.
+    #[serde(default)]
+    pub reduce_motion: bool,
     #[serde(default)]
     pub chat: ChatSettings,
     /// Models added to the catalog, or replacing built-in entries with the same id.
@@ -396,6 +399,25 @@ pub fn resolve_foundry_config_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reduced_motion_defaults_off_and_round_trips() {
+        let legacy: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.reduce_motion);
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        let settings = Settings {
+            reduce_motion: true,
+            ..Settings::default()
+        };
+        store.save(&settings).unwrap();
+        assert!(store.load().unwrap().reduce_motion);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["reduceMotion"],
+            true
+        );
+    }
 
     #[test]
     fn theme_preferences_round_trip_and_keep_legacy_values() {

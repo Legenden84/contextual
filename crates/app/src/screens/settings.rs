@@ -6,8 +6,9 @@ use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, div, px,
 };
 
 use crate::state::{AppModel, ConnectionTest};
@@ -44,6 +45,8 @@ pub struct SettingsScreen {
     respect_gitignore: bool,
     skip_binary: bool,
     include_hidden: bool,
+    reduce_motion: bool,
+    motion_focus: FocusHandle,
     /// Remove the stored key on save.
     remove_key: bool,
     /// Starting file or folder for the env-file picker.
@@ -188,6 +191,8 @@ impl SettingsScreen {
             respect_gitignore: s.workspace.respect_gitignore,
             skip_binary: s.workspace.skip_binary,
             include_hidden: s.workspace.include_hidden,
+            reduce_motion: s.reduce_motion,
+            motion_focus: cx.focus_handle(),
             remove_key: false,
             env_path,
             imported_key: None,
@@ -231,6 +236,7 @@ impl SettingsScreen {
         s.workspace.skip_binary = self.skip_binary;
         s.workspace.include_hidden = self.include_hidden;
         s.workspace.output_prompt = self.output_prompt.read(cx).value().to_string();
+        s.reduce_motion = self.reduce_motion;
         // Appearance is saved immediately; keep the latest value, including title-bar changes.
         let key = if self.remove_key {
             Some(String::new())
@@ -743,7 +749,41 @@ impl Render for SettingsScreen {
                     )
                     .child(div().type_style(contextual_theme::type_style::CODE_SMALL).child(Textarea::new(&self.output_prompt)))
                     .child(section("Appearance", cx))
-                    .child(div().flex().gap(sp(1)).children(theme_buttons)),
+                    .child(div().flex().gap(sp(1)).children(theme_buttons))
+                    .child(
+                        div()
+                            .id("reduce-motion-focus")
+                            .mt(sp(3))
+                            .p(sp(1))
+                            .track_focus(&self.motion_focus)
+                            .tab_index(0)
+                            .rounded(px(contextual_theme::radius::SM))
+                            .border_1()
+                            .border_color(hsla(c.surface_100))
+                            .focus(|s| s.border_color(hsla(c.focus_ring)))
+                            .on_key_down(cx.listener(|t, e: &KeyDownEvent, _, cx| {
+                                if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                                    t.reduce_motion = !t.reduce_motion;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                            }))
+                            .child(self.switch_row(
+                                "reduce-motion",
+                                "Reduce motion",
+                                self.reduce_motion,
+                                |t| t.reduce_motion = !t.reduce_motion,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .type_style(contextual_theme::type_style::UI_SMALL)
+                                    .text_color(hsla(c.ink_muted))
+                                    .child(
+                                        "Use static activity indicators. Takes effect when you save settings.",
+                                    ),
+                            ),
+                    ),
             );
         div()
             .relative()
