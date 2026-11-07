@@ -17,17 +17,17 @@ const LOGO: f32 = 16.0;
 
 pub fn title_bar(title: &str, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
-    let toggle = match cx.tokens().appearance.next() {
+    let toggle = match cx.tokens().appearance {
         Appearance::Light => {
-            IconButton::new("theme-toggle", IconName::Sun, "Dark theme · Switch to light")
+            IconButton::new("theme-toggle", IconName::Sun, "Light theme · Switch to Moss")
         }
         Appearance::Moss => IconButton::with_glyph(
             "theme-toggle",
             moss_mark(LOGO),
-            "Light theme · Switch to Moss",
+            "Moss theme · Switch to dark",
         ),
         Appearance::Dark => {
-            IconButton::new("theme-toggle", IconName::Moon, "Moss theme · Switch to dark")
+            IconButton::new("theme-toggle", IconName::Moon, "Dark theme · Switch to light")
         }
     };
     TitleBar::new()
