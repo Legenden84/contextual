@@ -1,78 +1,57 @@
-# Contextual
+# Contextual: WSL setup for Rust development
 
-A local desktop tool for working on code with a self-hosted model (Azure AI Foundry): tick the
-files the model should see, ask for a change, review the proposed diff file by file, and save what
-you want. The model never writes to disk; saving is an explicit action, checked against what the
-model saw, atomic and undoable. Source Control and pull requests (`git`, `gh`) are built in.
+These steps match the current dev machine (Ubuntu 26.04 in WSL, Rust stable 1.99) plus what CI installs. Run them inside the WSL distro.
 
-Native Rust app (GPUI) for **Windows and macOS**. On Windows it also opens projects that live
-inside WSL, served by a small agent it deploys into the distro.
+Before switching machines, commit and push any local work. Uncommitted changes stay behind on the old machine.
 
-## Build and run
+## 1. System packages
 
-Development happens on Linux (WSL is fine); the app runs there too, through WSLg.
+sudo apt-get update && sudo apt-get install -y build-essential pkg-config clang git gh libssl-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libvulkan-dev mesa-vulkan-drivers libasound2-dev gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+What they're for:
 
-```sh
-# one-time, for the GUI on Linux and the Windows cross-build
-sudo apt-get install -y libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev \
-  libfreetype-dev libvulkan-dev libasound2-dev clang mingw-w64
+**Compilers and build tools** (build-essential, pkg-config, clang): building crates with C code, such as ring.
+**GUI libraries for GPUI** (the libx*, wayland, fontconfig, freetype, vulkan and asound packages): the same list CI uses.
+**mesa-vulkan-drivers:** lets the app draw its window through WSLg.
+***-mingw-w64-x86-64:** cross-compiling contextual.exe for Windows.
+## 2. Rust (rustup)
 
-cargo run -p contextual                 # opens the last project
-cargo run -p contextual -- ~/src/app    # opens a folder
-cargo test --workspace
+The project needs Rust 1.85 or newer (edition 2024). Plain stable is fine.
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+rustup component add rustfmt clippy rust-analyzer
 ```
 
-- Windows `.exe` from Linux (debug, for checks): `cargo build -p contextual --target x86_64-pc-windows-gnu`.
-- Release builds for Windows and macOS come from CI (`.github/workflows/rust.yml`); the Windows
-  artifact ships the static Linux agents (`contextual-agent-<arch>-linux`) next to `contextual.exe`.
+## 3. Cross-compile targets
 
-## How the model gets context
+rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-musl x86_64-pc-windows-msvc
+**x86_64-pc-windows-gnu:** builds the Windows .exe (uses mingw from step 1).
+**x86_64-unknown-linux-musl:** builds the static WSL agent. It's pure Rust, so it needs no musl C toolchain.
+**x86_64-pc-windows-msvc:** only for the Windows type-check of contextual-core with clippy.
+**Optional:** aarch64-apple-darwin was installed on the old machine, but nothing in CLAUDE.md uses it.
+## 4. GitHub login (for PRs from the app and gh)
 
-With **Model picks files** (on by default, in the composer) a new chat starts with the project
-tree (paths and token sizes; large folders folded) and an index of the skills. The model asks for
-the files, folder listings and skills it needs with a `read` block; the app sends them and ticks
-the files (tagged "model" in the explorer), up to 25 files / 150k tokens and 5 rounds per
-message, asking before going further. Rules are always sent; skills are Auto (the model loads
-them), Always or Never in Skills & Rules. A reply that changes a file the model wasn't sent is
-answered with that file and asked again. Ticking files still sends them as before.
+gh auth login
+## 5. Check the setup
 
-## Configuration
+Run these in the cloned repo:
 
-Settings → Azure AI Foundry: endpoint, deployment, API version and model name. The API key is
-stored in the OS keychain (Credential Manager, Keychain, Secret Service), never in
-`settings.json`. "Import .env.local" reads the old app's file.
-
-Context limit and prices come from the model catalog, looked up by model name (else deployment
-name): `crates/core/data/models.json` ships with the app; add a model there, or locally under
-`"models"` in `settings.json` (same fields; the same `id` replaces a built-in entry). The
-Settings fields and environment variables override the catalog for one deployment.
-
-```json
-{ "id": "gpt-6-astra", "label": "GPT-6 Astra", "aliases": [], "contextLimit": 922000,
-  "inputPricePer1m": 10, "cachedInputPricePer1m": 1, "outputPricePer1m": 50,
-  "longContext": { "aboveInputTokens": 272000, "inputPricePer1m": 20, "outputPricePer1m": 75 },
-  "source": "https://…" }
+```bash
+cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+cargo build -p contextual --target x86_64-pc-windows-gnu
+cargo build -p contextual-agent --release --target x86_64-unknown-linux-musl
+cargo run -p contextual
 ```
 
-These environment variables override the settings (handy for development):
-`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT`,
-`AZURE_OPENAI_MODEL_NAME`, `AZURE_OPENAI_MAX_COMPLETION_TOKENS`, `AZURE_OPENAI_CONTEXT_LIMIT`,
-`AZURE_OPENAI_INPUT_PRICE_PER_1M`, `AZURE_OPENAI_OUTPUT_PRICE_PER_1M`. The endpoint must be HTTPS,
-or `http://localhost` for a local mock.
+## 6. API key
 
-Data lives in the OS config/data dirs: `settings.json`, `state.json` (recent projects),
-`threads/` (saved chats); undo snapshots in the cache dir of the machine the project is on.
-Chats saved by the old app are copied in the first time their project is opened.
+WSL has no keychain, so the app keeps the API key in memory only and loses it every time the app quits. Set it in your shell profile instead:
 
-## Layout
+echo "export AZURE_OPENAI_API_KEY='...'" >> ~/.bashrc
+The other values (endpoint, deployment, API version) can go in ~/.bashrc the same way, or you can enter them in Settings. Settings saves them in ~/.config/contextual/settings.json.
 
-| Crate | What |
-| --- | --- |
-| `crates/core` | Everything but the UI: workspace (scan, read, save/undo, git, PRs), Foundry client, chat turns, threads, settings, WSL deployment. See its README. |
-| `crates/protocol` | Wire types shared by the app, the core and the agent (JSON-RPC). |
-| `crates/theme` | The design tokens, generated at build time from `docs/design/contextual/tokens.json`. |
-| `crates/agent` | `contextual-agent`: serves the workspace host over stdio JSON-RPC (inside WSL). |
-| `crates/app` | `contextual`: the GPUI app. |
+## Notes
 
-Design spec: `docs/design/contextual/`. Architecture and history:
-`docs/plans/cross-platform-rust-port.md`.
+**If the window doesn't open:** WSLg must be enabled. Make sure WSL is up to date by running wsl --update in Windows PowerShell.
+**Expected warnings:** libEGL / MESA warnings in the terminal are normal on WSLg, and the app still runs.
