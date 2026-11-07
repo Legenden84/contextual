@@ -1145,12 +1145,26 @@ impl Render for ChatPanel {
                                                     ))
                                                 } else {
                                                     d.child(
-                                                        Button::new("send", "Send")
-                                                            .variant(ButtonVariant::Primary)
-                                                            .disabled(self.image_loading || self.settings_prompt_open)
-                                                            .on_click(cx.listener(
-                                                                |t, _, w, cx| t.send(w, cx),
-                                                            )),
+                                                        div()
+                                                            .id("send-tooltip")
+                                                            .tooltip(|window, cx| {
+                                                                gpui_kit::component::tooltip::Tooltip::new(
+                                                                    "Send (Ctrl+Enter)",
+                                                                )
+                                                                .build(window, cx)
+                                                            })
+                                                            .child(
+                                                                Button::new("send", "")
+                                                                    .icon(gpui_kit::assets::IconName::Send)
+                                                                    .variant(ButtonVariant::Primary)
+                                                                    .disabled(
+                                                                        self.image_loading
+                                                                            || self.settings_prompt_open,
+                                                                    )
+                                                                    .on_click(cx.listener(
+                                                                        |t, _, w, cx| t.send(w, cx),
+                                                                    )),
+                                                            ),
                                                     )
                                                 }
                                             }),
