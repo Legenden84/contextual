@@ -1,4 +1,4 @@
-//! 24px status bar: branch, Foundry connection, the read-only promise, scanning, Settings.
+ //! 24px status bar: branch, Foundry connection, scanning, Settings.
 
 use contextual_core::logic::foundry_status::{FoundryStatus, Tone, describe_foundry};
 use gpui_kit::component::{Icon, IconName};
@@ -117,18 +117,6 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                     },
                 )
                 .child(foundry)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(sp(1))
-                        .child(
-                            div()
-                                .text_color(hsla(c.success))
-                                .child(Icon::new(IconName::Check).size(px(ICON))),
-                        )
-                        .child("Read-only: nothing is written until you save"),
-                )
                 .child(div().flex_1())
                 .when(a.scanning, |d| {
                     d.child(
