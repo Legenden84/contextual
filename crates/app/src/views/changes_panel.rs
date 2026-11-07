@@ -6,8 +6,8 @@ use contextual_theme::layout;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
@@ -20,6 +20,12 @@ pub struct ChangesPanel {
     diffs: DiffCache,
     _subs: Vec<Subscription>,
 }
+
+pub struct OpenDiffFile {
+    pub path: String,
+}
+
+impl EventEmitter<OpenDiffFile> for ChangesPanel {}
 
 pub fn status_color(s: ChangeStatus, c: &contextual_theme::Colors) -> contextual_theme::Rgba {
     match s {
@@ -81,6 +87,7 @@ impl Render for ChangesPanel {
                     None => (String::new(), ch.path.clone()),
                 };
                 let path = ch.path.clone();
+                let diff_path = path.clone();
                 div()
                     .id(("change", i))
                     .flex()
@@ -89,7 +96,13 @@ impl Render for ChangesPanel {
                     .h(row_height())
                     .px(sp(3))
                     .type_style(contextual_theme::type_style::UI_BODY)
+                    .cursor_pointer()
                     .hover(|s| s.bg(hsla(c.surface_hover)))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(OpenDiffFile {
+                            path: diff_path.clone(),
+                        });
+                    }))
                     .child(
                         Checkbox::new(
                             ("include", i),

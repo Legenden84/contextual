@@ -39,6 +39,8 @@ pub struct DiffScreen {
     rows: Vec<Row>,
     /// Row index of each file's header, for the file list.
     file_rows: Vec<usize>,
+    /// Source key and path to reveal once the background diff is ready.
+    pending_file: Option<(String, String)>,
     list: ListState,
     _subs: Vec<Subscription>,
 }
@@ -71,6 +73,7 @@ impl DiffScreen {
             split_files: false,
             rows: Vec::new(),
             file_rows: Vec::new(),
+            pending_file: None,
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
             _subs: subs,
         }
@@ -78,6 +81,22 @@ impl DiffScreen {
 
     fn mode(&self, cx: &App) -> DiffMode {
         self.chat.read(cx).diff_mode
+    }
+
+    /// Open the Diff tab and reveal a file without changing its save selection.
+    pub fn open_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        let chat = self.chat.read(cx);
+        if !chat.changes_ref().iter().any(|change| change.path == path) {
+            return;
+        }
+        let Some(message) = chat.change_message() else {
+            return;
+        };
+        self.pending_file = Some((message_key(chat, message), path.to_string()));
+        self.chat
+            .update(cx, |chat, cx| chat.set_center(CenterView::Diff, cx));
+        self.refresh(cx);
+        cx.notify();
     }
 
     /// A streaming delta, checkbox, toast or dialog change does not change the row layout.
@@ -88,6 +107,14 @@ impl DiffScreen {
             return;
         }
         let source = chat.change_message().map(|m| message_key(chat, m));
+        // Never apply a delayed jump to another response or conversation.
+        if self
+            .pending_file
+            .as_ref()
+            .is_some_and(|(key, _)| Some(key) != source.as_ref())
+        {
+            self.pending_file = None;
+        }
         if self.source != source {
             self.changes = chat.changes_ref().to_vec().into();
             self.source = source;
@@ -108,6 +135,16 @@ impl DiffScreen {
             }
         } else if self.built_mode != self.mode(cx) {
             self.rebuild(cx);
+        }
+        if self.ready.is_some()
+            && let Some((_, path)) = self.pending_file.take()
+            && let Some(file) = self.changes.iter().position(|change| change.path == path)
+            && let Some(&row) = self.file_rows.get(file)
+        {
+            self.list.scroll_to(gpui_kit::ListOffset {
+                item_ix: row,
+                offset_in_item: px(0.0),
+            });
         }
     }
 
@@ -289,7 +326,7 @@ impl Render for DiffScreen {
             .iter()
             .enumerate()
             .map(|(i, ch)| {
-                let row = self.file_rows.get(i).copied().unwrap_or(0);
+                let path = ch.path.clone();
                 let name = ch.path.rsplit('/').next().unwrap_or(&ch.path).to_string();
                 div()
                     .id(("file-link", i))
@@ -301,11 +338,7 @@ impl Render for DiffScreen {
                     .cursor_pointer()
                     .hover(|s| s.bg(hsla(c.surface_hover)))
                     .on_click(cx.listener(move |t, _, _, cx| {
-                        t.list.scroll_to(gpui_kit::ListOffset {
-                            item_ix: row,
-                            offset_in_item: px(0.0),
-                        });
-                        cx.notify();
+                        t.open_file(&path, cx);
                     }))
                     .child(
                         div()

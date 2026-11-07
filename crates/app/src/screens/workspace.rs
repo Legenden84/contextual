@@ -18,7 +18,7 @@ use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, Tag, file_glyph};
 use crate::views::branch_picker::BranchPicker;
-use crate::views::changes_panel::ChangesPanel;
+use crate::views::changes_panel::{ChangesPanel, OpenDiffFile};
 use crate::views::chat_panel::ChatPanel;
 use crate::views::chats_menu::ChatsMenu;
 use crate::views::code_preview::CodePreview;
@@ -180,14 +180,23 @@ impl WorkspaceScreen {
         let sidebar =
             cx.new(|cx| Sidebar::new(app.clone(), project.clone(), scm.clone(), window, cx));
         crate::dev::open(&app, &sidebar, &project, &scm, &chat, cx);
+        let changes = cx.new(|cx| ChangesPanel::new(chat.clone(), diffs.clone(), cx));
+        let diff = cx.new(|cx| DiffScreen::new(chat.clone(), diffs, cx));
+        subs.push(cx.subscribe(
+            &changes,
+            |this: &mut Self, _, event: &OpenDiffFile, cx| {
+                this.diff
+                    .update(cx, |diff, cx| diff.open_file(&event.path, cx));
+            },
+        ));
         Self {
             sidebar,
             scm,
             branch_picker: None,
             pr_dialog: None,
             chat_panel,
-            changes: cx.new(|cx| ChangesPanel::new(chat.clone(), diffs.clone(), cx)),
-            diff: cx.new(|cx| DiffScreen::new(chat.clone(), diffs, cx)),
+            changes,
+            diff,
             inspect: cx.new(|cx| InspectScreen::new(chat.clone(), window, cx)),
             chats,
             save_dialog: None,
