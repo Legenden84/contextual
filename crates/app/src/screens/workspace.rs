@@ -1,6 +1,6 @@
 //! Workspace (design spec: ScreenWorkspace): sidebar, centre tabs (Chat plus read-only previews)
 //! with the chat and composer, and the Changes panel when a reply proposes changes. The diff view
-//! replaces the centre and right columns.
+//! and the Inspect view replace the centre and right columns.
 
 use std::collections::HashMap;
 
@@ -26,6 +26,7 @@ use crate::views::context_bar::context_bar;
 use crate::views::diff_cache::DiffCache;
 use crate::views::diff_screen::DiffScreen;
 use crate::views::git_diff::GitDiffView;
+use crate::views::inspect_screen::InspectScreen;
 use crate::views::pr_dialog::PrDialog;
 use crate::views::save_dialog::SaveDialog;
 use crate::views::sidebar::Sidebar;
@@ -47,6 +48,7 @@ pub struct WorkspaceScreen {
     chat_panel: Entity<ChatPanel>,
     changes: Entity<ChangesPanel>,
     diff: Entity<DiffScreen>,
+    inspect: Entity<InspectScreen>,
     chats: Entity<ChatsMenu>,
     save_dialog: Option<Entity<SaveDialog>>,
     _subs: Vec<Subscription>,
@@ -152,6 +154,7 @@ impl WorkspaceScreen {
             chat_panel,
             changes: cx.new(|cx| ChangesPanel::new(chat.clone(), diffs.clone(), cx)),
             diff: cx.new(|cx| DiffScreen::new(chat.clone(), diffs, cx)),
+            inspect: cx.new(|cx| InspectScreen::new(chat.clone(), window, cx)),
             chats,
             save_dialog: None,
             chat,
@@ -266,6 +269,8 @@ impl Render for WorkspaceScreen {
         let chat = self.chat.read(cx);
         let has_changes = !chat.changes().is_empty();
         let diff_view = chat.center == CenterView::Diff && has_changes;
+        let inspect_view = chat.center == CenterView::Inspect;
+        let can_inspect = !chat.thread.transcript.is_empty() || chat.live.is_some();
 
         let body = match &active {
             Tab::Preview(path) => {
@@ -334,6 +339,18 @@ impl Render for WorkspaceScreen {
                             })),
                     )
                     .child(
+                        Button::new("inspect", "Inspect")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .disabled(!can_inspect)
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                t.chat.update(cx, |c, cx| {
+                                    c.center = CenterView::Inspect;
+                                    cx.notify();
+                                })
+                            })),
+                    )
+                    .child(
                         Button::new("chats", "Chats")
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Ghost)
@@ -343,7 +360,9 @@ impl Render for WorkspaceScreen {
                     ),
             );
 
-        let main = if diff_view {
+        let main = if inspect_view {
+            div().flex().flex_1().min_w_0().child(self.inspect.clone())
+        } else if diff_view {
             div().flex().flex_1().min_w_0().child(self.diff.clone())
         } else {
             div()

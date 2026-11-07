@@ -12,6 +12,7 @@ pub mod diff_screen;
 pub mod explorer;
 pub mod folder_dialog;
 pub mod git_diff;
+pub mod inspect_screen;
 pub mod markdown;
 pub mod pr_dialog;
 pub mod presets_editor;

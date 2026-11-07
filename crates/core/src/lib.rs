@@ -14,6 +14,8 @@ pub mod chat;
 pub mod error;
 pub mod host;
 #[cfg(feature = "llm")]
+pub mod inspect;
+#[cfg(feature = "llm")]
 pub mod llm;
 pub mod location;
 pub mod logic;

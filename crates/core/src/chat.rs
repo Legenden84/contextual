@@ -22,6 +22,28 @@ use contextual_protocol::fs::FileContent;
 pub struct ApiMessage {
     pub role: ChatRole,
     pub content: ApiContent,
+    /// User turns: the system prompt sent with this turn, recorded only when it differs from
+    /// the one before it (`None`: unchanged, or a chat saved before this was recorded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// User turns: written by the app (answering a read request), not typed by the user.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub followup: bool,
+    /// Assistant turns: the tokens the reply used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+impl ApiMessage {
+    pub fn new(role: ChatRole, content: ApiContent) -> Self {
+        Self {
+            role,
+            content,
+            system: None,
+            followup: false,
+            usage: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +95,36 @@ impl ThreadState {
             tree_version: None,
             loaded: Vec::new(),
         }
+    }
+
+    /// The system prompt recorded last (what later turns were sent unless they record another).
+    pub fn last_system(&self) -> Option<&str> {
+        self.transcript
+            .iter()
+            .rev()
+            .find_map(|m| m.system.as_deref())
+    }
+
+    /// Adds a completed round to the transcript: the input as sent (with its system prompt when
+    /// it changed) and the reply as received.
+    pub fn record_round(
+        &mut self,
+        input: ApiContent,
+        system: &str,
+        followup: bool,
+        reply: String,
+        usage: Option<Usage>,
+    ) {
+        let system = (self.last_system() != Some(system)).then(|| system.to_string());
+        self.transcript.push(ApiMessage {
+            system,
+            followup,
+            ..ApiMessage::new(ChatRole::User, input)
+        });
+        self.transcript.push(ApiMessage {
+            usage,
+            ..ApiMessage::new(ChatRole::Assistant, ApiContent::Text(reply))
+        });
     }
 }
 
@@ -367,6 +419,8 @@ pub struct PreparedTurn {
     pub images: Vec<MessageImage>,
     /// "3 of 5 files sent (2 unchanged) · 1 rules"
     pub meta: String,
+    /// Written by the app (answering a read request).
+    pub followup: bool,
 }
 
 /// Builds the turn from freshly read files: only files the model doesn't have yet (or that
@@ -381,6 +435,7 @@ pub fn prepare_turn(
     opts: TurnOptions,
 ) -> PreparedTurn {
     let force_all = opts.force_all;
+    let followup = opts.followup;
     let mut versions = thread.file_versions.clone();
     let mut changed = Vec::new();
     let mut unchanged = Vec::new();
@@ -446,6 +501,7 @@ pub fn prepare_turn(
         versions,
         images: attachments.to_vec(),
         meta: format!("{files} · {rules_on} rules"),
+        followup,
     }
 }
 

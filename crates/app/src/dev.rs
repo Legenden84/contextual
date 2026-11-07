@@ -1,7 +1,7 @@
 //! Debug-build automation, so a full flow can be checked without clicking (compiled out of
 //! release builds). `CONTEXTUAL_DEV_SEND="text"` selects every file once the project opens and
-//! sends `text`; `CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats` then takes one action after the
-//! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|gitdiff:<path>|commit:<message>|switch:<branch>`
+//! sends `text`; `CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats|inspect` then takes one action after the
+//! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<message>|switch:<branch>`
 //! opens that view, or runs that Source Control action, at startup.
 
 use contextual_core::chat::Role;
@@ -47,7 +47,7 @@ pub fn install(
             chat.read(cx).messages.last().is_some_and(|m| {
                 m.role != Role::User && !m.streaming && !chat.read(cx).streaming()
             });
-        if !finished || chat.read(cx).changes().is_empty() {
+        if !finished || (after != "inspect" && chat.read(cx).changes().is_empty()) {
             return;
         }
         done = true;
@@ -58,6 +58,10 @@ pub fn install(
             return;
         }
         chat_for_obs.update(cx, |c, cx| match after.as_str() {
+            "inspect" => {
+                c.center = CenterView::Inspect;
+                cx.notify();
+            }
             "diff" | "split" => {
                 c.center = CenterView::Diff;
                 c.diff_mode = if after == "split" {
@@ -121,6 +125,10 @@ pub fn open(
         "branches" => scm.update(cx, |s, cx| s.open_branch_picker(cx)),
         "pr" => chat.update(cx, |c, cx| {
             c.pr_open = true;
+            cx.notify();
+        }),
+        "inspect" => chat.update(cx, |c, cx| {
+            c.center = CenterView::Inspect;
             cx.notify();
         }),
         other => {

@@ -20,9 +20,11 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
     prompt (incl. `FILE_FORMAT`, appended to the system prompt and not shown in Settings), tree
     sums, context totals, images, PR helpers.
   - `chat.rs` — turn preparation (only files new or changed since sent, by hash), saved-thread
-    format (reads the old app's JSON), notes, save bookkeeping. `llm/` — Foundry client on reqwest
+    format (reads the old app's JSON; each round keeps its system prompt when it changed, whether
+    the app wrote it, and usage), notes, save bookkeeping. `inspect.rs` — the chat round by round
+    for the Inspect view. `llm/` — Foundry client on reqwest
     (Responses API with `previous_response_id`, chain reset, chat-completions fallback, SSE),
-    drafts and edit repair. `llm`, `settings`, `models`, `chat` and `migrate` sit behind the `llm` feature.
+    drafts and edit repair. `llm`, `settings`, `models`, `chat`, `inspect` and `migrate` sit behind the `llm` feature.
   - `threads.rs`, `settings.rs`, `recents.rs`, `migrate.rs` (`.env.local` import),
     `models.rs` (model catalog: `data/models.json` + `models` in settings.json),
     `location.rs` / `wsl.rs` (where a project lives, distro discovery, agent deployment).
@@ -47,8 +49,8 @@ Rust is in `~/.cargo/bin`. Development is Linux-only; the app runs through WSLg.
   (the `llm` feature needs a C cross-compiler for `ring`).
 - Static agent: `cargo build -p contextual-agent --release --target x86_64-unknown-linux-musl`.
 - Checking flows without clicking (debug builds only, `crates/app/src/dev.rs`):
-  `CONTEXTUAL_DEV_SEND="…" CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats`,
-  `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|gitdiff:<path>|commit:<msg>|switch:<branch>`,
+  `CONTEXTUAL_DEV_SEND="…" CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats|inspect`,
+  `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<msg>|switch:<branch>`,
   `CONTEXTUAL_DEV_REMOTE=1` (serve projects through a local agent: the WSL code path). Point
   `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand.
 - Test fixtures were recorded from the old TypeScript app; see `crates/core/tests/fixtures/README.md`.

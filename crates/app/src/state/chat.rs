@@ -10,6 +10,7 @@ use contextual_core::chat::{
     TurnOptions, UiMessage, Usage,
 };
 use contextual_core::host::WorkspaceHost;
+use contextual_core::inspect::LiveRound;
 use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, RepairInput};
 use contextual_core::llm::{FoundryClient, FoundryConfig};
 use contextual_core::logic::changes::ChangeContext;
@@ -32,6 +33,8 @@ use crate::state::Project;
 pub enum CenterView {
     Chat,
     Diff,
+    /// Every round as sent and received (the Inspect view).
+    Inspect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -143,6 +146,8 @@ pub struct ChatModel {
     pub threads: Vec<ThreadSummary>,
     /// A read request waiting for the user.
     pub pending: Option<PendingReads>,
+    /// The round streaming now, as sent (the Inspect view shows it before it completes).
+    pub live: Option<LiveRound>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -201,6 +206,7 @@ impl ChatModel {
             toast: None,
             threads: Vec::new(),
             pending: None,
+            live: None,
             _tasks: Vec::new(),
         };
         this.refresh_threads(true, cx);
@@ -376,6 +382,16 @@ impl ChatModel {
         if env.auto {
             system = with_reads(system, &env.skill_index);
         }
+        let _ = this.update(cx, |this, cx| {
+            this.live = Some(LiveRound {
+                input: prepared.input.clone(),
+                system: system.clone(),
+                followup: prepared.followup,
+                reply: String::new(),
+            });
+            cx.notify();
+        });
+        let system_sent = system.clone();
         let req = ConversationRequest {
             system,
             history: chat::history(&base),
@@ -416,6 +432,9 @@ impl ChatModel {
                         .update(cx, |this, cx| {
                             if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
                                 m.text = current;
+                            }
+                            if let Some(l) = this.live.as_mut() {
+                                l.reply.push_str(&text);
                             }
                             cx.notify();
                         })
@@ -465,19 +484,19 @@ impl ChatModel {
             if completed && let Some((_, response_id, api, _)) = &done {
                 this.thread.response_id = response_id.clone();
                 this.thread.api = Some(*api);
-                this.thread.transcript.push(chat::ApiMessage {
-                    role: contextual_core::llm::types::ChatRole::User,
-                    content: prepared.input.clone(),
-                });
-                this.thread.transcript.push(chat::ApiMessage {
-                    role: contextual_core::llm::types::ChatRole::Assistant,
-                    content: contextual_core::logic::prompt::ApiContent::Text(reply.clone()),
-                });
+                this.thread.record_round(
+                    prepared.input.clone(),
+                    &system_sent,
+                    prepared.followup,
+                    reply.clone(),
+                    usage,
+                );
                 this.thread.file_versions = prepared.versions.clone();
                 if let Some(v) = &tree_version {
                     this.thread.tree_version = Some(v.clone());
                 }
             }
+            this.live = None;
             if !(env.auto && completed && !truncated) {
                 return None;
             }
