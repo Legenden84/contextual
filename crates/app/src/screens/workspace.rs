@@ -1,6 +1,6 @@
 //! Workspace (design spec: ScreenWorkspace): sidebar and persistent tabs for Chat, file previews,
 //! Diff and Inspect. Feature tabs use the centre and right columns beneath the shared tab bar;
-//! Chat and previews show chat history, or proposed changes when history is closed.
+//! Chat and previews keep a stable column beside responsive Changes and history docks.
 
 use std::collections::HashMap;
 
@@ -35,6 +35,27 @@ use contextual_core::logic::git_tabs::parse_git_tab;
 
 /// Centre tab bar height.
 const TABS_H: f32 = 36.0;
+
+struct ChatLayout {
+    width: f32,
+    show_changes: bool,
+    show_history: bool,
+}
+
+/// `available` is the width after the fixed explorer column. Reserve one sidebar even
+/// when it is empty, and cap the chat at its reading width plus message/composer padding.
+/// Panel visibility must never participate in sizing the chat.
+fn chat_layout(available: f32, has_changes: bool, history_open: bool) -> ChatLayout {
+    let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
+    let width = (available - layout::CHANGES_WIDTH).clamp(0.0, max_width);
+    let fits_both = available - width >= 2.0 * layout::CHANGES_WIDTH;
+
+    ChatLayout {
+        width,
+        show_changes: has_changes && (!history_open || fits_both),
+        show_history: history_open,
+    }
+}
 
 pub struct WorkspaceScreen {
     app: Entity<AppModel>,
@@ -248,7 +269,7 @@ impl WorkspaceScreen {
 }
 
 impl Render for WorkspaceScreen {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &cx.tokens().colors;
         let p = self.project.read(cx);
         let active = p.active.clone();
@@ -351,6 +372,13 @@ impl Render for WorkspaceScreen {
         let has_changes = chat.change_message().is_some();
         let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
         let history_open = self.chats.read(cx).open && !feature_view;
+        // The workspace fills the viewport; only the fixed explorer consumes width
+        // before this area. Recompute on resize, never from panel visibility.
+        let panes = chat_layout(
+            f32::from(window.viewport_size().width) - layout::EXPLORER_WIDTH,
+            has_changes,
+            history_open,
+        );
 
         let body = match &active {
             Tab::Preview(path) => {
@@ -458,11 +486,22 @@ impl Render for WorkspaceScreen {
                             .flex_1()
                             .min_h_0()
                             .min_w_0()
+                            .when(!feature_view, |d| d.flex_none().w(px(panes.width)))
                             .child(body),
                     )
-                    .when(history_open, |d| d.child(self.chats.clone()))
-                    .when(has_changes && !feature_view && !history_open, |d| {
-                        d.child(self.changes.clone())
+                    .when(!feature_view, |d| {
+                        d.child(
+                            div()
+                                .id("workspace-right-dock")
+                                .flex()
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .h_full()
+                                .justify_end()
+                                .when(panes.show_changes, |d| d.child(self.changes.clone()))
+                                .when(panes.show_history, |d| d.child(self.chats.clone())),
+                        )
                     }),
             );
 
@@ -482,5 +521,64 @@ impl Render for WorkspaceScreen {
                 self.chat_panel.update(cx, |panel, cx| panel.settings_prompt(cx)),
                 |d, prompt| d.child(prompt),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn full_chat_width() -> f32 {
+        layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4
+    }
+
+    #[test]
+    fn panel_visibility_never_changes_chat_width() {
+        for available in [
+            full_chat_width(),
+            full_chat_width() + layout::CHANGES_WIDTH,
+            full_chat_width() + 2.0 * layout::CHANGES_WIDTH,
+            full_chat_width() + 3.0 * layout::CHANGES_WIDTH,
+        ] {
+            let expected = chat_layout(available, false, false).width;
+            for has_changes in [false, true] {
+                for history_open in [false, true] {
+                    assert_eq!(
+                        chat_layout(available, has_changes, history_open).width,
+                        expected,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn both_panels_require_two_full_sidebar_widths_beside_chat() {
+        let threshold = full_chat_width() + 2.0 * layout::CHANGES_WIDTH;
+
+        let below = chat_layout(threshold - 1.0, true, true);
+        assert!(!below.show_changes);
+        assert!(below.show_history);
+        assert_eq!(below.width, full_chat_width());
+
+        for available in [threshold, threshold + layout::CHANGES_WIDTH] {
+            let panes = chat_layout(available, true, true);
+            assert!(panes.show_changes);
+            assert!(panes.show_history);
+            assert_eq!(panes.width, full_chat_width());
+        }
+    }
+
+    #[test]
+    fn narrow_layout_reserves_the_same_sidebar_when_empty() {
+        let available = full_chat_width();
+        for has_changes in [false, true] {
+            for history_open in [false, true] {
+                let panes = chat_layout(available, has_changes, history_open);
+                assert_eq!(panes.width, available - layout::CHANGES_WIDTH);
+                assert_eq!(panes.show_changes, has_changes && !history_open);
+                assert_eq!(panes.show_history, history_open);
+            }
+        }
     }
 }

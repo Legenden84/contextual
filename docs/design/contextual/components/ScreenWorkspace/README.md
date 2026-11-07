@@ -13,8 +13,13 @@ The main workspace with a project open, files selected and a finished assistant 
   feature selects its existing tab rather than adding a duplicate.
 - Switching tabs preserves the composer draft and the feature view state.
 - Diff and Inspect use the full area beneath the header, hiding the right sidebar.
-  Chat and file previews show chat history while it is open, otherwise the Changes panel
-  when proposed changes are available.
+  Chat and file previews use a stable, left-anchored column capped at the 820px reading
+  width plus horizontal padding. Its width depends only on window size, with one standard
+  sidebar width always reserved on the right—even when neither panel is visible.
+- Changes and chat history dock side by side when two standard sidebar widths fit to the
+  right of that column, with history rightmost. Otherwise they share one sidebar:
+  history takes priority while open, and closing it reveals Changes when available.
+  Neither panel overlays the other or resizes/recentres the chat when toggled.
 - Closing the active tab selects its next neighbour, then its previous neighbour,
   falling back to Chat. Closing an inactive tab does not change the selection.
 - Starting or opening another conversation closes Diff and Inspect and selects Chat;
@@ -31,8 +36,10 @@ The main workspace with a project open, files selected and a finished assistant 
   width and a hairline separator, not a floating popover, and stays open while composing.
 - Selecting a saved chat explicitly loads it and closes history. New chat also closes
   history. Search, rename and deletion remain available in the panel.
-- Close history or use the header toggle to reveal the Changes panel when available.
-  Opening history from Diff or Inspect returns to Chat.
+- Close history or use the header toggle without moving the messages or composer.
+  On narrower windows this reveals the Changes panel when available; on wider windows
+  Changes remains visible beside history. Opening history from Diff or Inspect returns
+  to Chat.
 
 ## Native Source Control workflow
 
