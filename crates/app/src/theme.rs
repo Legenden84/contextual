@@ -78,7 +78,7 @@ pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) 
     cx.set_global(ThemeState { tokens });
     let mode = match appearance {
         Appearance::Dark => ThemeMode::Dark,
-        Appearance::Light => ThemeMode::Light,
+        Appearance::Light | Appearance::Moss => ThemeMode::Light,
     };
     // `change` reloads the component theme's colours, so edit them in a second update.
     ComponentTheme::change(mode, window, cx);
@@ -302,6 +302,7 @@ pub fn resolve(pref: contextual_core::settings::ThemePreference, window: &Window
     match pref {
         ThemePreference::Dark => Appearance::Dark,
         ThemePreference::Light => Appearance::Light,
+        ThemePreference::Moss => Appearance::Moss,
         ThemePreference::System => match window.appearance() {
             gpui_kit::WindowAppearance::Light | gpui_kit::WindowAppearance::VibrantLight => {
                 Appearance::Light
@@ -318,17 +319,24 @@ mod tests {
     #[test]
     fn highlights_code_in_syn_colours() {
         register_languages();
-        let theme = highlight_theme(&Tokens::DARK);
-        for (lang, code) in [
-            ("rust", "fn main() { let x = 1; }"),
-            ("csharp", "public class A { int x = 1; }"),
-        ] {
-            let rope = Rope::from_str(code);
-            let mut h = SyntaxHighlighter::new(lang);
-            h.update(None, &rope, None);
-            let styles = h.styles(&(0..code.len()), &theme);
-            let colored = styles.iter().filter(|(_, s)| s.color.is_some()).count();
-            assert!(colored > 0, "{lang}: no coloured ranges in {styles:?}");
+        for tokens in [&Tokens::DARK, &Tokens::LIGHT, &Tokens::MOSS] {
+            let theme = highlight_theme(tokens);
+            for (lang, code) in [
+                ("rust", "fn main() { let x = 1; }"),
+                ("csharp", "public class A { int x = 1; }"),
+            ] {
+                let rope = Rope::from_str(code);
+                let mut h = SyntaxHighlighter::new(lang);
+                h.update(None, &rope, None);
+                let styles = h.styles(&(0..code.len()), &theme);
+                assert!(
+                    styles
+                        .iter()
+                        .any(|(_, s)| s.color == Some(hsla(tokens.colors.syn_keyword))),
+                    "{:?}/{lang}: missing themed keywords in {styles:?}",
+                    tokens.appearance,
+                );
+            }
         }
     }
 }

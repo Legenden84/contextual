@@ -10,14 +10,26 @@ use gpui_kit::{App, IntoElement, ParentElement, SharedString, Styled, div};
 
 use crate::ToggleTheme;
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
-use crate::ui::{IconButton, logo};
+use crate::ui::{IconButton, logo, moss_mark};
 
 /// Mark size in the title bar.
 const LOGO: f32 = 16.0;
 
 pub fn title_bar(title: &str, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
-    let dark = cx.tokens().appearance == Appearance::Dark;
+    let toggle = match cx.tokens().appearance.next() {
+        Appearance::Light => {
+            IconButton::new("theme-toggle", IconName::Sun, "Dark theme · Switch to light")
+        }
+        Appearance::Moss => IconButton::with_glyph(
+            "theme-toggle",
+            moss_mark(LOGO),
+            "Light theme · Switch to Moss",
+        ),
+        Appearance::Dark => {
+            IconButton::new("theme-toggle", IconName::Moon, "Moss theme · Switch to dark")
+        }
+    };
     TitleBar::new()
         .bg(hsla(c.surface_000))
         .border_b_1()
@@ -43,20 +55,9 @@ pub fn title_bar(title: &str, cx: &App) -> impl IntoElement + use<> {
                         .child(SharedString::from(title.to_string())),
                 )
                 .child(
-                    div().pr(sp(2)).child(
-                        IconButton::new(
-                            "theme-toggle",
-                            if dark { IconName::Sun } else { IconName::Moon },
-                            if dark {
-                                "Switch to light theme"
-                            } else {
-                                "Switch to dark theme"
-                            },
-                        )
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(ToggleTheme), cx)
-                        }),
-                    ),
+                    div().pr(sp(2)).child(toggle.on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(ToggleTheme), cx)
+                    })),
                 ),
         )
 }

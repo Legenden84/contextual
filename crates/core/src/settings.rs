@@ -174,6 +174,7 @@ pub enum ThemePreference {
     #[default]
     Dark,
     Light,
+    Moss,
     /// Follow the OS appearance.
     System,
 }
@@ -395,6 +396,26 @@ pub fn resolve_foundry_config_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_preferences_round_trip_and_keep_legacy_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        assert_eq!(store.load().unwrap().theme, ThemePreference::Dark);
+        for (name, theme) in [
+            ("dark", ThemePreference::Dark),
+            ("light", ThemePreference::Light),
+            ("moss", ThemePreference::Moss),
+            ("system", ThemePreference::System),
+        ] {
+            let settings: Settings =
+                serde_json::from_value(serde_json::json!({ "theme": name })).unwrap();
+            assert_eq!(settings.theme, theme);
+            store.save(&settings).unwrap();
+            assert_eq!(store.load().unwrap().theme, theme);
+            assert_eq!(serde_json::to_value(&settings).unwrap()["theme"], name);
+        }
+    }
 
     #[test]
     fn old_exclusions_are_upgraded_and_new_presets_added() {

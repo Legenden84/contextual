@@ -85,6 +85,7 @@ impl Spike {
         window.focus(&focus, cx);
         let appearance = match std::env::var("CONTEXTUAL_THEME").as_deref() {
             Ok("light") => Appearance::Light,
+            Ok("moss") => Appearance::Moss,
             _ => Appearance::Dark,
         };
         if appearance != Appearance::Dark {
@@ -165,6 +166,15 @@ impl Render for Spike {
                     .on_click(
                         cx.listener(|this, _, w, cx| this.set_appearance(Appearance::Light, w, cx)),
                     ),
+            )
+            .child(
+                Button::new("moss", "Moss")
+                    .size(ButtonSize::Xs)
+                    .variant(ButtonVariant::Ghost)
+                    .selected(self.appearance == Appearance::Moss)
+                    .on_click(
+                        cx.listener(|this, _, w, cx| this.set_appearance(Appearance::Moss, w, cx)),
+                    ),
             );
 
         div()
@@ -175,12 +185,7 @@ impl Render for Spike {
             .type_style(contextual_theme::type_style::UI_BODY)
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &ToggleTheme, w, cx| {
-                let next = if this.appearance == Appearance::Dark {
-                    Appearance::Light
-                } else {
-                    Appearance::Dark
-                };
-                this.set_appearance(next, w, cx)
+                this.set_appearance(this.appearance.next(), w, cx)
             }))
             .child(
                 div()

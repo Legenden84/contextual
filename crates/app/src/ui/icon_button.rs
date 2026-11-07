@@ -1,8 +1,8 @@
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::theme::{ActiveTheme, hsla, row_height};
@@ -15,7 +15,7 @@ type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 #[derive(IntoElement)]
 pub struct IconButton {
     id: ElementId,
-    icon: IconName,
+    icon: AnyElement,
     label: SharedString,
     disabled: bool,
     on_click: Option<OnClick>,
@@ -23,9 +23,18 @@ pub struct IconButton {
 
 impl IconButton {
     pub fn new(id: impl Into<ElementId>, icon: IconName, label: impl Into<SharedString>) -> Self {
+        Self::with_glyph(id, Icon::new(icon).size(px(GLYPH)), label)
+    }
+
+    /// Custom artwork with the same hit target, tooltip and interaction as standard icons.
+    pub fn with_glyph(
+        id: impl Into<ElementId>,
+        glyph: impl IntoElement,
+        label: impl Into<SharedString>,
+    ) -> Self {
         Self {
             id: id.into(),
-            icon,
+            icon: glyph.into_any_element(),
             label: label.into(),
             disabled: false,
             on_click: None,
@@ -66,7 +75,7 @@ impl RenderOnce for IconButton {
             .tooltip(move |window, cx| {
                 gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
             })
-            .child(Icon::new(self.icon).size(px(GLYPH)))
+            .child(self.icon)
             .when_some(self.on_click.filter(|_| !self.disabled), |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
             })

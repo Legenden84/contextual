@@ -136,15 +136,18 @@ impl Render for Shell {
                 this.app.update(cx, |a, cx| a.open_settings(cx))
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, window, cx| {
-                let next = if cx.tokens().appearance == contextual_theme::Appearance::Dark {
-                    contextual_core::settings::ThemePreference::Light
-                } else {
-                    contextual_core::settings::ThemePreference::Dark
-                };
-                crate::theme::apply(crate::theme::resolve(next, window), Some(window), cx);
+                use contextual_core::settings::ThemePreference;
+                use contextual_theme::Appearance;
+
+                let next = cx.tokens().appearance.next();
+                crate::theme::apply(next, Some(window), cx);
                 this.app.update(cx, |a, cx| {
                     let mut s = a.settings.clone();
-                    s.theme = next;
+                    s.theme = match next {
+                        Appearance::Dark => ThemePreference::Dark,
+                        Appearance::Light => ThemePreference::Light,
+                        Appearance::Moss => ThemePreference::Moss,
+                    };
                     a.save_settings(s, None, cx);
                 });
             }))

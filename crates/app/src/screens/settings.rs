@@ -44,7 +44,6 @@ pub struct SettingsScreen {
     respect_gitignore: bool,
     skip_binary: bool,
     include_hidden: bool,
-    theme: ThemePreference,
     /// Remove the stored key on save.
     remove_key: bool,
     /// Starting file or folder for the env-file picker.
@@ -189,7 +188,6 @@ impl SettingsScreen {
             respect_gitignore: s.workspace.respect_gitignore,
             skip_binary: s.workspace.skip_binary,
             include_hidden: s.workspace.include_hidden,
-            theme: s.theme,
             remove_key: false,
             env_path,
             imported_key: None,
@@ -233,7 +231,7 @@ impl SettingsScreen {
         s.workspace.skip_binary = self.skip_binary;
         s.workspace.include_hidden = self.include_hidden;
         s.workspace.output_prompt = self.output_prompt.read(cx).value().to_string();
-        s.theme = self.theme;
+        // Appearance is saved immediately; keep the latest value, including title-bar changes.
         let key = if self.remove_key {
             Some(String::new())
         } else {
@@ -352,7 +350,6 @@ impl SettingsScreen {
     }
 
     fn set_theme(&mut self, theme: ThemePreference, window: &mut Window, cx: &mut Context<Self>) {
-        self.theme = theme;
         crate::theme::apply(crate::theme::resolve(theme, window), Some(window), cx);
         self.app.update(cx, |a, cx| {
             let mut s = a.settings.clone();
@@ -466,6 +463,7 @@ impl Render for SettingsScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &cx.tokens().colors;
         let a = self.app.read(cx);
+        let theme = a.settings.theme;
         let test = a.connection_test.clone();
         let persistent = a.secrets.persistent();
         let has_key = a.has_api_key();
@@ -536,6 +534,7 @@ impl Render for SettingsScreen {
         let theme_buttons = [
             (ThemePreference::Dark, "Dark"),
             (ThemePreference::Light, "Light"),
+            (ThemePreference::Moss, "Moss"),
             (ThemePreference::System, "System"),
         ]
         .into_iter()
@@ -543,7 +542,7 @@ impl Render for SettingsScreen {
             Button::new(label, label)
                 .variant(ButtonVariant::Ghost)
                 .size(ButtonSize::Xs)
-                .selected(self.theme == t)
+                .selected(theme == t)
                 .on_click(cx.listener(move |this, _, w, cx| this.set_theme(t, w, cx)))
         })
         .collect::<Vec<_>>();

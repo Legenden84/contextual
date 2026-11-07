@@ -2,7 +2,7 @@
 
 Contextual is a local desktop chat client for code. You tick the project files the model should see, ask for a change, review the proposed edits as a GitHub-style diff, and apply what you want. The model talks to a self-hosted Azure AI Foundry deployment and **never writes to disk**: every write is an explicit, deterministic action by the user (Apply, Copy file content, Copy diff), and every write can be undone.
 
-The visual language borrows from VS Code and GitHub's pull-request view on purpose: the people using Contextual live in those tools all day, so code here looks and reads exactly like code there. Dark is the default theme; Light is a full variant.
+The visual language borrows from VS Code and GitHub's pull-request view on purpose: the people using Contextual live in those tools all day, so code here looks and reads exactly like code there. Dark is the default theme; Light and Moss are full variants. The title-bar toggle and theme shortcut cycle Dark → Light → Moss → Dark and remember the selection. System remains a separate Settings preference for OS appearance.
 
 The **Screens** cards show the app end to end, using a sample .NET clean-architecture solution, `Inventory.Api`:
 
@@ -39,7 +39,9 @@ The **Screens** cards show the app end to end, using a sample .NET clean-archite
 
 **Colour.** One accent (`accent`, VS Code blue) for the primary action, checked state, active tab and focus. Status colours carry fixed meanings and are never decoration: `success` = added / OK, `modified` = M, `danger` = deleted / over limit, `warning` = near limit, changed on disk, conflict. Each status is also marked by a letter (A / M / D) or an icon, so colour is never the only signal.
 
-**Syntax.** `syn-*` tokens reproduce VS Code Dark+ in the dark theme and GitHub Light in the light theme: keyword, control, type, function, string, number, comment, variable, tag, heading. Comments are italic. Language is detected from the file extension or the code fence: C#, TypeScript/JavaScript, Python, JSON, YAML, XML/.csproj, SQL, Markdown, shell.
+**Moss.** The supplied palette anchors this light-ground scheme: Moss `#173630` for primary ink and actions, Algae `#BFE6C4` for selections, Fern `#F2FFF3` for editor ground and text on primary actions. Supporting surfaces are pale green steps, with muted forest text and distinct amber/red status colours. Typography, density and layout are unchanged.
+
+**Syntax.** `syn-*` tokens reproduce VS Code Dark+ in the dark theme and GitHub Light in the light theme: keyword, control, type, function, string, number, comment, variable, tag, heading. Moss uses plum keywords, violet functions, ochre types, blue numbers, forest strings and muted green comments; code is not monochrome. Moss syntax tokens maintain at least 4.5:1 contrast on editor, selection and diff word backgrounds, checked in `contextual-theme` tests. Comments are italic. Language is detected from the file extension or the code fence: C#, TypeScript/JavaScript, Python, JSON, YAML, XML/.csproj, SQL, Markdown, shell.
 
 **Diffs.** Added and removed lines get `diff-add-bg` / `diff-del-bg`; their line-number cells get the stronger `*-gutter` tint; the changed characters inside a paired line get `diff-add-word` / `diff-del-word`, exactly like GitHub. Syntax colours stay on top of the tints. Two layouts, switched in the diff toolbar and remembered per user: **Unified** (one column, old and new line numbers) and **Split** (old on the left, new on the right, each with its own gutter; changed lines paired row by row, empty `diff-empty-bg` filler opposite pure additions or deletions, long lines wrap within their half). Unchanged regions collapse into `diff-hunk-bg` rows: "Expand 24 lines" followed by the `@@` header and the enclosing member.
 
@@ -67,7 +69,7 @@ The window is a title bar, a three-column body and a 24px status bar.
 
 ## Iconography
 
-16px line icons drawn inline with `currentColor` at a 1.3px stroke, codicon-like: chevrons, folder, file, copy, wrap, refresh, warning, check, split/unified, undo. File types use small coloured glyphs instead of pictures (`C#` in `file-csharp`, `{ }` in `file-json`, `</>` in `file-xml`, `M↓` in `file-markdown`). Status uses boxed letters A / M / D. There is no logo artwork beyond the small two-sheet mark drawn in tokens (`accent` sheet, outlined sheet, `success` lines).
+16px line icons drawn inline with `currentColor` at a 1.3px stroke, codicon-like: chevrons, folder, file, copy, wrap, refresh, warning, check, split/unified, undo. File types use small coloured glyphs instead of pictures (`C#` in `file-csharp`, `{ }` in `file-json`, `</>` in `file-xml`, `M↓` in `file-markdown`). Status uses boxed letters A / M / D. The app logo remains the small two-sheet mark drawn in tokens (`accent` sheet, outlined sheet, `success` lines). The Moss theme option uses a vector recreation of the supplied organic, segmented mark: Moss ink on an Algae circle. Theme-toggle icons indicate the next scheme; tooltips name both the current and next scheme.
 
 ## Using the kit
 

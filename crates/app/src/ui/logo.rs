@@ -1,6 +1,22 @@
-use gpui_kit::{App, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::{App, IntoElement, ParentElement, Styled, div, px, svg};
 
 use crate::theme::{ActiveTheme, hsla};
+
+/// The supplied Moss mark keeps its Moss/Algae colours even when previewed in another theme.
+pub fn moss_mark(size: f32) -> impl IntoElement {
+    let c = &contextual_theme::Theme::MOSS.colors;
+    div()
+        .flex_none()
+        .size(px(size))
+        .rounded_full()
+        .bg(hsla(c.surface_selected))
+        .child(
+            svg()
+                .path(crate::assets::MOSS_ICON_PATH)
+                .size_full()
+                .text_color(hsla(c.ink)),
+        )
+}
 
 /// The Contextual mark on a 16-unit grid: an accent sheet, an outlined sheet over it, and two
 /// success-coloured lines (the old app's `Logo`), drawn from the theme tokens.

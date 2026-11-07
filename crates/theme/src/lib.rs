@@ -65,6 +65,18 @@ pub enum Appearance {
     #[default]
     Dark,
     Light,
+    Moss,
+}
+
+impl Appearance {
+    /// The title-bar and keyboard toggle cycle through the three explicit schemes.
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Dark => Self::Light,
+            Self::Light => Self::Moss,
+            Self::Moss => Self::Dark,
+        }
+    }
 }
 
 /// One complete theme.
@@ -86,11 +98,17 @@ impl Theme {
         colors: LIGHT_COLORS,
         shadows: LIGHT_SHADOWS,
     };
+    pub const MOSS: Theme = Theme {
+        appearance: Appearance::Moss,
+        colors: MOSS_COLORS,
+        shadows: MOSS_SHADOWS,
+    };
 
     pub fn get(appearance: Appearance) -> &'static Theme {
         match appearance {
             Appearance::Dark => &Self::DARK,
             Appearance::Light => &Self::LIGHT,
+            Appearance::Moss => &Self::MOSS,
         }
     }
 }
@@ -140,5 +158,91 @@ mod tests {
     fn every_token_present() {
         assert!(COLOR_TOKEN_NAMES.contains(&"syn-keyword"));
         assert!(COLOR_TOKEN_NAMES.len() >= 50);
+    }
+
+    #[test]
+    fn appearance_cycles_through_three_complete_themes() {
+        let mut appearance = Appearance::default();
+        for expected in [Appearance::Light, Appearance::Moss, Appearance::Dark] {
+            appearance = appearance.next();
+            assert_eq!(appearance, expected);
+            assert_eq!(Theme::get(appearance).appearance, expected);
+        }
+        assert_eq!(MOSS_COLORS.ink.to_u32(), 0x173630ff);
+        assert_eq!(MOSS_COLORS.surface_selected.to_u32(), 0xbfe6c4ff);
+        assert_eq!(MOSS_COLORS.surface_100.to_u32(), 0xf2fff3ff);
+    }
+
+    fn contrast(a: Rgba, b: Rgba) -> f32 {
+        let luminance = |c: Rgba| {
+            let linear = |v: f32| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn moss_text_and_code_remain_readable() {
+        let c = MOSS_COLORS;
+        for bg in [
+            c.surface_000,
+            c.surface_100,
+            c.surface_200,
+            c.surface_300,
+            c.surface_hover,
+            c.surface_selected,
+        ] {
+            for fg in [
+                c.ink,
+                c.ink_strong,
+                c.ink_muted,
+                c.accent_ink,
+                c.success,
+                c.warning,
+                c.danger,
+                c.modified,
+            ] {
+                assert!(contrast(fg, bg) >= 4.5, "{fg:?} on {bg:?}");
+            }
+            assert!(contrast(c.border_strong, bg) >= 3.0);
+            assert!(contrast(c.focus_ring, bg) >= 3.0);
+        }
+        for bg in [
+            c.surface_100,
+            c.editor_selection,
+            c.diff_add_bg,
+            c.diff_add_word,
+            c.diff_del_bg,
+            c.diff_del_word,
+        ] {
+            for fg in [
+                c.syn_plain,
+                c.syn_keyword,
+                c.syn_control,
+                c.syn_type,
+                c.syn_function,
+                c.syn_string,
+                c.syn_number,
+                c.syn_comment,
+                c.syn_variable,
+                c.syn_tag,
+                c.syn_heading,
+            ] {
+                assert!(contrast(fg, bg) >= 4.5, "{fg:?} on {bg:?}");
+            }
+        }
+        for bg in [c.surface_100, c.diff_add_gutter, c.diff_del_gutter] {
+            assert!(contrast(c.editor_gutter_ink, bg) >= 4.5);
+        }
+        for bg in [c.accent, c.accent_hover] {
+            assert!(contrast(c.on_accent, bg) >= 4.5);
+        }
     }
 }
