@@ -208,8 +208,20 @@ impl ChatPanel {
         let thread = self.chat.read(cx).thread.id.clone();
         cx.notify();
         let job = runtime::spawn(cx, async move {
+            let mut resolved = Vec::with_capacity(sources.len());
+            for source in sources {
+                resolved.push(match source {
+                    ImageSource::File(path) => contextual_core::platform::local_attachment_path(path)
+                        .await
+                        .map(ImageSource::File),
+                    clipboard => Ok(clipboard),
+                });
+            }
             tokio::task::spawn_blocking(move || {
-                sources.into_iter().map(prepare_image).collect::<Vec<_>>()
+                resolved
+                    .into_iter()
+                    .map(|source| source.and_then(prepare_image))
+                    .collect::<Vec<_>>()
             })
             .await
             .map_err(|e| {
@@ -684,10 +696,19 @@ impl Render for ChatPanel {
         };
 
         div()
+            .id("chat-image-drop-target")
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
+            .when(!streaming && !self.image_loading, |d| {
+                d.drag_over::<ExternalPaths>(|s, _, _, cx| {
+                    s.bg(hsla(cx.tokens().colors.surface_selected))
+                })
+            })
+            .on_drop(cx.listener(|t, paths: &ExternalPaths, _, cx| {
+                t.drop_paths(paths, cx)
+            }))
             .child(thread)
             .child(
                 div()
@@ -713,12 +734,11 @@ impl Render for ChatPanel {
                                     .border_1()
                                     .border_color(hsla(c.border_strong))
                                     .bg(hsla(c.surface_200))
-                                    .drag_over::<ExternalPaths>(|s, _, _, cx| {
-                                        s.border_color(hsla(cx.tokens().colors.accent))
+                                    .when(!streaming && !self.image_loading, |d| {
+                                        d.drag_over::<ExternalPaths>(|s, _, _, cx| {
+                                            s.border_color(hsla(cx.tokens().colors.accent))
+                                        })
                                     })
-                                    .on_drop(cx.listener(|t, paths: &ExternalPaths, _, cx| {
-                                        t.drop_paths(paths, cx)
-                                    }))
                                     .child(
                                         div()
                                             .flex()
@@ -748,10 +768,13 @@ impl Render for ChatPanel {
                                                         contextual_theme::type_style::UI_SMALL,
                                                     )
                                                     .text_color(hsla(c.ink_muted))
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .whitespace_normal()
                                                     .child(if self.image_loading {
                                                         "Preparing images…"
                                                     } else {
-                                                        "PNG, JPEG, GIF or WebP · up to 20 MiB each"
+                                                        "Drop images anywhere in chat · PNG, JPEG, GIF or WebP · up to 20 MiB each"
                                                     }),
                                             ),
                                     )

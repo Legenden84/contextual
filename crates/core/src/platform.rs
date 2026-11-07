@@ -29,6 +29,61 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
+/// Resolves an explicitly chosen attachment on the machine running the UI, not the
+/// workspace host. Windows paths delivered to a WSLg app need WSL's mount translation.
+/// Native paths (including non-UTF-8 Unix paths) are preserved.
+pub async fn local_attachment_path(path: PathBuf) -> crate::Result<PathBuf> {
+    let in_wsl = cfg!(target_os = "linux")
+        && (std::env::var_os("WSL_DISTRO_NAME").is_some()
+            || std::env::var_os("WSL_INTEROP").is_some());
+    resolve_attachment_path(path, in_wsl, &crate::process::SystemRunner::default()).await
+}
+
+async fn resolve_attachment_path(
+    path: PathBuf,
+    in_wsl: bool,
+    runner: &dyn crate::process::CommandRunner,
+) -> crate::Result<PathBuf> {
+    let Some(text) = path.to_str() else {
+        return Ok(path);
+    };
+    let bytes = text.as_bytes();
+    let drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let unc = text.starts_with(r"\\") || text.starts_with("//");
+    if !in_wsl || !(drive_absolute || unc) {
+        return Ok(path);
+    }
+
+    // Do not assume /mnt/c: wslpath respects the distro's configured drive mounts.
+    // The path is one argument, never shell input.
+    let output = runner
+        .run(
+            crate::process::Cmd::new("wslpath", ["-u", text])
+                .timeout(std::time::Duration::from_secs(5)),
+        )
+        .await;
+    if !output.ok {
+        return Err(crate::Error::invalid(format!(
+            "Could not access the Windows attachment from WSL: {}. \
+             Use Attach images… and select the file from its mounted Windows drive.",
+            output.stderr.trim()
+        )));
+    }
+    // Remove the command's line ending, not whitespace belonging to the filename.
+    let translated = output.stdout.strip_suffix('\n').unwrap_or(&output.stdout);
+    let translated = translated.strip_suffix('\r').unwrap_or(translated);
+    if !translated.starts_with('/') || translated.starts_with("//") {
+        return Err(crate::Error::invalid(
+            "The Windows attachment has no local WSL path. \
+             Use Attach images… and select a file accessible from this distro.",
+        ));
+    }
+    Ok(PathBuf::from(translated))
+}
+
 /// Hidden entry: leading dot everywhere; on Windows also `FILE_ATTRIBUTE_HIDDEN`.
 pub fn is_hidden(name: &str, entry: Option<&fs::DirEntry>) -> bool {
     if name.starts_with('.') {
@@ -122,6 +177,110 @@ fn os_places() -> Vec<Place> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct AttachmentRunner {
+        output: crate::process::RunOutput,
+        calls: std::sync::Mutex<Vec<crate::process::Cmd>>,
+    }
+
+    impl AttachmentRunner {
+        fn new(output: crate::process::RunOutput) -> Self {
+            Self {
+                output,
+                calls: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::process::CommandRunner for AttachmentRunner {
+        async fn run(&self, cmd: crate::process::Cmd) -> crate::process::RunOutput {
+            self.calls.lock().unwrap().push(cmd);
+            self.output.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn attachment_paths_are_unchanged_without_translation() {
+        let runner = AttachmentRunner::new(crate::process::RunOutput::default());
+        for (input, in_wsl) in [
+            (r"C:\Users\me\picture.png", false),
+            (r"\\server\share\picture.png", false),
+            ("/Users/me/picture.png", false),
+            ("/mnt/c/Users/me/picture.png", true),
+            ("/home/me/picture.png", true),
+            ("relative.png", true),
+        ] {
+            let path = PathBuf::from(input);
+            assert_eq!(
+                resolve_attachment_path(path.clone(), in_wsl, &runner)
+                    .await
+                    .unwrap(),
+                path
+            );
+        }
+        assert!(runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn windows_attachments_use_wslpath_as_one_argument() {
+        let runner = AttachmentRunner::new(crate::process::RunOutput::success(
+            "/windows/c/Users/me/雪 & photo.png\n",
+        ));
+        for input in [
+            r"C:\Users\me\雪 & photo.png",
+            "C:/Users/me/雪 & photo.png",
+            r"\\wsl.localhost\Ubuntu\home\me\photo.png",
+        ] {
+            assert_eq!(
+                resolve_attachment_path(PathBuf::from(input), true, &runner)
+                    .await
+                    .unwrap(),
+                PathBuf::from("/windows/c/Users/me/雪 & photo.png")
+            );
+            let calls = runner.calls.lock().unwrap();
+            let call = calls.last().unwrap();
+            assert_eq!(call.program, "wslpath");
+            assert_eq!(call.args, vec!["-u", input]);
+            assert_eq!(call.timeout, std::time::Duration::from_secs(5));
+        }
+    }
+
+    #[tokio::test]
+    async fn attachment_translation_reports_failures() {
+        for output in [
+            crate::process::RunOutput::failure(1, "drive is not mounted"),
+            crate::process::RunOutput::success(""),
+            crate::process::RunOutput::success("relative.png\n"),
+            crate::process::RunOutput::success("//server/share/photo.png\n"),
+        ] {
+            let runner = AttachmentRunner::new(output);
+            let error = resolve_attachment_path(
+                PathBuf::from(r"C:\Users\me\photo.png"),
+                true,
+                &runner,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.message.contains("Attach images"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_utf8_attachment_paths_are_preserved() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"/tmp/\xff.png".to_vec()));
+        let runner = AttachmentRunner::new(crate::process::RunOutput::default());
+        assert_eq!(
+            resolve_attachment_path(path.clone(), true, &runner)
+                .await
+                .unwrap(),
+            path
+        );
+        assert!(runner.calls.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn dot_files_are_hidden() {
