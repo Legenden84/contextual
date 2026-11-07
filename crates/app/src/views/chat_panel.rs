@@ -49,6 +49,7 @@ pub struct ChatPanel {
     image_error: Option<String>,
     attachment_menu_open: bool,
     attachment_focus: FocusHandle,
+    inspect_focus: FocusHandle,
     settings_prompt_open: bool,
     settings_prompt_focus: FocusHandle,
     settings_cancel_focus: FocusHandle,
@@ -209,6 +210,7 @@ impl ChatPanel {
             image_error: None,
             attachment_menu_open: false,
             attachment_focus: cx.focus_handle(),
+            inspect_focus: cx.focus_handle(),
             settings_prompt_open: false,
             settings_prompt_focus: cx.focus_handle(),
             settings_cancel_focus: cx.focus_handle(),
@@ -597,6 +599,46 @@ impl ChatPanel {
             .into_any_element()
     }
 
+    fn inspect_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let c = &cx.tokens().colors;
+        let chat = self.chat.read(cx);
+        let enabled = !chat.thread.transcript.is_empty() || chat.live.is_some();
+        div()
+            .id("inspect-control")
+            .flex_none()
+            .track_focus(&self.inspect_focus)
+            .when(enabled, |d| d.tab_index(0))
+            .rounded(px(contextual_theme::radius::SM))
+            .border_1()
+            .border_color(hsla(c.surface_100))
+            .focus(|s| s.border_color(hsla(c.focus_ring)))
+            .on_key_down(cx.listener(|t, e: &KeyDownEvent, _, cx| {
+                if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                    let chat = t.chat.read(cx);
+                    if !chat.thread.transcript.is_empty() || chat.live.is_some() {
+                        cx.stop_propagation();
+                        t.chat.update(cx, |c, cx| {
+                            c.set_center(CenterView::Inspect, cx);
+                        });
+                    }
+                }
+            }))
+            .child(
+                IconButton::with_glyph(
+                    "inspect",
+                    Icon::new(gpui_kit::assets::IconName::Brain).size(sp(4)),
+                    "Inspect conversation",
+                )
+                .disabled(!enabled)
+                .on_click(cx.listener(|t, _, _, cx| {
+                    t.chat.update(cx, |c, cx| {
+                        c.set_center(CenterView::Inspect, cx);
+                    });
+                })),
+            )
+            .into_any_element()
+    }
+
     fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
         let mut sources = Vec::new();
         for entry in item.entries() {
@@ -902,6 +944,7 @@ impl Render for ChatPanel {
         let weak = entity.clone();
         let paste_target = entity.clone();
         let attachment_control = self.attachment_control(cx);
+        let inspect_control = self.inspect_control(cx);
 
         let thread = if empty {
             div()
@@ -1013,13 +1056,24 @@ impl Render for ChatPanel {
                         div()
                             .w_full()
                             .max_w(px(layout::CONTENT_MAX_WIDTH))
-                            .child(context_bar(
-                                &self.app,
-                                &self.project,
-                                Some(&self.chat),
-                                &self.context,
-                                cx,
-                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .justify_end()
+                                    .gap(sp(2))
+                                    .child(
+                                        div().flex_1().child(context_bar(
+                                            &self.app,
+                                            &self.project,
+                                            Some(&self.chat),
+                                            &self.context,
+                                            cx,
+                                        )),
+                                    )
+                                    .child(inspect_control),
+                            )
                             .child(
                                 div()
                                     .id("composer")

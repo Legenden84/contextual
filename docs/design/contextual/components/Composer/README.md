@@ -7,6 +7,12 @@ based on their hashes. Unchanged files remain available through the conversation
 duplicating their contents in the new turn. The model can request additional files as needed.
 There is no context-mode selector. Ctrl+Enter sends.
 
+An icon-only Lucide **brain** control sits at the right of the context bar above the message
+input, with the tooltip **Inspect conversation**. It opens the existing Inspect tab showing
+the raw inputs and outputs, not private model reasoning. It is disabled until the chat has
+a recorded transcript or a live round. Keyboard focus is visible; Enter or Space opens it.
+The workspace header no longer contains a separate Inspect action.
+
 An icon-only **+** control beside Send opens a small attachment menu, initially containing
 **Images** with a leading image icon, which opens the native file picker with multiple selection. Its tooltip is
 **Add attachment**. Enter or Space opens the menu and activates its item; Escape closes it.

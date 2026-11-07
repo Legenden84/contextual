@@ -12,7 +12,7 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
-use crate::state::chat::{CenterView, ChatModel};
+use crate::state::chat::ChatModel;
 use crate::state::scm::{OpenPullRequest, ScmModel};
 use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
@@ -299,7 +299,9 @@ impl Render for WorkspaceScreen {
                         "inspect".into(),
                         "Inspect".into(),
                         None,
-                        Icon::new(IconName::Eye).size(sp(4)).into_any_element(),
+                        Icon::new(gpui_kit::assets::IconName::Brain)
+                            .size(sp(4))
+                            .into_any_element(),
                     ),
                     Tab::Chat => (
                         "chat".into(),
@@ -349,7 +351,6 @@ impl Render for WorkspaceScreen {
         let has_changes = chat.change_message().is_some();
         let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
         let history_open = self.chats.read(cx).open && !feature_view;
-        let can_inspect = !chat.thread.transcript.is_empty() || chat.live.is_some();
 
         let body = match &active {
             Tab::Preview(path) => {
@@ -414,17 +415,6 @@ impl Render for WorkspaceScreen {
                     .items_center()
                     .gap(sp(1))
                     .px(sp(2))
-                    .child(
-                        Button::new("inspect", "Inspect")
-                            .size(ButtonSize::Xs)
-                            .variant(ButtonVariant::Ghost)
-                            .disabled(!can_inspect)
-                            .on_click(cx.listener(|t, _, _, cx| {
-                                t.chat.update(cx, |c, cx| {
-                                    c.set_center(CenterView::Inspect, cx);
-                                })
-                            })),
-                    )
                     .child(
                         Button::new("chats", if history_open { "Hide history" } else { "Chat history" })
                             .size(ButtonSize::Xs)
