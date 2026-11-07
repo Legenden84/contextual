@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
 use contextual_core::logic::format::fmt_k;
 use contextual_core::logic::images::{
-    Attachment, IMAGE_TYPES, MAX_SOURCE_BYTES, attachment_name, to_attachment,
+    Attachment, IMAGE_TYPES, MAX_SOURCE_BYTES, attachment_name, clipboard_attachment, to_attachment,
 };
 use contextual_theme::layout;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -16,8 +16,8 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
-    ImageFormat, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
-    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, PathPromptOptions,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     WeakEntity, Window, div, list, px,
 };
 
@@ -48,7 +48,6 @@ enum ImageSource {
     File(PathBuf),
     Clipboard {
         bytes: Vec<u8>,
-        mime: &'static str,
         name: String,
     },
 }
@@ -56,7 +55,13 @@ enum ImageSource {
 /// File I/O and image decoding run on the blocking pool, never on the UI thread.
 fn prepare_image(source: ImageSource) -> contextual_core::Result<Attachment> {
     let (bytes, mime, name) = match source {
-        ImageSource::Clipboard { bytes, mime, name } => (bytes, mime, name),
+        ImageSource::Clipboard { bytes, name } => {
+            return clipboard_attachment(
+                &bytes,
+                &name,
+                &contextual_core::chat::new_id("img"),
+            );
+        }
         ImageSource::File(path) => {
             let name = path
                 .file_name()
@@ -85,16 +90,6 @@ fn prepare_image(source: ImageSource) -> contextual_core::Result<Attachment> {
         &name,
         &contextual_core::chat::new_id("img"),
     )
-}
-
-fn mime_for_format(f: ImageFormat) -> Option<&'static str> {
-    Some(match f {
-        ImageFormat::Png => "image/png",
-        ImageFormat::Jpeg => "image/jpeg",
-        ImageFormat::Webp => "image/webp",
-        ImageFormat::Gif => "image/gif",
-        _ => return None,
-    })
 }
 
 fn mime_for_path(p: &std::path::Path) -> Option<&'static str> {
@@ -313,19 +308,13 @@ impl ChatPanel {
 
     fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
         let mut sources = Vec::new();
-        let mut unsupported = false;
         for entry in item.entries() {
             match entry {
                 ClipboardEntry::Image(img) => {
-                    if let Some(mime) = mime_for_format(img.format) {
-                        sources.push(ImageSource::Clipboard {
-                            bytes: img.bytes.to_vec(),
-                            mime,
-                            name: attachment_name("", runtime::now_local().time()),
-                        });
-                    } else {
-                        unsupported = true;
-                    }
+                    sources.push(ImageSource::Clipboard {
+                        bytes: img.bytes.to_vec(),
+                        name: attachment_name("", runtime::now_local().time()),
+                    });
                 }
                 ClipboardEntry::ExternalPaths(paths) => {
                     sources.extend(
@@ -340,13 +329,8 @@ impl ChatPanel {
                 _ => {}
             }
         }
-        let handled = !sources.is_empty() || unsupported;
+        let handled = !sources.is_empty();
         self.load_images(sources, cx);
-        if unsupported {
-            self.image_error =
-                Some("Clipboard image format not supported. Use PNG, JPEG, GIF or WebP.".into());
-            cx.notify();
-        }
         // Ordinary text (including non-image file paths) keeps the textarea's default paste.
         handled
     }

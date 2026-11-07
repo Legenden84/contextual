@@ -93,6 +93,33 @@ fn data_url(img: &DynamicImage, jpeg: Option<u8>) -> Result<String> {
     ))
 }
 
+/// Native clipboards may provide BMP or TIFF rather than a model-supported format.
+/// Detect the encoded bytes rather than relying on clipboard metadata; `to_attachment`
+/// normalizes the result to PNG/JPEG. File attachments keep their existing MIME restrictions.
+pub fn clipboard_attachment(bytes: &[u8], name: &str, id: &str) -> Result<Attachment> {
+    if bytes.len() > MAX_SOURCE_BYTES {
+        return Err(Error::invalid(format!(
+            "{name}: images must be 20 MiB or smaller."
+        )));
+    }
+    let mime = match image::guess_format(bytes) {
+        Ok(ImageFormat::Jpeg) => "image/jpeg",
+        Ok(
+            ImageFormat::Png
+            | ImageFormat::Gif
+            | ImageFormat::WebP
+            | ImageFormat::Bmp
+            | ImageFormat::Tiff,
+        ) => "image/png",
+        _ => {
+            return Err(Error::invalid(
+                "Clipboard image could not be read. Copy a PNG, JPEG, GIF, WebP, BMP or TIFF image, or use Attach images…",
+            ));
+        }
+    };
+    to_attachment(bytes, mime, name, id)
+}
+
 /// Reads an image file into an attachment, scaling it down if needed. Screenshots stay PNG (sharp
 /// text); JPEGs stay JPEG; very large PNGs become JPEG. `name` is the final display name (see
 /// [`attachment_name`]).
@@ -165,6 +192,45 @@ mod tests {
         assert!(a.url.starts_with("data:image/png;base64,"));
         assert!(to_attachment(&png, "image/bmp", "x.bmp", "2").is_err());
         assert!(to_attachment(b"nope", "image/png", "x.png", "3").is_err());
+    }
+
+    #[test]
+    fn clipboard_formats_are_normalized() {
+        for format in [
+            ImageFormat::Png,
+            ImageFormat::Jpeg,
+            ImageFormat::Gif,
+            ImageFormat::WebP,
+            ImageFormat::Bmp,
+            ImageFormat::Tiff,
+        ] {
+            let img = DynamicImage::new_rgb8(16, 8);
+            let mut bytes = Cursor::new(Vec::new());
+            img.write_to(&mut bytes, format).unwrap();
+
+            let attachment =
+                clipboard_attachment(bytes.get_ref(), "screenshot.png", "clipboard").unwrap();
+            assert_eq!((attachment.width, attachment.height), (16, 8));
+            let prefix = if format == ImageFormat::Jpeg {
+                "data:image/jpeg;base64,"
+            } else {
+                "data:image/png;base64,"
+            };
+            let encoded = attachment.url.strip_prefix(prefix).unwrap();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap();
+            let image = image::load_from_memory(&decoded).unwrap();
+            assert_eq!((image.width(), image.height()), (16, 8));
+        }
+    }
+
+    #[test]
+    fn clipboard_rejects_invalid_and_oversized_sources() {
+        assert!(clipboard_attachment(b"not an image", "screenshot.png", "1").is_err());
+        let bytes = vec![0; MAX_SOURCE_BYTES + 1];
+        let error = clipboard_attachment(&bytes, "large.png", "2").unwrap_err();
+        assert!(error.message.contains("20 MiB"));
     }
 
     #[test]
