@@ -99,7 +99,7 @@ fn data_url(img: &DynamicImage, jpeg: Option<u8>) -> Result<String> {
 pub fn clipboard_attachment(bytes: &[u8], name: &str, id: &str) -> Result<Attachment> {
     if bytes.len() > MAX_SOURCE_BYTES {
         return Err(Error::invalid(format!(
-            "{name}: images must be 20 MiB or smaller."
+            "{name} was not attached: it exceeds the 20 MiB image limit. Choose a smaller image."
         )));
     }
     let mime = match image::guess_format(bytes) {
@@ -113,7 +113,7 @@ pub fn clipboard_attachment(bytes: &[u8], name: &str, id: &str) -> Result<Attach
         ) => "image/png",
         _ => {
             return Err(Error::invalid(
-                "Clipboard image could not be read. Copy a PNG, JPEG, GIF, WebP, BMP or TIFF image, or use Attach images…",
+                "Clipboard image could not be read. Copy a PNG, JPEG, GIF, WebP, BMP or TIFF image, or choose Images… from the attachment menu.",
             ));
         }
     };
@@ -131,7 +131,7 @@ pub fn to_attachment(bytes: &[u8], mime: &str, name: &str, id: &str) -> Result<A
     }
     if bytes.len() > MAX_SOURCE_BYTES {
         return Err(Error::invalid(format!(
-            "{name}: images must be 20 MiB or smaller."
+            "{name} was not attached: it exceeds the 20 MiB image limit. Choose a smaller image."
         )));
     }
     let img = image::load_from_memory(bytes)
@@ -178,7 +178,16 @@ mod tests {
     fn rejects_oversized_sources_before_decoding() {
         let bytes = vec![0; MAX_SOURCE_BYTES + 1];
         let error = to_attachment(&bytes, "image/png", "large.png", "1").unwrap_err();
+        assert!(error.message.contains("large.png was not attached"));
         assert!(error.message.contains("20 MiB"));
+        assert!(error.message.contains("Choose a smaller image"));
+    }
+
+    #[test]
+    fn source_at_limit_reaches_decoding() {
+        let bytes = vec![0; MAX_SOURCE_BYTES];
+        let error = to_attachment(&bytes, "image/png", "invalid.png", "1").unwrap_err();
+        assert!(error.message.contains("Not a readable image"));
     }
 
     #[test]

@@ -18,16 +18,16 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
-    Focusable, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
-    PathPromptOptions, PromptLevel, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, list, px,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ListAlignment, ListState,
+    MouseButton, ParentElement, PathPromptOptions, PromptLevel, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list, px,
 };
 
 use crate::runtime;
 use crate::state::chat::{CenterView, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant};
+use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, shadow, sp};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 use crate::views::markdown::{ReplyCache, render_reply};
@@ -47,6 +47,8 @@ pub struct ChatPanel {
     diffs: DiffCache,
     image_loading: bool,
     image_error: Option<String>,
+    attachment_menu_open: bool,
+    attachment_focus: FocusHandle,
     settings_prompt_open: bool,
     _subs: Vec<Subscription>,
 }
@@ -160,6 +162,10 @@ impl ChatPanel {
                     this.thread_generation = chat.thread_generation;
                     this.expanded.clear();
                     this.replies.clear();
+                    this.image_error = None;
+                }
+                if replaced || chat.streaming() {
+                    this.attachment_menu_open = false;
                 }
                 if replaced || n != this.rendered {
                     this.list.reset(n);
@@ -197,6 +203,8 @@ impl ChatPanel {
             diffs,
             image_loading: false,
             image_error: None,
+            attachment_menu_open: false,
+            attachment_focus: cx.focus_handle(),
             settings_prompt_open: false,
             _subs: subs,
         }
@@ -269,6 +277,7 @@ impl ChatPanel {
             cx.notify();
             return;
         }
+        self.attachment_menu_open = false;
         self.image_loading = true;
         self.image_error = None;
         let thread = self.chat.read(cx).thread.id.clone();
@@ -326,6 +335,8 @@ impl ChatPanel {
     }
 
     fn choose_images(&mut self, cx: &mut Context<Self>) {
+        self.attachment_menu_open = false;
+        cx.notify();
         if self.image_loading || self.chat.read(cx).streaming() {
             return;
         }
@@ -371,17 +382,74 @@ impl ChatPanel {
         .detach();
     }
 
-    fn paste_image(&mut self, cx: &mut Context<Self>) {
-        let handled = cx
-            .read_from_clipboard()
-            .is_some_and(|item| self.paste(&item, cx));
-        if !handled {
-            self.image_error = Some(
-                "No supported image on the clipboard. Copy an image or choose Attach images…"
-                    .into(),
-            );
-            cx.notify();
-        }
+    fn attachment_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let c = &cx.tokens().colors;
+        let disabled = self.image_loading || self.chat.read(cx).streaming();
+        div()
+            .id("attachment-control")
+            .relative()
+            .track_focus(&self.attachment_focus)
+            .tab_index(0)
+            .rounded(px(contextual_theme::radius::SM))
+            .border_1()
+            .border_color(hsla(c.surface_200))
+            .focus(|s| s.border_color(hsla(c.focus_ring)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(|t, e: &KeyDownEvent, window, cx| {
+                match e.keystroke.key.as_str() {
+                    "escape" if t.attachment_menu_open => {
+                        t.attachment_menu_open = false;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    "enter" | "space"
+                        if !t.image_loading && !t.chat.read(cx).streaming() =>
+                    {
+                        cx.stop_propagation();
+                        if t.attachment_menu_open {
+                            t.choose_images(cx);
+                            t.focus_input(window, cx);
+                        } else {
+                            t.attachment_menu_open = true;
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                }
+            }))
+            .child(
+                IconButton::new("attach", IconName::Plus, "Add attachment")
+                    .disabled(disabled)
+                    .on_click(cx.listener(|t, _, window, cx| {
+                        window.focus(&t.attachment_focus, cx);
+                        t.attachment_menu_open = !t.attachment_menu_open;
+                        cx.notify();
+                    })),
+            )
+            .when(self.attachment_menu_open && !disabled, |d| {
+                d.child(
+                    div()
+                        .id("attachment-menu")
+                        .absolute()
+                        .bottom(control_height() + sp(1))
+                        .left_0()
+                        .p(sp(1))
+                        .rounded(px(contextual_theme::radius::MD))
+                        .border_1()
+                        .border_color(hsla(c.border_strong))
+                        .bg(hsla(c.surface_200))
+                        .shadow(vec![shadow(cx.tokens().shadows.popover)])
+                        .child(
+                            Button::new("attach-images", "Images…")
+                                .variant(ButtonVariant::Ghost)
+                                .on_click(cx.listener(|t, _, window, cx| {
+                                    t.choose_images(cx);
+                                    t.focus_input(window, cx);
+                                })),
+                        ),
+                )
+            })
+            .into_any_element()
     }
 
     fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
@@ -689,6 +757,7 @@ impl Render for ChatPanel {
         let entity = cx.entity().downgrade();
         let weak = entity.clone();
         let paste_target = entity.clone();
+        let attachment_control = self.attachment_control(cx);
 
         let thread = if empty {
             div()
@@ -763,6 +832,18 @@ impl Render for ChatPanel {
 
         div()
             .id("chat-image-drop-target")
+            .on_mouse_down(MouseButton::Left, cx.listener(|t, _, _, cx| {
+                if t.attachment_menu_open {
+                    t.attachment_menu_open = false;
+                    cx.notify();
+                }
+            }))
+            .on_mouse_down_out(cx.listener(|t, _, _, cx| {
+                if t.attachment_menu_open {
+                    t.attachment_menu_open = false;
+                    cx.notify();
+                }
+            }))
             .flex()
             .flex_col()
             .flex_1()
@@ -811,52 +892,23 @@ impl Render for ChatPanel {
                                             s.border_color(hsla(cx.tokens().colors.accent))
                                         })
                                     })
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_wrap()
-                                            .items_center()
-                                            .gap(sp(2))
-                                            .child(
-                                                Button::new("attach-images", "Attach images…")
-                                                    .size(ButtonSize::Xs)
-                                                    .disabled(streaming || self.image_loading)
-                                                    .on_click(cx.listener(|t, _, _, cx| {
-                                                        t.choose_images(cx)
-                                                    })),
-                                            )
-                                            .child(
-                                                Button::new("paste-image", "Paste image")
-                                                    .size(ButtonSize::Xs)
-                                                    .variant(ButtonVariant::Ghost)
-                                                    .disabled(streaming || self.image_loading)
-                                                    .on_click(cx.listener(|t, _, _, cx| {
-                                                        t.paste_image(cx)
-                                                    })),
-                                            )
-                                            .child(
-                                                div()
-                                                    .type_style(
-                                                        contextual_theme::type_style::UI_SMALL,
-                                                    )
-                                                    .text_color(hsla(c.ink_muted))
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .whitespace_normal()
-                                                    .child(if self.image_loading {
-                                                        "Preparing images…"
-                                                    } else {
-                                                        "Drop images anywhere in chat · PNG, JPEG, GIF or WebP · up to 20 MiB each"
-                                                    }),
-                                            ),
-                                    )
                                     .when_some(self.image_error.clone(), |d, error| {
                                         d.child(
                                             div()
+                                                .p(sp(2))
+                                                .rounded(px(contextual_theme::radius::SM))
+                                                .border_1()
+                                                .border_color(hsla(c.warning_border))
+                                                .bg(hsla(c.warning_bg))
                                                 .type_style(contextual_theme::type_style::UI_SMALL)
-                                                .text_color(hsla(c.danger))
+                                                .text_color(hsla(c.ink))
                                                 .whitespace_normal()
-                                                .child(SharedString::from(error)),
+                                                .child(
+                                                    div()
+                                                        .text_color(hsla(c.warning))
+                                                        .child("Attachment warning"),
+                                                )
+                                                .child(div().child(SharedString::from(error))),
                                         )
                                     })
                                     .when(!chips.is_empty(), |d| {
@@ -874,6 +926,17 @@ impl Render for ChatPanel {
                                             .flex()
                                             .items_center()
                                             .gap(sp(1))
+                                            .child(attachment_control)
+                                            .when(self.image_loading, |d| {
+                                                d.child(
+                                                    div()
+                                                        .type_style(
+                                                            contextual_theme::type_style::UI_SMALL,
+                                                        )
+                                                        .text_color(hsla(c.ink_muted))
+                                                        .child("Preparing images…"),
+                                                )
+                                            })
                                             .child(div().flex_1())
                                             .map(|d| {
                                                 if streaming {
