@@ -20,10 +20,7 @@ pub type DiffCache = Entity<DiffStore>;
 
 enum Value {
     Pending,
-    Ready {
-        diffs: Arc<Vec<Diff>>,
-        bytes: usize,
-    },
+    Ready { diffs: Arc<Vec<Diff>>, bytes: usize },
     Failed(String),
 }
 
@@ -150,9 +147,7 @@ impl DiffStore {
                 (diffs, bytes)
             })
             .await
-            .map_err(|e| {
-                contextual_core::Error::internal(format!("Could not calculate diff: {e}"))
-            })
+            .map_err(|e| contextual_core::Error::internal(format!("Could not calculate diff: {e}")))
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;

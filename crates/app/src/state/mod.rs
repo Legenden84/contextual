@@ -188,10 +188,9 @@ impl AppModel {
         api_key: Option<String>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        let store = self
-            .settings_store
-            .as_ref()
-            .ok_or_else(|| "Couldn't save settings: no settings directory is available.".to_string())?;
+        let store = self.settings_store.as_ref().ok_or_else(|| {
+            "Couldn't save settings: no settings directory is available.".to_string()
+        })?;
         store
             .save(&settings)
             .map_err(|e| format!("Couldn't save settings: {}", e.message))?;

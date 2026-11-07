@@ -60,7 +60,10 @@ impl ReplyCache {
         });
         while entries.len() > 1
             && (entries.len() > MAX_CACHED_REPLIES
-                || entries.iter().map(|entry| entry.source.len()).sum::<usize>()
+                || entries
+                    .iter()
+                    .map(|entry| entry.source.len())
+                    .sum::<usize>()
                     > MAX_CACHED_SOURCE_BYTES)
         {
             entries.pop_front();

@@ -62,15 +62,17 @@ impl SourceControl {
         let subs = vec![
             cx.observe(&scm, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&message, window, |this, _, e: &InputEvent, window, cx| {
-                match e {
+            cx.subscribe_in(
+                &message,
+                window,
+                |this, _, e: &InputEvent, window, cx| match e {
                     InputEvent::Change => cx.notify(),
                     InputEvent::PressEnter {
                         secondary: true, ..
                     } => this.commit(window, cx),
                     _ => {}
-                }
-            }),
+                },
+            ),
         ];
         Self {
             app,
@@ -164,7 +166,11 @@ impl SourceControl {
                     } else {
                         IconName::Plus
                     },
-                    if staged { "Unstage changes" } else { "Stage changes" },
+                    if staged {
+                        "Unstage changes"
+                    } else {
+                        "Stage changes"
+                    },
                 )
                 .disabled(busy)
                 .on_click(cx.listener(move |t, _, _, cx| {
@@ -263,7 +269,11 @@ impl SourceControl {
                             } else {
                                 IconName::Plus
                             },
-                            if staged { "Unstage all changes" } else { "Stage all changes" },
+                            if staged {
+                                "Unstage all changes"
+                            } else {
+                                "Stage all changes"
+                            },
                         )
                         .disabled(busy)
                         .on_click(cx.listener(move |t, _, _, cx| {

@@ -765,7 +765,10 @@ mod tests {
         let restored: SavedThread =
             serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(restored, saved);
-        assert_eq!(history(&restored.thread)[0].content, MessageContent::Parts(parts));
+        assert_eq!(
+            history(&restored.thread)[0].content,
+            MessageContent::Parts(parts)
+        );
     }
 
     #[test]

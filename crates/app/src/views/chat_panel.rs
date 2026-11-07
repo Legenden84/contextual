@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
 use contextual_core::llm::config;
-use contextual_core::logic::foundry_status::FoundryStatus;
 use contextual_core::logic::format::fmt_k;
+use contextual_core::logic::foundry_status::FoundryStatus;
 use contextual_core::logic::images::{
     Attachment, IMAGE_TYPES, MAX_SOURCE_BYTES, attachment_name, clipboard_attachment, to_attachment,
 };
@@ -19,8 +19,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
     Focusable, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
-    PathPromptOptions, PromptLevel, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, div, list, px,
+    PathPromptOptions, PromptLevel, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, WeakEntity, Window, div, list, px,
 };
 
 use crate::runtime;
@@ -54,21 +54,14 @@ pub struct ChatPanel {
 /// These are explicitly chosen local attachments, not project paths resolved through the host.
 enum ImageSource {
     File(PathBuf),
-    Clipboard {
-        bytes: Vec<u8>,
-        name: String,
-    },
+    Clipboard { bytes: Vec<u8>, name: String },
 }
 
 /// File I/O and image decoding run on the blocking pool, never on the UI thread.
 fn prepare_image(source: ImageSource) -> contextual_core::Result<Attachment> {
     let (bytes, mime, name) = match source {
         ImageSource::Clipboard { bytes, name } => {
-            return clipboard_attachment(
-                &bytes,
-                &name,
-                &contextual_core::chat::new_id("img"),
-            );
+            return clipboard_attachment(&bytes, &name, &contextual_core::chat::new_id("img"));
         }
         ImageSource::File(path) => {
             let name = path
@@ -92,12 +85,7 @@ fn prepare_image(source: ImageSource) -> contextual_core::Result<Attachment> {
             (bytes, mime, name)
         }
     };
-    to_attachment(
-        &bytes,
-        mime,
-        &name,
-        &contextual_core::chat::new_id("img"),
-    )
+    to_attachment(&bytes, mime, &name, &contextual_core::chat::new_id("img"))
 }
 
 fn mime_for_path(p: &std::path::Path) -> Option<&'static str> {
@@ -141,7 +129,9 @@ fn settings_prompt_detail(status: &FoundryStatus) -> String {
         "Open Settings to update Azure AI Foundry. Environment variables override saved values."
             .to_string(),
     );
-    lines.push("Your draft and attachments will stay in Chat. Save settings, then send again.".into());
+    lines.push(
+        "Your draft and attachments will stay in Chat. Save settings, then send again.".into(),
+    );
     lines.join("\n\n")
 }
 
@@ -288,9 +278,11 @@ impl ChatPanel {
             let mut resolved = Vec::with_capacity(sources.len());
             for source in sources {
                 resolved.push(match source {
-                    ImageSource::File(path) => contextual_core::platform::local_attachment_path(path)
-                        .await
-                        .map(ImageSource::File),
+                    ImageSource::File(path) => {
+                        contextual_core::platform::local_attachment_path(path)
+                            .await
+                            .map(ImageSource::File)
+                    }
                     clipboard => Ok(clipboard),
                 });
             }
@@ -301,9 +293,7 @@ impl ChatPanel {
                     .collect::<Vec<_>>()
             })
             .await
-            .map_err(|e| {
-                contextual_core::Error::internal(format!("Could not prepare images: {e}"))
-            })
+            .map_err(|e| contextual_core::Error::internal(format!("Could not prepare images: {e}")))
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;
@@ -426,7 +416,12 @@ impl ChatPanel {
 
     fn drop_paths(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
         self.load_images(
-            paths.paths().iter().cloned().map(ImageSource::File).collect(),
+            paths
+                .paths()
+                .iter()
+                .cloned()
+                .map(ImageSource::File)
+                .collect(),
             cx,
         );
     }

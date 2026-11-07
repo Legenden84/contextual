@@ -225,10 +225,11 @@ impl ChatModel {
 
     /// Published changes are immutable for the lifetime of their message in this generation.
     pub fn change_message(&self) -> Option<&UiMessage> {
-        self.messages
-            .iter()
-            .rev()
-            .find(|m| m.changes.as_ref().is_some_and(|changes| !changes.is_empty()))
+        self.messages.iter().rev().find(|m| {
+            m.changes
+                .as_ref()
+                .is_some_and(|changes| !changes.is_empty())
+        })
     }
 
     /// Borrowed changes for render paths; do not clone file contents just to show counts.

@@ -99,10 +99,7 @@ pub fn content_tokens(content: &ApiContent) -> u64 {
 }
 
 pub fn totals(input: &ContextInput<'_>) -> Totals {
-    totals_with_conversation_tokens(
-        input,
-        input.transcript.iter().map(content_tokens).sum(),
-    )
+    totals_with_conversation_tokens(input, input.transcript.iter().map(content_tokens).sum())
 }
 
 /// As `totals`, but with an already counted conversation. `input.transcript` is not read.

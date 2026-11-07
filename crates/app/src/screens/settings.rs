@@ -12,7 +12,7 @@ use gpui_kit::{
 
 use crate::state::{AppModel, ConnectionTest};
 use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, LinkButton, Switch};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, Switch};
 use crate::views::env_file_dialog::{EnvFileDialog, EnvFileEvent};
 use crate::views::presets_editor::PresetsEditor;
 
@@ -47,9 +47,9 @@ pub struct SettingsScreen {
     theme: ThemePreference,
     /// Remove the stored key on save.
     remove_key: bool,
-    /// `.env.local` of the old app to import from.
+    /// Starting file or folder for the env-file picker.
     env_path: Entity<InputState>,
-    /// An API key read from `.env.local`, stored on Save (unless one was typed).
+    /// An API key read from an env file, stored on Save (unless one was typed).
     imported_key: Option<String>,
     status: Option<String>,
     /// The env-file picker, while open.
@@ -153,7 +153,7 @@ impl SettingsScreen {
         let env_guess = find_env_local(&app.read(cx).state.recents);
         let env_path = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("/path/to/old/contextual/.env.local")
+                .placeholder("Path to a .env file or folder")
                 .default_value(env_guess)
         });
         let detected = app
@@ -261,7 +261,7 @@ impl SettingsScreen {
         cx.notify();
     }
 
-    /// Fills the Foundry fields from the old app's `.env.local` (review, then Save).
+    /// Fills the Foundry fields from an env file (review, then Save).
     fn import_env(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = self.env_path.read(cx).value().trim().to_string();
         let text = match std::fs::read_to_string(&path) {
@@ -301,7 +301,7 @@ impl SettingsScreen {
         }
         self.imported_key = imp.api_key;
         let mut msg = format!(
-            "Imported {n} values from .env.local. Review them, then Save (the API key goes to the keychain)."
+            "Imported {n} values from the env file. Review them, then use the save icon in the header (the API key goes to the keychain)."
         );
         if !imp.skipped.is_empty() {
             msg.push_str(&format!(
@@ -549,6 +549,40 @@ impl Render for SettingsScreen {
         .collect::<Vec<_>>();
 
         let env_dialog = self.env_dialog.as_ref().map(|(d, _)| d.clone());
+        let header = div()
+            .flex()
+            .flex_none()
+            .justify_center()
+            .px(sp(8))
+            .py(sp(3))
+            .border_b_1()
+            .border_color(hsla(c.border))
+            .bg(hsla(c.surface_100))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(sp(3))
+                    .w_full()
+                    .max_w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
+                    .child(
+                        IconButton::new("back", IconName::ArrowLeft, "Back")
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                t.app.update(cx, |a, cx| a.close_settings(cx))
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .type_style(contextual_theme::type_style::UI_TITLE)
+                            .text_color(hsla(c.ink_strong))
+                            .child("Settings"),
+                    )
+                    .child(
+                        IconButton::new("save", IconName::Check, "Save settings and return")
+                            .on_click(cx.listener(|t, _, w, cx| t.save(w, cx))),
+                    ),
+            );
         let page = div()
             .id("settings")
             .flex()
@@ -557,21 +591,14 @@ impl Render for SettingsScreen {
             .min_h_0()
             .items_center()
             .overflow_y_scroll()
+            .px(sp(8))
             .bg(hsla(c.surface_100))
             .type_style(contextual_theme::type_style::UI_BODY)
             .child(
                 div()
-                    .w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
-                    .py(sp(8))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(sp(3))
-                            .child(div().flex_1().type_style(contextual_theme::type_style::UI_DISPLAY).text_color(hsla(c.ink_strong)).child("Settings"))
-                            .child(Button::new("back", "Back").on_click(cx.listener(|t, _, _, cx| t.app.update(cx, |a, cx| a.close_settings(cx)))))
-                            .child(Button::new("save", "Save").variant(ButtonVariant::Primary).on_click(cx.listener(|t, _, w, cx| t.save(w, cx)))),
-                    )
+                    .w_full()
+                    .max_w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
+                    .pb(sp(8))
                     .when_some(self.status.clone(), |d, s| {
                         d.child(div().mt(sp(2)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child(SharedString::from(s)))
                     })
@@ -584,10 +611,16 @@ impl Render for SettingsScreen {
                             .mb(sp(2))
                             .type_style(contextual_theme::type_style::UI_SMALL)
                             .text_color(hsla(c.ink_muted))
-                            .child("Import from the old app:")
-                            .child(div().flex_1().child(Input::new(&self.env_path)))
-                            .child(Button::new("browse-env", "Browse…").on_click(cx.listener(|t, _, w, cx| t.browse_env(w, cx))))
-                            .child(Button::new("import-env", "Import .env.local").on_click(cx.listener(|t, _, w, cx| t.import_env(w, cx)))),
+                            .child("Env file or folder")
+                            .child(div().flex_1().min_w_0().type_style(contextual_theme::type_style::CODE_SMALL).child(Input::new(&self.env_path)))
+                            .child(Button::new("browse-env", "Import .env file…").on_click(cx.listener(|t, _, w, cx| t.browse_env(w, cx)))),
+                    )
+                    .child(
+                        div()
+                            .mb(sp(2))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child("Choose a .env or .env.local file to fill the connection fields. Review the values before saving."),
                     )
                     .when(self.imported_key.is_some(), |d| {
                         d.child(
@@ -719,6 +752,7 @@ impl Render for SettingsScreen {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .child(header)
             .child(page)
             .when_some(env_dialog, |d, dialog| d.child(dialog))
     }

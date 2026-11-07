@@ -53,7 +53,11 @@ impl RenderOnce for IconButton {
             .justify_center()
             .size(row_height())
             .rounded(px(contextual_theme::radius::SM))
-            .text_color(hsla(if self.disabled { c.ink_faint } else { c.ink_muted }))
+            .text_color(hsla(if self.disabled {
+                c.ink_faint
+            } else {
+                c.ink_muted
+            }))
             .when(self.disabled, |d| d.cursor_not_allowed())
             .when(!self.disabled, |d| {
                 d.cursor_pointer()

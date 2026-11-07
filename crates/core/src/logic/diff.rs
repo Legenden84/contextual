@@ -430,16 +430,8 @@ mod tests {
     }
 
     fn assert_reconstructs(diff: &Diff) {
-        let old: Vec<_> = diff
-            .ops
-            .iter()
-            .filter(|op| op.k != OpKind::Add)
-            .collect();
-        let new: Vec<_> = diff
-            .ops
-            .iter()
-            .filter(|op| op.k != OpKind::Del)
-            .collect();
+        let old: Vec<_> = diff.ops.iter().filter(|op| op.k != OpKind::Add).collect();
+        let new: Vec<_> = diff.ops.iter().filter(|op| op.k != OpKind::Del).collect();
         assert_eq!(old.len(), diff.old_lines.len());
         assert_eq!(new.len(), diff.new_lines.len());
         for (i, op) in old.iter().enumerate() {

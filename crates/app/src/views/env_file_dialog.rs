@@ -269,7 +269,7 @@ impl Render for EnvFileDialog {
                                 div()
                                     .type_style(contextual_theme::type_style::UI_TITLE)
                                     .text_color(hsla(c.ink_strong))
-                                    .child("Choose an env file"),
+                                    .child("Import .env file"),
                             )
                             .child(div().flex_1())
                             .child(

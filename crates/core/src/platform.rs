@@ -255,13 +255,10 @@ mod tests {
             crate::process::RunOutput::success("//server/share/photo.png\n"),
         ] {
             let runner = AttachmentRunner::new(output);
-            let error = resolve_attachment_path(
-                PathBuf::from(r"C:\Users\me\photo.png"),
-                true,
-                &runner,
-            )
-            .await
-            .unwrap_err();
+            let error =
+                resolve_attachment_path(PathBuf::from(r"C:\Users\me\photo.png"), true, &runner)
+                    .await
+                    .unwrap_err();
             assert!(error.message.contains("Attach images"));
         }
     }

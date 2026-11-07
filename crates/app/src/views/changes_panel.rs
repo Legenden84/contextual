@@ -141,20 +141,16 @@ impl Render for ChangesPanel {
                             .gap(sp(1))
                             .type_style(contextual_theme::type_style::CODE_SMALL)
                             .child(
-                                div()
-                                    .text_color(hsla(c.success))
-                                    .child(SharedString::from(
-                                        diff.map(|d| format!("+{}", d.adds))
-                                            .unwrap_or_else(|| "…".into()),
-                                    )),
+                                div().text_color(hsla(c.success)).child(SharedString::from(
+                                    diff.map(|d| format!("+{}", d.adds))
+                                        .unwrap_or_else(|| "…".into()),
+                                )),
                             )
                             .child(
-                                div()
-                                    .text_color(hsla(c.danger))
-                                    .child(SharedString::from(
-                                        diff.map(|d| format!("−{}", d.dels))
-                                            .unwrap_or_else(|| "…".into()),
-                                    )),
+                                div().text_color(hsla(c.danger)).child(SharedString::from(
+                                    diff.map(|d| format!("−{}", d.dels))
+                                        .unwrap_or_else(|| "…".into()),
+                                )),
                             ),
                     )
             })

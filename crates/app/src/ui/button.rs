@@ -136,9 +136,7 @@ impl RenderOnce for Button {
             .when_some(self.on_click.filter(|_| !disabled), |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
             })
-            .when_some(self.icon, |d, icon| {
-                d.child(Icon::new(icon).size(sp(4)))
-            })
+            .when_some(self.icon, |d, icon| d.child(Icon::new(icon).size(sp(4))))
             .child(self.label)
     }
 }

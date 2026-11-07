@@ -106,7 +106,8 @@ impl WorkspaceScreen {
                     chat.center = CenterView::Chat;
                     cx.notify();
                 });
-                this.chat_panel.update(cx, |panel, cx| panel.focus_input(window, cx));
+                this.chat_panel
+                    .update(cx, |panel, cx| panel.focus_input(window, cx));
                 cx.notify();
             }),
         ];
