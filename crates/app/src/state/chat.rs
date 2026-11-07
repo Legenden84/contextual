@@ -876,14 +876,17 @@ impl ChatModel {
         cx.notify();
     }
 
-    /// A new, empty chat (the files stay ticked).
+    /// A new, empty chat with no files selected or context carried over.
     pub fn start_fresh(&mut self, cx: &mut Context<Self>) {
         if self.streaming() {
             return;
         }
+        self.contents.clear();
         self.reference_only.clear();
+        self.resend_all = false;
         self.pending = None;
         self.project.update(cx, |p, cx| {
+            p.clear_selection();
             p.clear_model_marks();
             cx.notify()
         });
