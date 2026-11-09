@@ -3,9 +3,12 @@
 //! awaited from GPUI tasks through their `JoinHandle`.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use contextual_core::llm::types::ChatEvent;
+use contextual_core::logic::markdown::{Block, parse_markdown};
+use contextual_core::logic::reads;
 use futures::{Stream, StreamExt as _};
 use gpui_kit::{App, Global};
 use tokio::sync::mpsc;
@@ -49,6 +52,47 @@ where
             )))
         })
     }
+}
+
+/// Prepare a display snapshot on the blocking pool, not GPUI or a Tokio async worker.
+/// The caller retains the lossless raw reply for Inspect, proposal checking and persistence.
+/// Await each snapshot before requesting another: stream backpressure bounds pending work.
+pub async fn prepare_reply(
+    source: String,
+    auto: bool,
+) -> contextual_core::Result<(String, Arc<Vec<Block>>)> {
+    tokio::task::spawn_blocking(move || {
+        // Opt-in measurements only; never record response or project-file contents.
+        let started = tracing::enabled!(
+            target: "contextual::performance",
+            tracing::Level::DEBUG
+        )
+        .then(std::time::Instant::now);
+        let source_bytes = source.len();
+        let text = if auto {
+            reads::without_read_blocks(&source)
+        } else {
+            source
+        };
+        let filtered = started.map(|started| started.elapsed());
+        let blocks = Arc::new(parse_markdown(&text));
+        if let (Some(started), Some(filtered)) = (started, filtered) {
+            let elapsed = started.elapsed();
+            tracing::debug!(
+                target: "contextual::performance",
+                source_bytes,
+                display_bytes = text.len(),
+                blocks = blocks.len(),
+                filter_us = filtered.as_micros() as u64,
+                parse_us = elapsed.saturating_sub(filtered).as_micros() as u64,
+                prepare_us = elapsed.as_micros() as u64,
+                "streamed reply prepared on blocking pool"
+            );
+        }
+        (text, blocks)
+    })
+    .await
+    .map_err(|_| contextual_core::Error::internal("Could not prepare the response preview."))
 }
 
 /// Forward a lossless, ordered stream to GPUI with fewer text updates. Run on Tokio.
@@ -168,6 +212,47 @@ mod tests {
 
     fn delta(text: &str) -> ChatEvent {
         ChatEvent::Delta { text: text.into() }
+    }
+
+    #[tokio::test]
+    async fn reply_preparation_preserves_unfiltered_text_and_markdown() {
+        let source = "  Café ☕\r\n\r\n```rust\r\nfn main() {}\r\n```\r\n";
+        let (text, blocks) = prepare_reply(source.into(), false).await.unwrap();
+        assert_eq!(text, source);
+        assert_eq!(*blocks, parse_markdown(source));
+    }
+
+    #[tokio::test]
+    async fn reply_preparation_hides_reads_only_in_auto_mode() {
+        let source = "I need these.\n\n```read\nsrc/main.rs\n```\nnot displayed";
+        let (text, blocks) = prepare_reply(source.into(), true).await.unwrap();
+        assert_eq!(text, "I need these.");
+        assert_eq!(*blocks, parse_markdown(&text));
+
+        let (text, blocks) = prepare_reply(source.into(), false).await.unwrap();
+        assert_eq!(text, source);
+        assert_eq!(*blocks, parse_markdown(source));
+    }
+
+    #[tokio::test]
+    async fn reply_preparation_matches_streaming_prefixes_including_partial_markers() {
+        for source in [
+            "Café ☕\n\n```read\nsrc/main.rs\n```\n",
+            "### EDIT: a.rs\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n",
+            "### FILE: a.rs\n```rust\nfn main() {}\n```\n",
+        ] {
+            for end in source
+                .char_indices()
+                .map(|(offset, _)| offset)
+                .chain(std::iter::once(source.len()))
+            {
+                let prefix = &source[..end];
+                let expected = reads::without_read_blocks(prefix);
+                let (text, blocks) = prepare_reply(prefix.into(), true).await.unwrap();
+                assert_eq!(text, expected);
+                assert_eq!(*blocks, parse_markdown(&expected));
+            }
+        }
     }
 
     async fn collect(events: Vec<ChatEvent>) -> Vec<ChatEvent> {

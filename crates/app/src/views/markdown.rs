@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use contextual_core::logic::diff::Diff;
 use contextual_core::logic::markdown::{
@@ -37,16 +37,23 @@ const MAX_CACHED_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 struct CachedReply {
     id: String,
     source: String,
-    blocks: Rc<Vec<Block>>,
+    blocks: Arc<Vec<Block>>,
 }
 
-/// Cache parsed data, not themed GPUI elements. Changed text (including equal-length
-/// replacements) invalidates it. One oversized reply may occupy the cache alone.
+/// Cache parsed data, not themed GPUI elements. Streamed replies supply blocks prepared
+/// on the blocking pool; historical cache misses still parse locally. Changed text (including
+/// equal-length replacements) invalidates it. One oversized reply may occupy the cache alone.
 #[derive(Default)]
 pub struct ReplyCache(RefCell<VecDeque<CachedReply>>);
 
 impl ReplyCache {
-    pub fn get(&self, id: &str, source: &str) -> Rc<Vec<Block>> {
+    /// `prepared`, when supplied, must describe exactly `source`.
+    pub fn get(
+        &self,
+        id: &str,
+        source: &str,
+        prepared: Option<&Arc<Vec<Block>>>,
+    ) -> Arc<Vec<Block>> {
         let mut entries = self.0.borrow_mut();
         if let Some(index) = entries.iter().position(|entry| entry.id == id) {
             let entry = entries.remove(index).expect("located cache entry");
@@ -56,22 +63,28 @@ impl ReplyCache {
                 return blocks;
             }
         }
-        // Opt-in measurements only: record sizes and time, never reply/file contents.
-        let started = tracing::enabled!(
-            target: "contextual::performance",
-            tracing::Level::DEBUG
-        )
-        .then(std::time::Instant::now);
-        let blocks = Rc::new(parse_markdown(source));
-        if let Some(started) = started {
-            tracing::debug!(
-                target: "contextual::performance",
-                source_bytes = source.len(),
-                blocks = blocks.len(),
-                parse_us = started.elapsed().as_micros() as u64,
-                "reply Markdown parsed on UI thread"
-            );
-        }
+        let blocks = match prepared {
+            Some(blocks) => blocks.clone(),
+            None => {
+                // Opt-in measurements only: record sizes and time, never reply/file contents.
+                let started = tracing::enabled!(
+                    target: "contextual::performance",
+                    tracing::Level::DEBUG
+                )
+                .then(std::time::Instant::now);
+                let blocks = Arc::new(parse_markdown(source));
+                if let Some(started) = started {
+                    tracing::debug!(
+                        target: "contextual::performance",
+                        source_bytes = source.len(),
+                        blocks = blocks.len(),
+                        parse_us = started.elapsed().as_micros() as u64,
+                        "reply Markdown parsed on UI thread"
+                    );
+                }
+                blocks
+            }
+        };
         entries.push_back(CachedReply {
             id: id.into(),
             source: source.into(),
@@ -260,6 +273,25 @@ fn badge(change: &Change, diff: Option<&Diff>) -> AnyElement {
     Tag::new(label).into_any_element()
 }
 
+/// Borrow the visible prefix without collecting every line or allocating a joined preview.
+/// Match split('\n') semantics, including the empty line after a trailing newline.
+fn code_excerpt(code: &str, max: usize, expanded: bool) -> (&str, usize) {
+    if expanded {
+        return (code, 0);
+    }
+    let mut lines = 1;
+    let mut end = code.len();
+    for (offset, _) in code.match_indices('\n') {
+        if lines == max {
+            end = offset;
+        }
+        lines += 1;
+    }
+    let hidden = lines.saturating_sub(max);
+    let shown = if max == 0 { "" } else { &code[..end] };
+    (shown, hidden)
+}
+
 /// A code block: header with path or language, optional badge and Copy, then highlighted code,
 /// cut after `max` lines with "Show N more lines". Copy always includes the hidden lines.
 #[allow(clippy::too_many_arguments)]
@@ -275,17 +307,7 @@ fn code_block<F: Fn(&mut App) + 'static>(
     cx: &App,
 ) -> impl IntoElement + use<F> {
     let c = &cx.tokens().colors;
-    let lines: Vec<&str> = code.split('\n').collect();
-    let hidden = if expanded {
-        0
-    } else {
-        lines.len().saturating_sub(max)
-    };
-    let shown = if hidden > 0 {
-        lines[..max].join("\n")
-    } else {
-        code.to_string()
-    };
+    let (shown, hidden) = code_excerpt(code, max, expanded);
     let fence = format!("```{lang}\n{shown}\n```");
     // Copy the source, not the truncated display or its synthetic Markdown fence.
     let copy_text = code.to_string();
@@ -772,23 +794,52 @@ mod tests {
     #[test]
     fn replies_reuse_parsing_but_not_stale_text() {
         let cache = ReplyCache::default();
-        let first = cache.get("a", "**one**");
-        assert!(Rc::ptr_eq(&first, &cache.get("a", "**one**")));
-        let changed = cache.get("a", "**two**");
-        assert!(!Rc::ptr_eq(&first, &changed));
+        let first = cache.get("a", "**one**", None);
+        assert!(Arc::ptr_eq(&first, &cache.get("a", "**one**", None)));
+        let changed = cache.get("a", "**two**", None);
+        assert!(!Arc::ptr_eq(&first, &changed));
         assert_eq!(*changed, parse_markdown("**two**"));
         cache.clear();
-        assert!(!Rc::ptr_eq(&changed, &cache.get("a", "**two**")));
+        assert!(!Arc::ptr_eq(&changed, &cache.get("a", "**two**", None)));
+    }
+
+    #[test]
+    fn replies_share_background_parsing_and_keep_it_after_streaming() {
+        let cache = ReplyCache::default();
+        let prepared = Arc::new(parse_markdown("**one**"));
+        let first = cache.get("a", "**one**", Some(&prepared));
+        assert!(Arc::ptr_eq(&prepared, &first));
+        assert!(Arc::ptr_eq(&prepared, &cache.get("a", "**one**", None)));
+
+        // Equal-length replacements must use the new snapshot, not the old blocks.
+        let replacement = Arc::new(parse_markdown("**two**"));
+        let changed = cache.get("a", "**two**", Some(&replacement));
+        assert!(Arc::ptr_eq(&replacement, &changed));
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert_eq!(*changed, parse_markdown("**two**"));
     }
 
     #[test]
     fn reply_cache_does_not_grow_with_the_whole_thread() {
         let cache = ReplyCache::default();
-        let first = cache.get("first", "hello");
+        let first = cache.get("first", "hello", None);
         for i in 0..MAX_CACHED_REPLIES {
-            cache.get(&i.to_string(), "hello");
+            cache.get(&i.to_string(), "hello", None);
         }
         assert_eq!(cache.0.borrow().len(), MAX_CACHED_REPLIES);
-        assert!(!Rc::ptr_eq(&first, &cache.get("first", "hello")));
+        assert!(!Arc::ptr_eq(&first, &cache.get("first", "hello", None)));
+    }
+
+    #[test]
+    fn code_excerpts_preserve_line_boundaries_without_copying() {
+        for source in ["", "one", "one\n", "one\n\nthree", "café\n☕\n", "a\r\nb"] {
+            let lines: Vec<_> = source.split('\n').collect();
+            for max in 0..=lines.len() + 1 {
+                let (shown, hidden) = code_excerpt(source, max, false);
+                assert_eq!(shown, lines[..max.min(lines.len())].join("\n"));
+                assert_eq!(hidden, lines.len().saturating_sub(max));
+                assert_eq!(code_excerpt(source, max, true), (source, 0));
+            }
+        }
     }
 }

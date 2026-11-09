@@ -17,6 +17,7 @@ use contextual_core::logic::changes::ChangeContext;
 use contextual_core::logic::edits::format_edits;
 use contextual_core::logic::format::estimate_tokens;
 use contextual_core::logic::images::Attachment;
+use contextual_core::logic::markdown::Block;
 use contextual_core::logic::prompt::{system_prompt, with_reads};
 use contextual_core::logic::reads::{self, LIMITS, ReadRequest, Resolved};
 use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
@@ -154,6 +155,9 @@ pub struct ChatModel {
     store: Option<Arc<ThreadStore>>,
     pub thread: ThreadState,
     pub messages: Vec<UiMessage>,
+    /// Most recently prepared reply: message id and blocks matching that message's text.
+    /// Transient, shared with the render cache, and never persisted. Only one snapshot is held.
+    pub reply_preview: Option<(String, Arc<Vec<Block>>)>,
     /// Changes when context accounting inputs in the stored thread change, not on deltas.
     pub context_revision: u64,
     /// Changes on every thread replacement, including reopening the same saved thread.
@@ -236,6 +240,7 @@ impl ChatModel {
             store: ThreadStore::open_default().ok().map(Arc::new),
             thread: ThreadState::fresh(),
             messages: Vec::new(),
+            reply_preview: None,
             context_revision: 0,
             thread_generation: 0,
             attachments: Vec::new(),
@@ -541,11 +546,33 @@ impl ChatModel {
             match event {
                 ChatEvent::Delta { text } => {
                     reply.push_str(&text);
-                    // A read request is shown as a row, not as a code block.
-                    let current = if env.auto {
-                        reads::without_read_blocks(&reply)
-                    } else {
-                        reply.clone()
+                    // Keep the raw response here, but prepare its display on the blocking
+                    // pool. Awaiting one job at a time preserves ordering and lets the
+                    // existing bounded bridge apply backpressure while GPUI stays free.
+                    let source = reply.clone();
+                    let auto = env.auto;
+                    let job = cx.update(|cx| {
+                        runtime::spawn(
+                            cx,
+                            async move { runtime::prepare_reply(source, auto).await },
+                        )
+                    });
+                    let (current, parsed) = match job.await {
+                        Ok((current, parsed)) => (current, Some(parsed)),
+                        Err(_) => {
+                            // Preserve the previous display path if the background task
+                            // fails. No raw text, stream events or proposal data are lost.
+                            tracing::warn!(
+                                target: "contextual::performance",
+                                "Background reply preparation failed; using foreground fallback"
+                            );
+                            let current = if env.auto {
+                                reads::without_read_blocks(&reply)
+                            } else {
+                                reply.clone()
+                            };
+                            (current, None)
+                        }
                     };
                     let alive = this
                         .update(cx, |this, cx| {
@@ -555,6 +582,7 @@ impl ChatModel {
                             if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
                                 m.text = current;
                             }
+                            this.reply_preview = parsed.map(|blocks| (ai_id.clone(), blocks));
                             if let Some(l) = this.live.as_mut() {
                                 l.reply.push_str(&text);
                             }
@@ -1024,6 +1052,7 @@ impl ChatModel {
         self.context_revision = self.context_revision.wrapping_add(1);
         self.thread_generation = self.thread_generation.wrapping_add(1);
         self.messages.clear();
+        self.reply_preview = None;
         self.include.clear();
         self.change_snapshot = None;
         self.undo_changes.clear();
@@ -1148,6 +1177,7 @@ impl ChatModel {
                 this.set_changes(changes);
                 this.context_revision = this.context_revision.wrapping_add(1);
                 this.thread_generation = this.thread_generation.wrapping_add(1);
+                this.reply_preview = None;
                 this.messages = saved
                     .messages
                     .into_iter()

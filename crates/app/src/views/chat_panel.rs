@@ -811,7 +811,12 @@ fn render_message(
         ),
         Role::Assistant => {
             let changes = m.changes.as_deref().unwrap_or_default();
-            let parsed = this.replies.get(&m.id, &m.text);
+            let prepared = chat
+                .reply_preview
+                .as_ref()
+                .filter(|(id, _)| id == &m.id)
+                .map(|(_, blocks)| blocks);
+            let parsed = this.replies.get(&m.id, &m.text, prepared);
             let diffs = this.diffs.read(cx).get(&message_key(chat, m));
             let weak = entity.clone();
             let body = render_reply(
