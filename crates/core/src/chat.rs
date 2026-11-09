@@ -214,6 +214,10 @@ pub struct ReadLog {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held_back: Vec<String>,
     pub tokens: u64,
+    /// The requested context was fetched successfully. Older logs leave this false rather
+    /// than presenting an unverified success indicator.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub completed: bool,
     /// The reply changed files it hadn't been sent: they were sent and the changes asked again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unseen_edits: bool,
@@ -243,6 +247,7 @@ impl ReadLog {
                 .collect(),
             held_back: Vec::new(),
             tokens: r.tokens,
+            completed: false,
             unseen_edits: false,
         }
     }

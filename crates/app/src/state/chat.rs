@@ -935,6 +935,7 @@ impl ChatModel {
                     && let Some(log) = m.reads.as_mut()
                 {
                     log.tokens = read_tokens;
+                    log.completed = files.iter().all(|file| file.error.is_none());
                 }
                 let last = step.rounds.n == LIMITS.rounds;
                 let text = if step.unseen {

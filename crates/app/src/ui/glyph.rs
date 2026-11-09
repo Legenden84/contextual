@@ -56,6 +56,22 @@ pub fn file_glyph(name: &str, cx: &App) -> impl IntoElement + use<> {
     }
 }
 
+/// A completed action, not an indication that a proposal has been saved. The editor-ground
+/// token gives the check contrasting ink on the success fill in Dark, Light and Moss.
+pub fn completed_mark(cx: &App) -> impl IntoElement + use<> {
+    let c = &cx.tokens().colors;
+    div()
+        .flex_none()
+        .size(crate::theme::sp(4))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(contextual_theme::radius::FULL))
+        .bg(hsla(c.success))
+        .text_color(hsla(c.surface_100))
+        .child(Icon::new(IconName::Check).size(crate::theme::sp(3)))
+}
+
 pub fn folder_glyph(open: bool, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()

@@ -18,17 +18,17 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity,
+    AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, ElementId, Entity,
     EntityInputHandler, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, ListAlignment, ListState, MouseButton, ParentElement, PathPromptOptions, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list,
 };
 
 use crate::runtime;
-use crate::state::chat::{CenterView, ChatModel, SendEnv};
+use crate::state::chat::{CenterView, ChatActivity, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, ListZoom, TypeExt, control_height, hsla, px, shadow, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark, completed_mark};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 use crate::views::markdown::{ReplyCache, render_reply};
@@ -813,6 +813,8 @@ fn render_message(
                 changes,
                 diffs.as_ref().map(|diffs| diffs.as_slice()),
                 m.streaming,
+                m.streaming && chat.activity() == Some(ChatActivity::WritingResponse),
+                this.app.read(cx).settings.reduce_motion,
                 &this.expanded,
                 move |key, cx| {
                     weak.update(cx, |t, cx| {
@@ -873,9 +875,10 @@ fn read_row(
     let c = &cx.tokens().colors;
     let key = format!("reads-{id}");
     let open = this.expanded.contains(&key);
-    let pending = this
-        .chat
-        .read(cx)
+    let chat = this.chat.read(cx);
+    let reading = chat.activity() == Some(ChatActivity::ReadingFiles)
+        && chat.messages.last().is_some_and(|message| message.id == id);
+    let pending = chat
         .pending
         .as_ref()
         .filter(|p| p.ai_id() == id)
@@ -925,8 +928,28 @@ fn read_row(
                     })
                     .size(px(12.0)),
                 )
-                .child(Icon::new(IconName::File).size(px(12.0)))
-                .child(SharedString::from(log.summary())),
+                .child(if reading {
+                    activity_mark(
+                        ElementId::Name(format!("{key}-activity").into()),
+                        !this.app.read(cx).settings.reduce_motion,
+                        cx,
+                    )
+                } else if log.completed
+                    && pending.is_none()
+                    && log.refused.is_empty()
+                    && log.held_back.is_empty()
+                {
+                    completed_mark(cx).into_any_element()
+                } else {
+                    Icon::new(IconName::File).size(sp(4)).into_any_element()
+                })
+                .child(SharedString::from(if reading {
+                    "Reading requested context…".to_string()
+                } else if pending.is_some() {
+                    "Context request · waiting for your approval".to_string()
+                } else {
+                    log.summary()
+                })),
         )
         .when(open, |d| {
             d.child(

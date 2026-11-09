@@ -95,6 +95,66 @@ pub enum Block {
     },
 }
 
+/// Progress of a file section while receiving a reply. This describes receipt of a draft,
+/// not validation of its edits or a write to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileProgress {
+    Writing,
+    Received,
+    Unavailable,
+}
+
+/// Only the trailing file section can still be growing. Keep it active until another block
+/// arrives or streaming ends: an EDIT section can contain several SEARCH/REPLACE pairs.
+/// A stopped reply is not evidence of completion; callers use validated changes after streaming.
+pub fn file_progress(blocks: &[Block], path: &str, streaming: bool) -> FileProgress {
+    if !streaming {
+        return FileProgress::Unavailable;
+    }
+    let trailing_path = blocks.last().and_then(|block| match block {
+        Block::File { path }
+        | Block::Edit { path, .. }
+        | Block::Delete { path }
+        | Block::Code {
+            path: Some(path), ..
+        } => Some(path.as_str()),
+        _ => None,
+    });
+    if trailing_path == Some(path) {
+        return FileProgress::Writing;
+    }
+
+    let mut received = false;
+    for (index, block) in blocks.iter().enumerate() {
+        match block {
+            Block::Edit {
+                path: candidate,
+                edits,
+                partial,
+            } if candidate == path => {
+                if *partial || edits.is_empty() {
+                    return FileProgress::Unavailable;
+                }
+                received = true;
+            }
+            Block::Code {
+                path: Some(candidate),
+                ..
+            } if candidate == path && index + 1 < blocks.len() => {
+                // Another parsed block proves that this fence ended.
+                received = true;
+            }
+            Block::Delete { path: candidate } if candidate == path => received = true,
+            _ => {}
+        }
+    }
+    if received {
+        FileProgress::Received
+    } else {
+        FileProgress::Unavailable
+    }
+}
+
 // ------------------------------------------------------------------ inline
 
 /// Compiles a pattern written with the [`js::pattern`] placeholders.
@@ -665,6 +725,52 @@ mod tests {
                 inline: vec![text("after")]
             }
         );
+    }
+
+    #[test]
+    fn only_the_trailing_file_action_is_writing() {
+        let source = "### EDIT: a.rs\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n\n### EDIT: b.rs\n<<<<<<< SEARCH\nold";
+        let blocks = parse_markdown(source);
+        assert_eq!(file_progress(&blocks, "a.rs", true), FileProgress::Received);
+        assert_eq!(file_progress(&blocks, "b.rs", true), FileProgress::Writing);
+        assert_eq!(
+            file_progress(&blocks, "b.rs", false),
+            FileProgress::Unavailable
+        );
+    }
+
+    #[test]
+    fn a_file_header_alone_is_not_a_received_draft() {
+        let blocks = parse_markdown("### FILE: a.rs\n\nExplanation.");
+        assert_eq!(
+            file_progress(&blocks, "a.rs", true),
+            FileProgress::Unavailable
+        );
+    }
+
+    #[test]
+    fn file_fences_and_deletions_advance_to_received() {
+        let blocks = parse_markdown(
+            "### FILE: a.rs\n```rust\nfn a() {}\n```\n\n### DELETE: old.rs\n\nDone.",
+        );
+        assert_eq!(file_progress(&blocks, "a.rs", true), FileProgress::Received);
+        assert_eq!(file_progress(&blocks, "old.rs", true), FileProgress::Received);
+        // No successful proposal should be inferred just because streaming stopped.
+        assert_eq!(
+            file_progress(&blocks, "a.rs", false),
+            FileProgress::Unavailable
+        );
+    }
+
+    #[test]
+    fn a_complete_edit_pair_can_still_be_followed_by_more_pairs() {
+        let blocks =
+            parse_markdown("### EDIT: a.rs\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE");
+        assert_eq!(file_progress(&blocks, "a.rs", true), FileProgress::Writing);
+        let blocks = parse_markdown(
+            "### EDIT: a.rs\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n\nDone.",
+        );
+        assert_eq!(file_progress(&blocks, "a.rs", true), FileProgress::Received);
     }
 
     #[test]

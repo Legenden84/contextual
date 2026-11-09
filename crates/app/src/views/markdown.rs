@@ -9,7 +9,9 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use contextual_core::logic::diff::Diff;
-use contextual_core::logic::markdown::{Align, Block, Inline, ListItem, parse_markdown};
+use contextual_core::logic::markdown::{
+    Align, Block, FileProgress, Inline, ListItem, file_progress, parse_markdown,
+};
 use contextual_core::logic::types::{Change, ChangeStatus};
 use gpui_kit::base::text::TextView;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -20,7 +22,9 @@ use gpui_kit::{
 };
 
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, TagTone};
+use crate::ui::{
+    Button, ButtonSize, ButtonVariant, Tag, TagTone, activity_mark, completed_mark, file_glyph,
+};
 
 /// Lines shown before "Show N more lines" (modified files are shown shorter).
 const MAX_LINES: usize = 28;
@@ -343,6 +347,146 @@ fn lang_name(path: Option<&str>, fence_lang: &str) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileState {
+    Writing,
+    Checking,
+    Received,
+    Ready,
+    Attention,
+    Unavailable,
+}
+
+impl FileState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Writing => "Writing proposal…",
+            Self::Checking => "Checking proposal…",
+            Self::Received => "Draft received",
+            Self::Ready => "Ready to review",
+            Self::Attention => "Needs review",
+            Self::Unavailable => "No reviewable change",
+        }
+    }
+}
+
+fn file_state(
+    progress: FileProgress,
+    change: Option<&Change>,
+    writing: bool,
+) -> FileState {
+    if let Some(change) = change {
+        return if change.conflict.is_some()
+            || change.unplaced.as_ref().is_some_and(|edits| !edits.is_empty())
+        {
+            FileState::Attention
+        } else {
+            FileState::Ready
+        };
+    }
+    match progress {
+        FileProgress::Writing if writing => FileState::Writing,
+        FileProgress::Writing => FileState::Checking,
+        FileProgress::Received => FileState::Received,
+        FileProgress::Unavailable => FileState::Unavailable,
+    }
+}
+
+/// The output-format marker stays in the source; the chat shows a file-oriented header.
+/// Status copy makes it explicit that the green check is about a proposal, never a disk write.
+fn file_header(
+    id: &str,
+    path: &str,
+    deleting: bool,
+    state: FileState,
+    reduce_motion: bool,
+    cx: &App,
+) -> AnyElement {
+    let c = &cx.tokens().colors;
+    let (directory, name) = path
+        .rsplit_once('/')
+        .map_or(("", path), |(directory, name)| (directory, name));
+    let status_color = match state {
+        FileState::Writing | FileState::Checking => c.accent_ink,
+        FileState::Received | FileState::Ready => c.success,
+        FileState::Attention => c.warning,
+        FileState::Unavailable => c.ink_muted,
+    };
+    let mark = match state {
+        FileState::Writing | FileState::Checking => activity_mark(
+            ElementId::Name(format!("{id}-activity").into()),
+            state == FileState::Writing && !reduce_motion,
+            cx,
+        ),
+        FileState::Received | FileState::Ready => completed_mark(cx).into_any_element(),
+        _ => div()
+            .flex_none()
+            .size(sp(4))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(contextual_theme::radius::FULL))
+            .border_1()
+            .border_color(hsla(status_color))
+            .type_style(contextual_theme::type_style::UI_SMALL)
+            .text_color(hsla(status_color))
+            .child(if state == FileState::Attention { "!" } else { "−" })
+            .into_any_element(),
+    };
+    div()
+        .mt(sp(4))
+        .mb(sp(2))
+        .p(sp(3))
+        .flex()
+        .items_center()
+        .gap(sp(2))
+        .rounded(px(contextual_theme::radius::MD))
+        .border_1()
+        .border_color(hsla(c.border))
+        .bg(hsla(c.surface_200))
+        .child(file_glyph(path, cx))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(sp(1))
+                .child(
+                    div()
+                        .type_style(contextual_theme::type_style::CODE_SMALL)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hsla(c.ink_strong))
+                        .whitespace_normal()
+                        .child(SharedString::from(name.to_string())),
+                )
+                .when(!directory.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .type_style(contextual_theme::type_style::CODE_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .whitespace_normal()
+                            .child(SharedString::from(format!("{directory}/"))),
+                    )
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(sp(2))
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(status_color))
+                        .child(mark)
+                        .child(SharedString::from(if deleting {
+                            format!("Delete proposal · {}", state.label())
+                        } else {
+                            state.label().to_string()
+                        })),
+                ),
+        )
+        .into_any_element()
+}
+
 /// Renders cached reply data. `expanded` holds the ids of expanded blocks.
 #[allow(clippy::too_many_arguments)]
 pub fn render_reply(
@@ -351,6 +495,8 @@ pub fn render_reply(
     changes: &[Change],
     diffs: Option<&[Diff]>,
     streaming: bool,
+    writing: bool,
+    reduce_motion: bool,
     expanded: &HashSet<String>,
     on_expand: impl Fn(String, &mut App) + Clone + 'static,
     cx: &App,
@@ -373,6 +519,8 @@ pub fn render_reply(
         &by_path,
         &mut shown_edits,
         streaming,
+        writing,
+        reduce_motion,
         expanded,
         &on_expand,
         &mut out,
@@ -388,19 +536,18 @@ fn blocks(
     by_path: &HashMap<&str, ChangeEntry<'_>>,
     shown_edits: &mut HashSet<String>,
     streaming: bool,
+    writing: bool,
+    reduce_motion: bool,
     expanded: &HashSet<String>,
     on_expand: &(impl Fn(String, &mut App) + Clone + 'static),
     out: &mut Vec<AnyElement>,
     cx: &App,
 ) {
     let c = &cx.tokens().colors;
-    let header = |text: String| {
-        div()
-            .mt(sp(4))
-            .type_style(contextual_theme::type_style::CODE_SMALL)
-            .text_color(hsla(c.ink_muted))
-            .child(SharedString::from(text))
-            .into_any_element()
+    let header = |id: &str, path: &str, deleting: bool| {
+        let change = by_path.get(path).map(|(change, _)| *change);
+        let state = file_state(file_progress(blocks_in, path, streaming), change, writing);
+        file_header(id, path, deleting, state, reduce_motion, cx)
     };
     for (i, b) in blocks_in.iter().enumerate() {
         let key = format!("{message_id}-{}-{i}", out.len());
@@ -440,7 +587,9 @@ fn blocks(
                     &key,
                     by_path,
                     shown_edits,
-                    streaming,
+                    streaming && i + 1 == blocks_in.len(),
+                    writing && i + 1 == blocks_in.len(),
+                    reduce_motion,
                     expanded,
                     on_expand,
                     &mut kids,
@@ -498,15 +647,15 @@ fn blocks(
                 .h(px(1.0))
                 .bg(hsla(c.border))
                 .into_any_element(),
-            Block::File { path } => header(format!("### FILE: {path}")),
-            Block::Delete { path } => header(format!("### DELETE: {path}")),
+            Block::File { path } => header(&key, path, false),
+            Block::Delete { path } => header(&key, path, true),
             Block::Edit { path, partial, .. } => {
                 if !shown_edits.insert(path.clone()) {
                     continue;
                 }
                 let entry = by_path.get(path.as_str()).copied();
                 let change = entry.map(|(change, _)| change);
-                out.push(header(format!("### FILE: {path}")));
+                out.push(header(&key, path, false));
                 match change {
                     Some(ch)
                         if ch.status != ChangeStatus::D
@@ -532,17 +681,9 @@ fn blocks(
                         .text_color(hsla(c.ink_muted))
                         .child(SharedString::from(ch.conflict.clone().unwrap_or_default()))
                         .into_any_element(),
-                    _ => div()
-                        .mt(sp(2))
-                        .mb(sp(3))
-                        .type_style(contextual_theme::type_style::UI_SMALL)
-                        .text_color(hsla(c.ink_muted))
-                        .child(SharedString::from(format!(
-                            "{} changes to {}…",
-                            if streaming { "Writing" } else { "Preparing" },
-                            path.rsplit('/').next().unwrap_or(path)
-                        )))
-                        .into_any_element(),
+                    // The header owns progress while the proposal is being received.
+                    // Do not leave a stale "Preparing…" label on stopped or failed replies.
+                    _ => div().into_any_element(),
                 }
             }
             Block::Code { code, lang, path } => {
@@ -575,6 +716,40 @@ fn blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_status_distinguishes_drafting_checking_and_review() {
+        assert_eq!(
+            file_state(FileProgress::Writing, None, true),
+            FileState::Writing
+        );
+        assert_eq!(
+            file_state(FileProgress::Writing, None, false),
+            FileState::Checking
+        );
+        assert_eq!(
+            file_state(FileProgress::Unavailable, None, false),
+            FileState::Unavailable
+        );
+        let mut change = Change {
+            path: "a.rs".into(),
+            status: ChangeStatus::M,
+            old: "old".into(),
+            new: "new".into(),
+            conflict: None,
+            edits: None,
+            unplaced: None,
+        };
+        assert_eq!(
+            file_state(FileProgress::Unavailable, Some(&change), false),
+            FileState::Ready
+        );
+        change.conflict = Some("Changed on disk".into());
+        assert_eq!(
+            file_state(FileProgress::Unavailable, Some(&change), false),
+            FileState::Attention
+        );
+    }
 
     #[test]
     fn replies_reuse_parsing_but_not_stale_text() {
