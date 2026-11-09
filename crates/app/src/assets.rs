@@ -72,3 +72,28 @@ impl gpui_kit::AssetSource for AppAssets {
         Ok(all)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::AssetSource as _;
+
+    #[test]
+    fn default_icons_are_embedded_even_in_debug_builds() {
+        let assets = gpui_kit::assets::Assets;
+        let paths = assets.list("icons/").expect("list default icons");
+        assert!(!paths.is_empty(), "the default icon bundle must not be empty");
+
+        for path in paths {
+            let data = assets
+                .load(path.as_ref())
+                .expect("load default icon")
+                .expect("default icon must exist");
+            assert!(!data.is_empty(), "empty icon: {path}");
+            assert!(
+                matches!(data, Cow::Borrowed(_)),
+                "icon must be embedded, not loaded from the build machine: {path}"
+            );
+        }
+    }
+}
