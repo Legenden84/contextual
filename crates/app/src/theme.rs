@@ -88,7 +88,7 @@ pub fn set_zoom(percent: i16, cx: &mut App) {
     let timer = cx.background_executor().timer(ZOOM_NOTICE_DURATION);
     cx.spawn(async move |cx| {
         timer.await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             // An older timer must not dismiss a more recent zoom notification.
             if cx
                 .try_global::<ZoomNotice>()

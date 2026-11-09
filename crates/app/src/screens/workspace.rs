@@ -1171,8 +1171,12 @@ mod tests {
             layout::CHAT_MIN_WIDTH + layout::CHANGES_WIDTH,
             1280.0 - layout::EXPLORER_WIDTH,
         ] {
-            let closed =
-                ChatGeometry::from_layout(&chat_layout(available, false, false, DockPanel::History));
+            let closed = ChatGeometry::from_layout(&chat_layout(
+                available,
+                false,
+                false,
+                DockPanel::History,
+            ));
             let opened =
                 ChatGeometry::from_layout(&chat_layout(available, false, true, DockPanel::History));
 

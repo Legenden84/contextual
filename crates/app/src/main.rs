@@ -66,6 +66,20 @@ fn args() -> Args {
 }
 
 fn main() {
+    // Explicit opt-in, also available in release builds. Restrict this subscriber to
+    // performance metadata rather than enabling logs containing request/file contents.
+    if std::env::var("CONTEXTUAL_PERF").as_deref() == Ok("1")
+        && tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new(
+                "off,contextual::performance=debug",
+            ))
+            .with_ansi(false)
+            .with_writer(std::io::stderr)
+            .try_init()
+            .is_err()
+    {
+        eprintln!("Performance logging could not be enabled: a subscriber is already installed.");
+    }
     runtime::init_local_offset();
     state::hosts::kill_children_with_app();
     let args = args();

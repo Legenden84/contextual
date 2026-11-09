@@ -124,11 +124,7 @@ fn selectable_markdown(inline: &[Inline]) -> String {
                     }
                 }
                 Inline::Code { text } => {
-                    let longest = text
-                        .split(|ch| ch != '`')
-                        .map(str::len)
-                        .max()
-                        .unwrap_or(0);
+                    let longest = text.split(|ch| ch != '`').map(str::len).max().unwrap_or(0);
                     let fence = "`".repeat(longest + 1);
                     // CommonMark removes one surrounding space when the content is not
                     // entirely spaces. Padding protects backticks and significant spaces.
@@ -633,7 +629,12 @@ fn blocks(
                     )
                     .children(rows.iter().enumerate().map(|(row, r)| {
                         div().flex().children((0..head.len()).map(|j| {
-                            cell(r.get(j).map(Vec::as_slice).unwrap_or(&[]), row + 1, j, false)
+                            cell(
+                                r.get(j).map(Vec::as_slice).unwrap_or(&[]),
+                                row + 1,
+                                j,
+                                false,
+                            )
                         }))
                     }))
                     .into_any_element()

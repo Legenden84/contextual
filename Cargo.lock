@@ -962,6 +962,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "tree-sitter",
  "tree-sitter-c-sharp",
  "win32job",

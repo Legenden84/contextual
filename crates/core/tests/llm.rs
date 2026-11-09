@@ -92,7 +92,10 @@ impl Respond for AzureLike {
 }
 
 async fn azure_like() -> MockServer {
-    let server = MockServer::start().await;
+    // Foundry caches capabilities by endpoint+deployment across client instances.
+    // Avoid wiremock's pooled server addresses carrying that state between tests.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let server = MockServer::builder().listener(listener).start().await;
     Mock::given(any())
         .respond_with(AzureLike::new())
         .mount(&server)
@@ -314,8 +317,17 @@ async fn conversation_requests_use_the_configured_completion_limit() {
             let mut config = cfg(&server.uri(), deployment);
             config.max_completion_tokens = limit;
             let client = FoundryClient::new(config).unwrap().with_max_retries(0);
+            assert_eq!(
+                client.responses_supported(),
+                None,
+                "{deployment}/{limit}: mock endpoint inherited cached API support",
+            );
 
-            chat(&client, req(vec![], "Hello", None)).await;
+            let events = chat(&client, req(vec![], "Hello", None)).await;
+            assert!(
+                events.last().is_some_and(|event| event["type"] == "done"),
+                "{deployment}/{limit}: conversation did not complete: {events:?}",
+            );
 
             let requests = server.received_requests().await.unwrap();
             assert_eq!(requests.len(), if deployment == "gpt-chat" { 2 } else { 1 });

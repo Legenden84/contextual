@@ -3,18 +3,21 @@
 //! Uses the centre and right columns beneath the workspace tabs, like the diff view.
 //! The round streaming now is shown live.
 
+use std::time::Instant;
+
 use contextual_core::chat::Usage;
 use contextual_core::inspect::{Round, rounds};
-use contextual_core::logic::format::fmt_k;
+use contextual_core::logic::format::{estimate_tokens, fmt_k};
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ListAlignment,
+    ListOffset, ListState, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, div, list,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
-use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
+use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, TagTone, pane_header};
 
 const ROUND_LIST_W: f32 = 260.0;
@@ -23,15 +26,134 @@ const TOOLBAR_H: f32 = 36.0;
 const NOT_RECORDED: &str =
     "The system prompt was not recorded for this round: the chat was saved before the app kept it.";
 
+/// Opt-in CPU timings. Only static stage names and numeric metadata are logged.
+/// Editor layout/highlighting may also run after these synchronous operations.
+struct InspectTiming {
+    stage: &'static str,
+    started: Instant,
+    bytes: usize,
+    rounds: usize,
+}
+
+impl InspectTiming {
+    fn start(stage: &'static str, bytes: usize, rounds: usize) -> Option<Self> {
+        tracing::enabled!(
+            target: "contextual::performance",
+            tracing::Level::DEBUG
+        )
+        .then(|| Self {
+            stage,
+            started: Instant::now(),
+            bytes,
+            rounds,
+        })
+    }
+
+    fn next_frame(&self, window: &mut Window) {
+        let started = self.started;
+        let stage = self.stage;
+        window.on_next_frame(move |_, _| {
+            // A scheduling/latency proxy, not a GPU presentation timestamp or proof
+            // that asynchronous highlighting has finished.
+            tracing::debug!(
+                target: "contextual::performance",
+                stage,
+                next_frame_us = started.elapsed().as_micros() as u64,
+                "inspect navigation reached next frame callback"
+            );
+        });
+    }
+}
+
+impl Drop for InspectTiming {
+    fn drop(&mut self) {
+        tracing::debug!(
+            target: "contextual::performance",
+            stage = self.stage,
+            bytes = self.bytes,
+            rounds = self.rounds,
+            elapsed_us = self.started.elapsed().as_micros() as u64,
+            "inspect synchronous work"
+        );
+    }
+}
+
+/// Retain the visible item across same-thread rebuilds, clamping if a live round disappeared.
+fn retained_round_offset(mut top: ListOffset, count: usize) -> Option<ListOffset> {
+    let last = count.checked_sub(1)?;
+    if top.item_ix > last {
+        top.item_ix = last;
+        top.offset_in_item = px(0.0);
+    }
+    Some(top)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InputMode {
     Message,
     System,
 }
 
+#[derive(Clone, Copy)]
+enum CopySource {
+    Input,
+    Output,
+}
+
+/// Prepared only when rounds are rebuilt, never while rendering or receiving deltas.
+struct RoundSummary {
+    input: SharedString,
+    reply: SharedString,
+    reply_row: SharedString,
+    usage: SharedString,
+    system_tokens: Option<u64>,
+}
+
+impl RoundSummary {
+    fn new(round: &Round) -> Self {
+        let input = round.input_label();
+        let reply = round.reply_label();
+        Self {
+            input: if input.is_empty() {
+                "(no text)".into()
+            } else {
+                input.into()
+            },
+            reply_row: format!("→ {reply}").into(),
+            reply: reply.into(),
+            usage: match &round.usage {
+                Some(usage) => usage_text(usage),
+                None => format!("~{} in", fmt_k(round.input_tokens())),
+            }
+            .into(),
+            system_tokens: round.system.as_deref().map(estimate_tokens),
+        }
+    }
+}
+
+/// Input mode is deliberately absent from output invalidation: switching Message/System
+/// must not reset the unchanged output editor, its selection or its scroll position.
+/// Reply length is a revision only within a round: ChatModel's live replies are append-only.
+fn editor_changes(
+    shown: Option<(usize, InputMode, usize)>,
+    next: (usize, InputMode, usize),
+) -> (bool, bool) {
+    let Some(previous) = shown else {
+        return (true, true);
+    };
+    (
+        previous.0 != next.0 || previous.1 != next.1,
+        previous.0 != next.0 || previous.2 != next.2,
+    )
+}
+
 pub struct InspectScreen {
     chat: Entity<ChatModel>,
     rounds: Vec<Round>,
+    summaries: Vec<RoundSummary>,
+    usage_totals: (u64, u64),
+    round_list: ListState,
+    list_zoom: ListZoom,
     /// What `rounds` was built from: thread generation, transcript length and a live round.
     built: (u64, usize, bool),
     /// Index into `rounds`; `None` follows the newest round.
@@ -76,6 +198,10 @@ impl InspectScreen {
             output: editor(window, cx),
             chat,
             rounds: Vec::new(),
+            summaries: Vec::new(),
+            usage_totals: (0, 0),
+            round_list: ListState::new(0, ListAlignment::Top, sp(8)),
+            list_zoom: ListZoom::default(),
             built: (u64::MAX, usize::MAX, false),
             selected: None,
             mode: InputMode::Message,
@@ -101,11 +227,32 @@ impl InspectScreen {
             chat.thread.transcript.len(),
             chat.live.is_some(),
         );
-        if key != self.built {
-            if key.0 != self.built.0 {
+        let rebuilt = key != self.built;
+        if rebuilt {
+            let same_thread = key.0 == self.built.0;
+            let top = same_thread.then(|| self.round_list.logical_scroll_top());
+            if !same_thread {
                 self.selected = None;
             }
-            self.rounds = rounds(&chat.thread, chat.live.as_ref());
+            {
+                let _timing = InspectTiming::start("build_rounds", 0, self.rounds.len());
+                self.rounds = rounds(&chat.thread, chat.live.as_ref());
+            }
+            {
+                let _timing = InspectTiming::start("build_summaries", 0, self.rounds.len());
+                self.summaries = self.rounds.iter().map(RoundSummary::new).collect();
+                self.usage_totals = self
+                    .rounds
+                    .iter()
+                    .filter_map(|r| r.usage)
+                    .fold((0, 0), |a, u| (a.0 + u.input_tokens, a.1 + u.output_tokens));
+            }
+            // Re-measure changed labels/badges, but do not jump the user's viewport.
+            // Ordinary live deltas never reset the list.
+            self.round_list.reset(self.rounds.len());
+            if let Some(top) = top.and_then(|top| retained_round_offset(top, self.rounds.len())) {
+                self.round_list.scroll_to(top);
+            }
             self.built = key;
             self.shown = None;
             if self.selected.is_some_and(|i| i >= self.rounds.len()) {
@@ -113,61 +260,83 @@ impl InspectScreen {
             }
         } else if let (Some(live), Some(last)) = (&chat.live, self.rounds.last_mut())
             && last.live
+            && live.reply.len() > last.reply.len()
         {
-            last.reply.clone_from(&live.reply);
+            // Within this build key the live round is unchanged and only receives appends.
+            // Unrelated notifications do no copying, and deltas copy only the new suffix.
+            last.reply.push_str(&live.reply[last.reply.len()..]);
         }
-        self.sync_editors(window, cx);
-        cx.notify();
+        let editors_changed = self.sync_editors(window, cx);
+        if rebuilt || editors_changed {
+            cx.notify();
+        }
     }
 
-    fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(i) = self.current() else {
-            if self.shown.take().is_some() {
+            let changed = self.shown.take().is_some();
+            if changed {
                 self.input.update(cx, |e, cx| e.set_value("", window, cx));
                 self.output.update(cx, |e, cx| e.set_value("", window, cx));
             }
-            return;
+            return changed;
         };
         let r = &self.rounds[i];
         let key = (i, self.mode, r.reply.len());
-        if self.shown == Some(key) {
-            return;
-        }
-        let input_changed = self
-            .shown
-            .is_none_or(|(si, sm, _)| si != i || sm != self.mode);
+        let (input_changed, output_changed) = editor_changes(self.shown, key);
         if input_changed {
             let text = match self.mode {
-                InputMode::Message => r.input.clone(),
-                InputMode::System => r.system.clone().unwrap_or_else(|| NOT_RECORDED.into()),
+                InputMode::Message => r.input.as_str(),
+                InputMode::System => r.system.as_deref().unwrap_or(NOT_RECORDED),
             };
+            let _timing = InspectTiming::start("input_editor", text.len(), self.rounds.len());
+            let text = text.to_owned();
             self.input.update(cx, |e, cx| e.set_value(text, window, cx));
         }
-        let reply = r.reply.clone();
-        self.output
-            .update(cx, |e, cx| e.set_value(reply, window, cx));
+        if output_changed {
+            let _timing = InspectTiming::start("output_editor", r.reply.len(), self.rounds.len());
+            let reply = r.reply.clone();
+            self.output
+                .update(cx, |e, cx| e.set_value(reply, window, cx));
+        }
         self.shown = Some(key);
+        input_changed || output_changed
     }
 
     fn select(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.current() == Some(i) {
+            return;
+        }
+        let timing = InspectTiming::start("select_round", 0, self.rounds.len());
         // Picking the newest round follows new rounds as they come in.
         self.selected = (i + 1 < self.rounds.len()).then_some(i);
         self.sync_editors(window, cx);
         cx.notify();
+        if let Some(timing) = &timing {
+            timing.next_frame(window);
+        }
     }
 
     fn set_mode(&mut self, mode: InputMode, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == mode {
+            return;
+        }
+        let timing = InspectTiming::start("input_mode", 0, self.rounds.len());
         self.mode = mode;
         self.sync_editors(window, cx);
         cx.notify();
+        if let Some(timing) = &timing {
+            timing.next_frame(window);
+        }
     }
 
     fn round_row(&self, i: usize, active: bool, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let c = &cx.tokens().colors;
         let r = &self.rounds[i];
-        let label = r.input_label();
+        let summary = &self.summaries[i];
         div()
             .id(SharedString::from(format!("round-{i}")))
+            .w_full()
             .flex()
             .flex_col()
             .gap(px(2.0))
@@ -197,26 +366,19 @@ impl InspectScreen {
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()
-                    .child(SharedString::from(if label.is_empty() {
-                        "(no text)".to_string()
-                    } else {
-                        label
-                    })),
+                    .child(summary.input.clone()),
             )
             .child(
                 div()
                     .type_style(contextual_theme::type_style::UI_SMALL)
                     .text_color(hsla(c.ink))
-                    .child(SharedString::from(format!("→ {}", r.reply_label()))),
+                    .child(summary.reply_row.clone()),
             )
             .child(
                 div()
                     .type_style(contextual_theme::type_style::CODE_SMALL)
                     .text_color(hsla(c.ink_muted))
-                    .child(SharedString::from(match &r.usage {
-                        Some(u) => usage_text(u),
-                        None => format!("~{} in", fmt_k(r.input_tokens())),
-                    })),
+                    .child(summary.usage.clone()),
             )
             .into_any_element()
     }
@@ -260,29 +422,35 @@ impl InspectScreen {
             )
     }
 
-    fn copy_button(id: &'static str, text: String) -> Button {
+    fn copy_button(&self, id: &'static str, source: CopySource, cx: &Context<Self>) -> Button {
         Button::new(id, "Copy")
             .size(ButtonSize::Xs)
             .variant(ButtonVariant::Ghost)
-            .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
-            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let Some(i) = this.current() else {
+                    return;
+                };
+                let round = &this.rounds[i];
+                let text = match source {
+                    CopySource::Input => match this.mode {
+                        InputMode::Message => round.input.as_str(),
+                        InputMode::System => round.system.as_deref().unwrap_or_default(),
+                    },
+                    CopySource::Output => round.reply.as_str(),
+                };
+                cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+            }))
     }
 }
 
 impl Render for InspectScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // This measures element construction, not deferred list rendering or editor layout.
+        let _timing = InspectTiming::start("render_elements", 0, self.rounds.len());
+        self.list_zoom.refresh(&self.round_list, self.rounds.len());
         let current = self.current();
-        let mut rows = Vec::with_capacity(self.rounds.len());
-        for i in 0..self.rounds.len() {
-            rows.push(self.round_row(i, Some(i) == current, cx));
-        }
         let c = &cx.tokens().colors;
-        let (tokens_in, tokens_out) = self
-            .rounds
-            .iter()
-            .filter_map(|r| r.usage)
-            .fold((0, 0), |a, u| (a.0 + u.input_tokens, a.1 + u.output_tokens));
+        let (tokens_in, tokens_out) = self.usage_totals;
         let n = self.rounds.len();
 
         let toolbar = div()
@@ -319,7 +487,7 @@ impl Render for InspectScreen {
                     .child("Raw, exactly as sent and received"),
             );
 
-        let body = match current.map(|i| &self.rounds[i]) {
+        let body = match current.map(|i| (&self.rounds[i], &self.summaries[i])) {
             None => div()
                 .flex()
                 .flex_1()
@@ -329,17 +497,13 @@ impl Render for InspectScreen {
                 .text_color(hsla(c.ink_muted))
                 .child("Nothing sent in this chat yet.")
                 .into_any_element(),
-            Some(r) => {
+            Some((r, summary)) => {
                 let mode = self.mode;
                 let toggle = |id: &'static str, label: &'static str, m: InputMode| {
                     Button::new(id, label)
                         .size(ButtonSize::Xs)
                         .variant(ButtonVariant::Ghost)
                         .selected(mode == m)
-                };
-                let input_text = match mode {
-                    InputMode::Message => r.input.clone(),
-                    InputMode::System => r.system.clone().unwrap_or_default(),
                 };
                 let input_actions = div()
                     .flex()
@@ -355,7 +519,7 @@ impl Render for InspectScreen {
                             cx.listener(|t, _, w, cx| t.set_mode(InputMode::System, w, cx)),
                         ),
                     )
-                    .child(Self::copy_button("copy-input", input_text));
+                    .child(self.copy_button("copy-input", CopySource::Input, cx));
                 let input_summary: Vec<gpui_kit::AnyElement> = match mode {
                     InputMode::Message => {
                         let mut v: Vec<gpui_kit::AnyElement> = r
@@ -378,18 +542,14 @@ impl Render for InspectScreen {
                         }
                         v
                     }
-                    InputMode::System => match &r.system {
+                    InputMode::System => match summary.system_tokens {
                         None => vec![
                             Tag::new("not recorded")
                                 .tone(TagTone::Warn)
                                 .into_any_element(),
                         ],
-                        Some(s) => vec![
-                            Tag::new(format!(
-                                "~{} tokens",
-                                fmt_k(contextual_core::logic::format::estimate_tokens(s),)
-                            ))
-                            .into_any_element(),
+                        Some(tokens) => vec![
+                            Tag::new(format!("~{} tokens", fmt_k(tokens))).into_any_element(),
                             Tag::new(if r.system_changed {
                                 "sent with this round"
                             } else {
@@ -403,12 +563,12 @@ impl Render for InspectScreen {
                     .flex()
                     .items_center()
                     .gap(sp(2))
-                    .child(SharedString::from(r.reply_label()))
-                    .when_some(r.usage, |d, u| {
+                    .child(summary.reply.clone())
+                    .when(r.usage.is_some(), |d| {
                         d.child(
                             div()
                                 .type_style(contextual_theme::type_style::CODE_SMALL)
-                                .child(SharedString::from(usage_text(&u))),
+                                .child(summary.usage.clone()),
                         )
                     });
                 div()
@@ -426,7 +586,7 @@ impl Render for InspectScreen {
                     .child(div().w(px(1.0)).h_full().bg(hsla(c.border)))
                     .child(Self::column(
                         "Output",
-                        Self::copy_button("copy-output", r.reply.clone()),
+                        self.copy_button("copy-output", CopySource::Output, cx),
                         output_summary,
                         &self.output,
                         cx,
@@ -450,16 +610,133 @@ impl Render for InspectScreen {
                     .child(
                         div()
                             .id("inspect-rounds")
+                            .flex()
+                            .flex_col()
                             .flex_none()
                             .w(px(ROUND_LIST_W))
                             .h_full()
-                            .overflow_y_scroll()
+                            .min_h_0()
+                            .overflow_hidden()
                             .border_r_1()
                             .border_color(hsla(c.border))
                             .bg(hsla(c.surface_000))
-                            .children(rows),
+                            .child(
+                                list(self.round_list.clone(), {
+                                    let weak = cx.entity().downgrade();
+                                    move |i, _, cx| {
+                                        weak.upgrade()
+                                            .map(|entity| {
+                                                entity.update(cx, |this, cx| {
+                                                    let active = this.current() == Some(i);
+                                                    this.round_row(i, active, cx)
+                                                })
+                                            })
+                                            .unwrap_or_else(|| div().into_any_element())
+                                    }
+                                })
+                                .flex_1()
+                                .min_h_0()
+                                .w_full(),
+                            ),
                     )
                     .child(body),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_rebuild_retains_the_visible_round_and_offset() {
+        let top = retained_round_offset(
+            ListOffset {
+                item_ix: 3,
+                offset_in_item: gpui_kit::px(12.0),
+            },
+            8,
+        )
+        .unwrap();
+        assert_eq!((top.item_ix, top.offset_in_item), (3, gpui_kit::px(12.0)));
+    }
+
+    #[test]
+    fn removed_live_round_clamps_the_list_to_the_last_remaining_round() {
+        let top = retained_round_offset(
+            ListOffset {
+                item_ix: 7,
+                offset_in_item: gpui_kit::px(12.0),
+            },
+            7,
+        )
+        .unwrap();
+        assert_eq!((top.item_ix, top.offset_in_item), (6, gpui_kit::px(0.0)));
+    }
+
+    #[test]
+    fn empty_list_has_no_scroll_anchor() {
+        assert!(
+            retained_round_offset(
+                ListOffset {
+                    item_ix: 0,
+                    offset_in_item: gpui_kit::px(0.0),
+                },
+                0,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn switching_input_mode_leaves_output_untouched() {
+        assert_eq!(
+            editor_changes(
+                Some((0, InputMode::Message, 120)),
+                (0, InputMode::System, 120),
+            ),
+            (true, false),
+        );
+    }
+
+    #[test]
+    fn streaming_updates_only_output() {
+        assert_eq!(
+            editor_changes(
+                Some((0, InputMode::System, 120)),
+                (0, InputMode::System, 140),
+            ),
+            (false, true),
+        );
+    }
+
+    #[test]
+    fn unchanged_selection_updates_neither_editor() {
+        assert_eq!(
+            editor_changes(
+                Some((0, InputMode::Message, 120)),
+                (0, InputMode::Message, 120),
+            ),
+            (false, false),
+        );
+    }
+
+    #[test]
+    fn different_round_updates_both_even_with_equal_reply_lengths() {
+        assert_eq!(
+            editor_changes(
+                Some((0, InputMode::Message, 120)),
+                (1, InputMode::Message, 120),
+            ),
+            (true, true),
+        );
+    }
+
+    #[test]
+    fn rebuilt_transcript_invalidates_both_editors() {
+        assert_eq!(
+            editor_changes(None, (0, InputMode::Message, 120)),
+            (true, true),
+        );
     }
 }

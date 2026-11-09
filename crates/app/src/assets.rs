@@ -82,7 +82,10 @@ mod tests {
     fn default_icons_are_embedded_even_in_debug_builds() {
         let assets = gpui_kit::assets::Assets;
         let paths = assets.list("icons/").expect("list default icons");
-        assert!(!paths.is_empty(), "the default icon bundle must not be empty");
+        assert!(
+            !paths.is_empty(),
+            "the default icon bundle must not be empty"
+        );
 
         for path in paths {
             let data = assets
