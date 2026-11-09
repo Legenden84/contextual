@@ -44,8 +44,26 @@ pub fn status_letter(s: ChangeStatus) -> &'static str {
 
 impl ChangesPanel {
     pub fn new(chat: Entity<ChatModel>, diffs: DiffCache, cx: &mut Context<Self>) -> Self {
+        let model = chat.read(cx);
+        let mut generation = model.thread_generation;
+        let mut message = model.change_message().map(|m| m.id.clone());
+        let mut included = model.include.clone();
         let subs = vec![
-            cx.observe(&chat, |_, _, cx| cx.notify()),
+            cx.observe(&chat, move |_, chat, cx| {
+                let model = chat.read(cx);
+                let next_message = model.change_message().map(|m| m.id.as_str());
+                // Published proposal contents are immutable under their message identity.
+                // Compare only identity and selection metadata, never old/new file text.
+                if generation != model.thread_generation
+                    || message.as_deref() != next_message
+                    || included != model.include
+                {
+                    generation = model.thread_generation;
+                    message = next_message.map(str::to_string);
+                    included.clone_from(&model.include);
+                    cx.notify();
+                }
+            }),
             cx.observe(&diffs, |_, _, cx| cx.notify()),
         ];
         Self {

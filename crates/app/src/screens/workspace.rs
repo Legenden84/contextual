@@ -13,7 +13,7 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
-use crate::state::chat::ChatModel;
+use crate::state::chat::{ChatModel, Toast};
 use crate::state::scm::{OpenPullRequest, ScmModel};
 use crate::state::{AppModel, Project, ReturnToChat, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
@@ -41,6 +41,30 @@ const TABS_H: f32 = 36.0;
 enum DockPanel {
     Changes,
     History,
+}
+
+/// Only chat state rendered or mounted by the workspace itself. Child views observe
+/// their own data; streamed text must not invalidate the surrounding chrome.
+/// Proposal identities are immutable, so this never copies or compares file contents.
+#[derive(Clone, Debug, PartialEq)]
+struct WorkspaceChatState {
+    changes: Option<(u64, String)>,
+    save_dialog_open: bool,
+    pr_open: bool,
+    toast: Option<Toast>,
+}
+
+impl WorkspaceChatState {
+    fn read(chat: &ChatModel) -> Self {
+        Self {
+            changes: chat
+                .change_message()
+                .map(|m| (chat.thread_generation, m.id.clone())),
+            save_dialog_open: chat.save_dialog_open,
+            pr_open: chat.pr_open,
+            toast: chat.toast.clone(),
+        }
+    }
 }
 
 /// Visibility and stacking are independent of the window width. Resizing must
@@ -304,23 +328,24 @@ impl WorkspaceScreen {
         let chat = cx.new(|cx| ChatModel::new(project.clone(), host, cx));
         let diffs = cx.new(|_| DiffStore::default());
         let mut subs = subs;
+        let mut chat_state = WorkspaceChatState::read(chat.read(cx));
         subs.push(
-            cx.observe_in(&chat, window, |this: &mut Self, chat, window, cx| {
-                let model = chat.read(cx);
-                this.docks.sync_changes(
-                    model
-                        .change_message()
-                        .map(|m| (model.thread_generation, m.id.clone())),
-                );
+            cx.observe_in(&chat, window, move |this: &mut Self, chat, window, cx| {
+                let next = WorkspaceChatState::read(chat.read(cx));
+                if next == chat_state {
+                    return;
+                }
+                chat_state = next;
+                this.docks.sync_changes(chat_state.changes.clone());
                 // The Save and pull request dialogs live while the model says they're open.
-                let open = chat.read(cx).save_dialog_open;
+                let open = chat_state.save_dialog_open;
                 if open && this.save_dialog.is_none() {
                     let (app, chat) = (this.app.clone(), chat.clone());
                     this.save_dialog = Some(cx.new(|cx| SaveDialog::new(app, chat, window, cx)));
                 } else if !open {
                     this.save_dialog = None;
                 }
-                let pr = chat.read(cx).pr_open;
+                let pr = chat_state.pr_open;
                 if pr && this.pr_dialog.is_none() {
                     this.sidebar.update(cx, |sidebar, cx| sidebar.show_scm(cx));
                     let (app, project, chat) =
@@ -364,13 +389,26 @@ impl WorkspaceScreen {
             )
         });
         // The settings warning is owned by the composer but overlays the whole workspace.
-        subs.push(cx.observe(&chat_panel, |_, _, cx| cx.notify()));
+        // Typing, attachments and streamed text do not change that overlay's visibility.
+        let mut settings_prompt_open = chat_panel.read(cx).settings_prompt_open();
+        subs.push(cx.observe(&chat_panel, move |_, panel, cx| {
+            let open = panel.read(cx).settings_prompt_open();
+            if open != settings_prompt_open {
+                settings_prompt_open = open;
+                cx.notify();
+            }
+        }));
         let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
-        // Only opening history raises it; search, rename and model notifications
-        // must not steal the shared slot back from Changes.
-        subs.push(cx.observe(&chats, |this: &mut Self, chats, cx| {
-            this.docks.sync_history(chats.read(cx).open);
-            cx.notify();
+        // History owns search, rename and row updates. The workspace only needs to
+        // know whether its dock opened or closed.
+        let mut history_open = chats.read(cx).open;
+        subs.push(cx.observe(&chats, move |this: &mut Self, chats, cx| {
+            let open = chats.read(cx).open;
+            if open != history_open {
+                history_open = open;
+                this.docks.sync_history(open);
+                cx.notify();
+            }
         }));
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
@@ -825,6 +863,8 @@ impl Render for WorkspaceScreen {
                                     cx.notify();
                                 });
                             }
+                            // Raising already-open history changes dock priority, not
+                            // ChatsMenu::open, so the workspace must invalidate itself.
                             cx.notify();
                         })),
                     ),

@@ -342,6 +342,12 @@ impl ChatPanel {
         cx.notify();
     }
 
+    /// The parent only needs notification when this overlay opens or closes.
+    /// Ordinary chat/composer updates are rendered by this entity independently.
+    pub fn settings_prompt_open(&self) -> bool {
+        self.settings_prompt_open
+    }
+
     /// Rendered above the whole workspace, not clipped to the chat column.
     pub fn settings_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.settings_prompt_open {

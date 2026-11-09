@@ -182,6 +182,8 @@ pub struct ChatModel {
     pub save_error: Option<String>,
     pub toast: Option<Toast>,
     pub threads: Vec<ThreadSummary>,
+    /// Changes when the saved-history listing is published, never on response deltas.
+    pub threads_revision: u64,
     /// A read request waiting for the user.
     pub pending: Option<PendingReads>,
     /// The round streaming now, as sent (the Inspect view shows it before it completes).
@@ -258,6 +260,7 @@ impl ChatModel {
             save_error: None,
             toast: None,
             threads: Vec::new(),
+            threads_revision: 0,
             pending: None,
             live: None,
             _navigation_sub: navigation_sub,
@@ -1122,6 +1125,7 @@ impl ChatModel {
             let list = job.await.unwrap_or_default();
             this.update(cx, |this, cx| {
                 this.threads = list;
+                this.threads_revision = this.threads_revision.wrapping_add(1);
                 cx.notify();
             })
             .ok();

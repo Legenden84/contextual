@@ -26,8 +26,18 @@ pub struct ChatsMenu {
 impl ChatsMenu {
     pub fn new(chat: Entity<ChatModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats"));
+        let model = chat.read(cx);
+        let mut history_key = (model.thread_generation, model.threads_revision);
         let subs = vec![
-            cx.observe(&chat, |_, _, cx| cx.notify()),
+            cx.observe(&chat, move |_, chat, cx| {
+                let model = chat.read(cx);
+                let next = (model.thread_generation, model.threads_revision);
+                // Response deltas do not change saved rows or the active-thread highlight.
+                if next != history_key {
+                    history_key = next;
+                    cx.notify();
+                }
+            }),
             cx.subscribe(&search, |_, _, e: &InputEvent, cx| {
                 if matches!(e, InputEvent::Change) {
                     cx.notify()
