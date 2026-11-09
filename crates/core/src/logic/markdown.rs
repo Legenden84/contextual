@@ -754,7 +754,10 @@ mod tests {
             "### FILE: a.rs\n```rust\nfn a() {}\n```\n\n### DELETE: old.rs\n\nDone.",
         );
         assert_eq!(file_progress(&blocks, "a.rs", true), FileProgress::Received);
-        assert_eq!(file_progress(&blocks, "old.rs", true), FileProgress::Received);
+        assert_eq!(
+            file_progress(&blocks, "old.rs", true),
+            FileProgress::Received
+        );
         // No successful proposal should be inferred just because streaming stopped.
         assert_eq!(
             file_progress(&blocks, "a.rs", false),

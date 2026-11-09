@@ -30,6 +30,8 @@ tracing = { workspace = true }
 tree-sitter = "0.26"
 tree-sitter-c-sharp = "0.23"
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(windows)'.dependencies]
 # Kills the WSL agents with the app, even on a crash.

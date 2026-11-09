@@ -119,12 +119,10 @@ fn chat_layout(
     let compact = compact_workspace(available);
     let panel_width = layout::CHANGES_WIDTH.min(available);
     let fits_both = available >= max_width + 2.0 * layout::CHANGES_WIDTH;
-    let show_changes = !compact
-        && changes_open
-        && (!history_open || fits_both || front == DockPanel::Changes);
-    let show_history = !compact
-        && history_open
-        && (!changes_open || fits_both || front == DockPanel::History);
+    let show_changes =
+        !compact && changes_open && (!history_open || fits_both || front == DockPanel::Changes);
+    let show_history =
+        !compact && history_open && (!changes_open || fits_both || front == DockPanel::History);
     let reserved = (usize::from(show_changes) + usize::from(show_history)) as f32 * panel_width;
     let remaining = (available - reserved).max(0.0);
     let width = max_width.min(remaining);
@@ -640,40 +638,40 @@ impl Render for WorkspaceScreen {
             self.chats.clone().into_any_element()
         } else {
             match &active {
-            Tab::Preview(path) => {
-                let view = self
-                    .previews
-                    .get(path)
-                    .map(|v| v.clone().into_any_element())
-                    .unwrap_or_else(|| div().into_any_element());
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .child(div().flex().flex_col().flex_1().min_h_0().child(view))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .justify_center()
-                            .px(sp(4))
-                            .pb(sp(2))
-                            .child(div().w_full().max_w(px(layout::CONTENT_MAX_WIDTH)).child(
-                                context_bar(
-                                    &self.app,
-                                    &self.project,
-                                    Some(&self.chat),
-                                    &self.context,
-                                    cx,
-                                ),
-                            )),
-                    )
-                    .into_any_element()
-            }
-            Tab::Chat => self.chat_panel.clone().into_any_element(),
-            Tab::Diff => self.diff.clone().into_any_element(),
-            Tab::Inspect => self.inspect.clone().into_any_element(),
+                Tab::Preview(path) => {
+                    let view = self
+                        .previews
+                        .get(path)
+                        .map(|v| v.clone().into_any_element())
+                        .unwrap_or_else(|| div().into_any_element());
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h_0()
+                        .child(div().flex().flex_col().flex_1().min_h_0().child(view))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .justify_center()
+                                .px(sp(4))
+                                .pb(sp(2))
+                                .child(div().w_full().max_w(px(layout::CONTENT_MAX_WIDTH)).child(
+                                    context_bar(
+                                        &self.app,
+                                        &self.project,
+                                        Some(&self.chat),
+                                        &self.context,
+                                        cx,
+                                    ),
+                                )),
+                        )
+                        .into_any_element()
+                }
+                Tab::Chat => self.chat_panel.clone().into_any_element(),
+                Tab::Diff => self.diff.clone().into_any_element(),
+                Tab::Inspect => self.inspect.clone().into_any_element(),
             }
         };
 
@@ -707,31 +705,40 @@ impl Render for WorkspaceScreen {
                     .gap(sp(1))
                     .px(sp(2))
                     .when(compact, |d| {
-                        d.flex_wrap().py(sp(1)).border_t_1().border_color(hsla(c.border))
+                        d.flex_wrap()
+                            .py(sp(1))
+                            .border_t_1()
+                            .border_color(hsla(c.border))
                     })
                     .when(!explorer_docked, |d| {
                         d.child(
                             Button::new(
                                 "toggle-project",
-                                if project_visible { "Back to chat" } else { "Project" },
+                                if project_visible {
+                                    "Back to chat"
+                                } else {
+                                    "Project"
+                                },
                             )
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Ghost)
                             .selected(project_visible)
-                            .on_click(cx.listener(|t, _, window, cx| {
-                                t.compact_project = !t.compact_project;
-                                t.compact_panel = None;
-                                if !t.compact_project {
-                                    t.project.update(cx, |p, cx| {
-                                        p.activate(Tab::Chat);
-                                        cx.notify();
-                                    });
-                                    t.chat_panel.update(cx, |panel, cx| {
-                                        panel.focus_input(window, cx);
-                                    });
-                                }
-                                cx.notify();
-                            })),
+                            .on_click(cx.listener(
+                                |t, _, window, cx| {
+                                    t.compact_project = !t.compact_project;
+                                    t.compact_panel = None;
+                                    if !t.compact_project {
+                                        t.project.update(cx, |p, cx| {
+                                            p.activate(Tab::Chat);
+                                            cx.notify();
+                                        });
+                                        t.chat_panel.update(cx, |panel, cx| {
+                                            panel.focus_input(window, cx);
+                                        });
+                                    }
+                                    cx.notify();
+                                },
+                            )),
                         )
                     })
                     .when(has_changes, |d| {
@@ -746,27 +753,30 @@ impl Render for WorkspaceScreen {
                             )
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(move |t, _, window, cx| {
-                                t.compact_project = false;
-                                if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
-                                    t.project.update(cx, |p, cx| {
-                                        p.activate(Tab::Chat);
-                                        cx.notify();
-                                    });
-                                }
-                                if compact {
-                                    t.compact_panel =
-                                        (!changes_visible).then_some(DockPanel::Changes);
-                                    if changes_visible {
-                                        t.chat_panel.update(cx, |panel, cx| {
-                                            panel.focus_input(window, cx);
+                            .on_click(cx.listener(
+                                move |t, _, window, cx| {
+                                    t.compact_project = false;
+                                    if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect)
+                                    {
+                                        t.project.update(cx, |p, cx| {
+                                            p.activate(Tab::Chat);
+                                            cx.notify();
                                         });
                                     }
-                                } else {
-                                    t.docks.toggle_changes(changes_visible);
-                                }
-                                cx.notify();
-                            })),
+                                    if compact {
+                                        t.compact_panel =
+                                            (!changes_visible).then_some(DockPanel::Changes);
+                                        if changes_visible {
+                                            t.chat_panel.update(cx, |panel, cx| {
+                                                panel.focus_input(window, cx);
+                                            });
+                                        }
+                                    } else {
+                                        t.docks.toggle_changes(changes_visible);
+                                    }
+                                    cx.notify();
+                                },
+                            )),
                         )
                     })
                     .child(
@@ -789,8 +799,7 @@ impl Render for WorkspaceScreen {
                                 });
                             }
                             if compact {
-                                t.compact_panel =
-                                    (!history_visible).then_some(DockPanel::History);
+                                t.compact_panel = (!history_visible).then_some(DockPanel::History);
                                 if history_visible {
                                     t.chat_panel.update(cx, |panel, cx| {
                                         panel.focus_input(window, cx);
@@ -939,8 +948,7 @@ mod tests {
                         assert!(panes.left_inset >= 0.0);
                         assert!(panes.width >= 0.0);
                         assert!(
-                            panes.left_inset + panes.width
-                                + panel_count as f32 * panes.panel_width
+                            panes.left_inset + panes.width + panel_count as f32 * panes.panel_width
                                 <= available + 0.001
                         );
                         assert_eq!(
@@ -949,8 +957,7 @@ mod tests {
                         );
                         let remaining = available - panel_count as f32 * panes.panel_width;
                         assert!(
-                            (panes.left_inset + panes.width / 2.0 - remaining / 2.0).abs()
-                                < 0.001
+                            (panes.left_inset + panes.width / 2.0 - remaining / 2.0).abs() < 0.001
                         );
                         if panel_count > 0 {
                             assert!(panes.width >= layout::CHAT_MIN_WIDTH);
@@ -1019,8 +1026,7 @@ mod tests {
                 for history in [false, true] {
                     let panes = chat_layout(available, changes, history, DockPanel::History);
                     assert_eq!(panes.width, full_chat_width());
-                    let count =
-                        usize::from(panes.show_changes) + usize::from(panes.show_history);
+                    let count = usize::from(panes.show_changes) + usize::from(panes.show_history);
                     let remaining = available - count as f32 * panes.panel_width;
                     assert_eq!(panes.left_inset, (remaining - full_chat_width()) / 2.0);
                 }
@@ -1049,12 +1055,10 @@ mod tests {
     fn reflow_moves_the_column_and_lands_exactly_on_target() {
         let now = Instant::now();
         let available = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
-        let closed = ChatGeometry::from_layout(&chat_layout(
-            available, false, false, DockPanel::History,
-        ));
-        let opened = ChatGeometry::from_layout(&chat_layout(
-            available, false, true, DockPanel::History,
-        ));
+        let closed =
+            ChatGeometry::from_layout(&chat_layout(available, false, false, DockPanel::History));
+        let opened =
+            ChatGeometry::from_layout(&chat_layout(available, false, true, DockPanel::History));
         let mut reflow = ChatReflow::settled(closed, now);
         assert!(!reflow.running(now));
         reflow.retarget(opened, now);
@@ -1065,9 +1069,7 @@ mod tests {
         assert!(middle.left_inset > opened.left_inset);
         assert_eq!(middle.width, full_chat_width());
         assert!(
-            (middle.left_inset + middle.width / 2.0
-                - (available - middle.dock_width) / 2.0)
-                .abs()
+            (middle.left_inset + middle.width / 2.0 - (available - middle.dock_width) / 2.0).abs()
                 < 0.001
         );
 
@@ -1080,12 +1082,10 @@ mod tests {
     fn reflow_retargets_without_jumping_or_restarting_on_notifications() {
         let now = Instant::now();
         let available = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
-        let closed = ChatGeometry::from_layout(&chat_layout(
-            available, false, false, DockPanel::History,
-        ));
-        let both = ChatGeometry::from_layout(&chat_layout(
-            available, true, true, DockPanel::History,
-        ));
+        let closed =
+            ChatGeometry::from_layout(&chat_layout(available, false, false, DockPanel::History));
+        let both =
+            ChatGeometry::from_layout(&chat_layout(available, true, true, DockPanel::History));
         let mut reflow = ChatReflow::settled(closed, now);
         reflow.retarget(both, now);
         let interrupted = now + CHAT_REFLOW_DURATION / 3;

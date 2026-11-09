@@ -56,7 +56,22 @@ impl ReplyCache {
                 return blocks;
             }
         }
+        // Opt-in measurements only: record sizes and time, never reply/file contents.
+        let started = tracing::enabled!(
+            target: "contextual::performance",
+            tracing::Level::DEBUG
+        )
+        .then(std::time::Instant::now);
         let blocks = Rc::new(parse_markdown(source));
+        if let Some(started) = started {
+            tracing::debug!(
+                target: "contextual::performance",
+                source_bytes = source.len(),
+                blocks = blocks.len(),
+                parse_us = started.elapsed().as_micros() as u64,
+                "reply Markdown parsed on UI thread"
+            );
+        }
         entries.push_back(CachedReply {
             id: id.into(),
             source: source.into(),
@@ -370,14 +385,13 @@ impl FileState {
     }
 }
 
-fn file_state(
-    progress: FileProgress,
-    change: Option<&Change>,
-    writing: bool,
-) -> FileState {
+fn file_state(progress: FileProgress, change: Option<&Change>, writing: bool) -> FileState {
     if let Some(change) = change {
         return if change.conflict.is_some()
-            || change.unplaced.as_ref().is_some_and(|edits| !edits.is_empty())
+            || change
+                .unplaced
+                .as_ref()
+                .is_some_and(|edits| !edits.is_empty())
         {
             FileState::Attention
         } else {
@@ -430,7 +444,11 @@ fn file_header(
             .border_color(hsla(status_color))
             .type_style(contextual_theme::type_style::UI_SMALL)
             .text_color(hsla(status_color))
-            .child(if state == FileState::Attention { "!" } else { "−" })
+            .child(if state == FileState::Attention {
+                "!"
+            } else {
+                "−"
+            })
             .into_any_element(),
     };
     div()

@@ -761,7 +761,13 @@ fn render_message(
     let Some(m) = chat.messages.get(ix) else {
         return div().into_any_element();
     };
-    let row = div().w_full().min_w_0().flex().justify_center().px(sp(4)).py(sp(3));
+    let row = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .justify_center()
+        .px(sp(4))
+        .py(sp(3));
     let column = div()
         .w_full()
         .min_w_0()

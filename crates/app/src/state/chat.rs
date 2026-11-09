@@ -22,7 +22,6 @@ use contextual_core::logic::reads::{self, LIMITS, ReadRequest, Resolved};
 use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
 use contextual_core::threads::{ThreadStore, ThreadSummary};
 use contextual_protocol::fs::{Apply, ApplyChange, ChangeStatus as WireStatus, ReadFiles, Undo};
-use futures::StreamExt as _;
 use gpui_kit::{App, Context, Entity, Subscription, Task};
 use tokio_util::sync::CancellationToken;
 
@@ -521,17 +520,13 @@ impl ChatModel {
             previous_response_id: base.response_id.clone(),
         };
         let config = env.config.clone();
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<ChatEvent>();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(runtime::STREAM_QUEUE_CAPACITY);
         let stream_token = token.clone();
         let streamer = cx.update(|cx| {
             runtime::spawn(cx, async move {
                 let client = FoundryClient::new(config)?;
-                let mut events = client.stream_conversation(req, stream_token);
-                while let Some(e) = events.next().await {
-                    if tx.unbounded_send(e).is_err() {
-                        break;
-                    }
-                }
+                let events = client.stream_conversation(req, stream_token.clone());
+                runtime::forward_chat_events(events, tx, stream_token).await;
                 Ok(())
             })
         });
@@ -540,7 +535,9 @@ impl ChatModel {
         let mut usage: Option<Usage> = None;
         let mut done: Option<(Option<String>, Option<String>, ApiKind, bool)> = None;
         let mut failure: Option<String> = None;
-        while let Some(event) = rx.next().await {
+        // Continue draining after Stop so already accepted text is retained. The bridge
+        // cancels upstream independently and flushes its final buffered text before closing.
+        while let Some(event) = rx.recv().await {
             match event {
                 ChatEvent::Delta { text } => {
                     reply.push_str(&text);
