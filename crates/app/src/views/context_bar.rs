@@ -207,7 +207,10 @@ pub fn context_bar(
                 .child(
                     div()
                         .type_style(contextual_theme::type_style::CODE_SMALL)
-                        .child(SharedString::from(format!("· ~{} tokens", fmt_n(t.tokens)))),
+                        .child(SharedString::from(format!(
+                            "· ~{} input tokens",
+                            fmt_n(t.tokens)
+                        ))),
                 ),
         )
         .child(
@@ -232,10 +235,32 @@ pub fn context_bar(
                 .text_color(hsla(ink))
                 .whitespace_nowrap()
                 .child(SharedString::from(format!(
-                    "{pct}% of {}",
+                    "{pct}% of {} input limit",
                     fmt_k(deployment.limit)
                 ))),
         )
+        .when_some(a.config.as_ref(), |d, config| {
+            d.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .min_w_0()
+                    .gap(sp(1))
+                    .child(
+                        div()
+                            .type_style(contextual_theme::type_style::CODE_SMALL)
+                            .child(SharedString::from(format!(
+                                "Completion limit: {} tokens / response",
+                                fmt_n(u64::from(config.max_completion_tokens))
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .whitespace_normal()
+                            .child("(includes reasoning where applicable)"),
+                    ),
+            )
+        })
         .when(t.level != Level::Ok, |d| {
             d.child(
                 div()
