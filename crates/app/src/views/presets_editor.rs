@@ -8,10 +8,10 @@ use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window,
-    div, px,
+    div,
 };
 
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Switch, Tag, TagTone};
 
 struct Editor {

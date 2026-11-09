@@ -3,10 +3,10 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    StatefulInteractiveElement, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, hsla};
+use crate::theme::{ActiveTheme, hsla, px};
 
 /// Box size and glyph size from the Controls spec (14px box, 12px check).
 const BOX: f32 = 14.0;

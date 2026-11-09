@@ -5,12 +5,12 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::scm::ScmModel;
 use crate::state::{AppModel, Project};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::count;
 use crate::views::explorer::Explorer;
 use crate::views::rules::RulesPanel;

@@ -9,13 +9,13 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyView, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::chat::ChatModel;
 use crate::state::scm::{OpenPullRequest, ScmModel};
 use crate::state::{AppModel, Project, ReturnToChat, Tab};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, Tag, file_glyph};
 use crate::views::branch_picker::BranchPicker;
 use crate::views::changes_panel::{ChangesPanel, OpenDiffFile};
@@ -47,6 +47,17 @@ struct ChatLayout {
 /// space before one reserved sidebar, capped at its reading width plus padding.
 /// Panels may use the remaining right gutter, but never move or resize the chat.
 fn chat_layout(available: f32, has_changes: bool, history_open: bool) -> ChatLayout {
+    // Zoom reduces available design-space width just like shrinking the window.
+    // Do not reserve a dock when that would leave less than one panel-width for Chat.
+    // This breakpoint depends only on width, never panel visibility.
+    if available < 2.0 * layout::CHANGES_WIDTH {
+        return ChatLayout {
+            left_inset: 0.0,
+            width: available.max(0.0),
+            show_changes: false,
+            show_history: false,
+        };
+    }
     let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
     let center_width = (available - layout::CHANGES_WIDTH).max(0.0);
     let width = center_width.min(max_width);
@@ -180,15 +191,14 @@ impl WorkspaceScreen {
                 cx.notify();
             }),
         );
-        subs.push(cx.subscribe(
-            &scm,
-            |this: &mut Self, _, _: &OpenPullRequest, cx| {
+        subs.push(
+            cx.subscribe(&scm, |this: &mut Self, _, _: &OpenPullRequest, cx| {
                 this.chat.update(cx, |chat, cx| {
                     chat.pr_open = true;
                     cx.notify();
                 });
-            },
-        ));
+            }),
+        );
         let chat_panel = cx.new(|cx| {
             ChatPanel::new(
                 app.clone(),
@@ -210,13 +220,12 @@ impl WorkspaceScreen {
         crate::dev::open(&app, &sidebar, &project, &scm, &chat, cx);
         let changes = cx.new(|cx| ChangesPanel::new(chat.clone(), diffs.clone(), cx));
         let diff = cx.new(|cx| DiffScreen::new(chat.clone(), diffs, cx));
-        subs.push(cx.subscribe(
-            &changes,
-            |this: &mut Self, _, event: &OpenDiffFile, cx| {
+        subs.push(
+            cx.subscribe(&changes, |this: &mut Self, _, event: &OpenDiffFile, cx| {
                 this.diff
                     .update(cx, |diff, cx| diff.open_file(&event.path, cx));
-            },
-        ));
+            }),
+        );
         Self {
             sidebar,
             scm,
@@ -302,10 +311,7 @@ impl Render for WorkspaceScreen {
                 let (id, name, tag, glyph) = match tab {
                     Tab::Preview(path) => {
                         let git = parse_git_tab(path);
-                        let shown = git
-                            .as_ref()
-                            .map(|g| g.path.as_str())
-                            .unwrap_or(path);
+                        let shown = git.as_ref().map(|g| g.path.as_str()).unwrap_or(path);
                         let name = shown.rsplit('/').next().unwrap_or(shown).to_string();
                         let tag = match &git {
                             Some(g) if g.staged => "staged",
@@ -338,38 +344,34 @@ impl Render for WorkspaceScreen {
                 };
                 let (activate, close) = (tab.clone(), tab.clone());
                 let close_label = format!("Close {name}");
-                self.tab(
-                    SharedString::from(format!("tab:{id}")),
-                    &active == tab,
-                    cx,
-                )
-                .on_click(cx.listener(move |t, _, _, cx| {
-                    t.project.update(cx, |p, cx| {
-                        p.activate(activate.clone());
-                        cx.notify()
-                    })
-                }))
-                .child(glyph)
-                .child(SharedString::from(name))
-                .when_some(tag, |d, tag| d.child(Tag::new(tag)))
-                .child(
-                    IconButton::new(
-                        SharedString::from(format!("close:{id}")),
-                        IconName::Close,
-                        close_label,
-                    )
-                    .on_click(cx.listener(move |t, _, window, cx| {
-                        cx.stop_propagation();
+                self.tab(SharedString::from(format!("tab:{id}")), &active == tab, cx)
+                    .on_click(cx.listener(move |t, _, _, cx| {
                         t.project.update(cx, |p, cx| {
-                            p.close_tab(&close);
+                            p.activate(activate.clone());
                             cx.notify()
-                        });
-                        if t.project.read(cx).active == Tab::Chat {
-                            t.chat_panel
-                                .update(cx, |panel, cx| panel.focus_input(window, cx));
-                        }
-                    })),
-                )
+                        })
+                    }))
+                    .child(glyph)
+                    .child(SharedString::from(name))
+                    .when_some(tag, |d, tag| d.child(Tag::new(tag)))
+                    .child(
+                        IconButton::new(
+                            SharedString::from(format!("close:{id}")),
+                            IconName::Close,
+                            close_label,
+                        )
+                        .on_click(cx.listener(move |t, _, window, cx| {
+                            cx.stop_propagation();
+                            t.project.update(cx, |p, cx| {
+                                p.close_tab(&close);
+                                cx.notify()
+                            });
+                            if t.project.read(cx).active == Tab::Chat {
+                                t.chat_panel
+                                    .update(cx, |panel, cx| panel.focus_input(window, cx));
+                            }
+                        })),
+                    )
             })
             .collect();
 
@@ -377,10 +379,11 @@ impl Render for WorkspaceScreen {
         let has_changes = chat.change_message().is_some();
         let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
         let history_open = self.chats.read(cx).open && !feature_view;
-        // The workspace fills the viewport; only the fixed explorer consumes width
-        // before this area. Recompute on resize, never from panel visibility.
+        // Convert measured logical pixels back to design space before doing layout.
+        // The resulting dimensions are scaled exactly once by theme::px below.
         let panes = chat_layout(
-            f32::from(window.viewport_size().width) - layout::EXPLORER_WIDTH,
+            f32::from(window.viewport_size().width) / crate::theme::zoom_factor()
+                - layout::EXPLORER_WIDTH,
             has_changes,
             history_open,
         );
@@ -449,23 +452,30 @@ impl Render for WorkspaceScreen {
                     .gap(sp(1))
                     .px(sp(2))
                     .child(
-                        Button::new("chats", if history_open { "Hide history" } else { "Chat history" })
-                            .size(ButtonSize::Xs)
-                            .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(|t, _, _, cx| {
-                                if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
-                                    t.project.update(cx, |p, cx| {
-                                        p.activate(Tab::Chat);
-                                        cx.notify();
-                                    });
-                                    t.chats.update(cx, |m, cx| {
-                                        m.open = true;
-                                        cx.notify();
-                                    });
-                                } else {
-                                    t.chats.update(cx, |m, cx| m.toggle(cx));
-                                }
-                            })),
+                        Button::new(
+                            "chats",
+                            if history_open {
+                                "Hide history"
+                            } else {
+                                "Chat history"
+                            },
+                        )
+                        .size(ButtonSize::Xs)
+                        .variant(ButtonVariant::Ghost)
+                        .on_click(cx.listener(|t, _, _, cx| {
+                            if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
+                                t.project.update(cx, |p, cx| {
+                                    p.activate(Tab::Chat);
+                                    cx.notify();
+                                });
+                                t.chats.update(cx, |m, cx| {
+                                    m.open = true;
+                                    cx.notify();
+                                });
+                            } else {
+                                t.chats.update(cx, |m, cx| m.toggle(cx));
+                            }
+                        })),
                     ),
             );
 
@@ -526,7 +536,8 @@ impl Render for WorkspaceScreen {
             .when_some(self.pr_dialog.clone(), |d, s| d.child(s))
             .when_some(self.branch_picker.clone(), |d, s| d.child(s))
             .when_some(
-                self.chat_panel.update(cx, |panel, cx| panel.settings_prompt(cx)),
+                self.chat_panel
+                    .update(cx, |panel, cx| panel.settings_prompt(cx)),
                 |d, prompt| d.child(prompt),
             )
     }
@@ -562,9 +573,7 @@ mod tests {
                     let panel_count =
                         usize::from(panes.show_changes) + usize::from(panes.show_history);
                     assert!(
-                        panes.left_inset
-                            + panes.width
-                            + panel_count as f32 * layout::CHANGES_WIDTH
+                        panes.left_inset + panes.width + panel_count as f32 * layout::CHANGES_WIDTH
                             <= available
                     );
                 }
@@ -589,6 +598,25 @@ mod tests {
             assert!(panes.show_history);
             assert_eq!(panes.width, full_chat_width());
         }
+    }
+
+    #[test]
+    fn zoomed_or_narrow_windows_keep_chat_instead_of_reserving_a_dock() {
+        for scale in [1.0, 1.5, 2.0] {
+            let available = 300.0;
+            let viewport = (available + layout::EXPLORER_WIDTH) * scale;
+            let design_width = viewport / scale - layout::EXPLORER_WIDTH;
+            for has_changes in [false, true] {
+                for history_open in [false, true] {
+                    let panes = chat_layout(design_width, has_changes, history_open);
+                    assert_eq!(panes.width, available);
+                    assert_eq!(panes.left_inset, 0.0);
+                    assert!(!panes.show_changes);
+                    assert!(!panes.show_history);
+                }
+            }
+        }
+        assert_eq!(chat_layout(-10.0, true, true).width, 0.0);
     }
 
     #[test]

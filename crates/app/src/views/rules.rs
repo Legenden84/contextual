@@ -8,12 +8,12 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::Project;
 use crate::state::project::SkillMode;
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 use crate::ui::{Switch, Tag, TagTone, count, file_glyph};
 use contextual_core::logic::reads;

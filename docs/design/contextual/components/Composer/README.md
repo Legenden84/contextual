@@ -7,6 +7,25 @@ based on their hashes. Unchanged files remain available through the conversation
 duplicating their contents in the new turn. The model can request additional files as needed.
 There is no context-mode selector. Ctrl+Enter sends.
 
+## Markdown typing
+
+The composer remains a native plain-text input: Markdown markers stay visible and editable.
+Typing `* `, `- `, `+ `, `1. ` or `1) ` on a new, unindented line gives the marker a small
+two-space text indent. An asterisk without its following space stays literal. Existing
+indentation is preserved, and bulk pasted text is not automatically reformatted.
+
+Enter continues a bullet, increments a numbered list, or continues a `> ` quote. Checklists
+such as `- [x] done` continue with an unchecked `- [ ] ` item. Enter on an empty item removes
+its marker and indentation and inserts a regular line break. Shift+Enter inserts a plain
+newline without continuing the marker. Enter with selected text replaces that selection with
+a plain newline.
+
+Typing assistance leaves fenced code and thematic breaks alone. Automatic edits use the
+input's undo history rather than resetting the draft; IME composition is not reformatted.
+This is Markdown typing assistance, not a rich-text editor or formatting toolbar.
+
+## Activity and attachments
+
 A single activity indicator sits between the attachment control and Send/Stop. Its fixed-size
 code-flow mark has three horizontal strokes; a soft accent highlight passes through them in
 a 1.8-second loop. Only stroke opacity changes: no bouncing, rotation, animated text, glow or

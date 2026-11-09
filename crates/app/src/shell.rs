@@ -14,7 +14,7 @@ use crate::theme::{ActiveTheme, TypeExt, hsla};
 use crate::views::folder_dialog::FolderDialog;
 use crate::views::status_bar::status_bar;
 use crate::views::title_bar::title_bar;
-use crate::{CloseFolder, OpenFolder, OpenSettings, ToggleTheme};
+use crate::{CloseFolder, OpenFolder, OpenSettings, ResetZoom, ToggleTheme, ZoomIn, ZoomOut};
 
 pub struct Shell {
     app: Entity<AppModel>,
@@ -123,6 +123,20 @@ impl Render for Shell {
             .text_color(hsla(c.ink))
             .type_style(contextual_theme::type_style::UI_BODY)
             .track_focus(&self.focus)
+            // Capture before focused inputs and modal keyboard handlers. Stop propagation so
+            // the app-level fallback cannot apply the same zoom action a second time.
+            .capture_action(|_: &ZoomIn, _, cx| {
+                crate::theme::set_zoom(crate::theme::zoom_percent() as i16 + 10, cx);
+                cx.stop_propagation();
+            })
+            .capture_action(|_: &ZoomOut, _, cx| {
+                crate::theme::set_zoom(crate::theme::zoom_percent() as i16 - 10, cx);
+                cx.stop_propagation();
+            })
+            .capture_action(|_: &ResetZoom, _, cx| {
+                crate::theme::set_zoom(100, cx);
+                cx.stop_propagation();
+            })
             .on_action(cx.listener(|this, _: &OpenFolder, _, cx| {
                 this.app.update(cx, |a, cx| {
                     a.folder_dialog_open = true;

@@ -6,12 +6,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    div, px,
+    div,
 };
 
 use crate::state::AppModel;
 use crate::state::chat::ChatModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, shadow, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonVariant};
 use crate::views::changes_panel::status_color;
 
@@ -153,7 +153,8 @@ impl Render for SaveDialog {
                 div()
                     .id("save-dialog")
                     .w(px(W))
-                    .max_h(px(560.0))
+                    .max_w_full()
+                    .max_h(gpui_kit::relative(0.9))
                     .flex()
                     .flex_col()
                     .rounded(px(contextual_theme::radius::LG))

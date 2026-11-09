@@ -8,12 +8,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyDownEvent,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    div, px,
+    div,
 };
 
 use crate::state::AppModel;
 use crate::state::scm::ScmModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, shadow, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, shadow, sp};
 
 const W: f32 = 620.0;
 const ROW_H: f32 = 26.0;
@@ -284,6 +284,7 @@ impl Render for BranchPicker {
                     .child(
                         div()
                             .w(px(W))
+                            .max_w_full()
                             .overflow_hidden()
                             .rounded(px(contextual_theme::radius::MD))
                             .border_1()

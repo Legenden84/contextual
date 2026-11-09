@@ -221,9 +221,7 @@ impl ScmModel {
 
     /// Review committed changes before explicitly pushing or creating a pull request.
     pub fn open_pull_request(&mut self, cx: &mut Context<Self>) {
-        if self.busy.is_some()
-            || !self.status.as_ref().is_some_and(|s| s.branch.is_some())
-        {
+        if self.busy.is_some() || !self.status.as_ref().is_some_and(|s| s.branch.is_some()) {
             return;
         }
         cx.emit(OpenPullRequest);

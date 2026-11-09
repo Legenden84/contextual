@@ -1,10 +1,10 @@
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    StatefulInteractiveElement, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, hsla};
+use crate::theme::{ActiveTheme, hsla, px};
 
 /// Track and knob sizes from the Controls spec.
 const TRACK_W: f32 = 26.0;

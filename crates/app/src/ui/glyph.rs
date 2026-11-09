@@ -1,8 +1,8 @@
 use contextual_core::logic::lang::{Lang, lang_from_path};
 use gpui_kit::component::{Icon, IconName};
-use gpui_kit::{App, FontWeight, IntoElement, ParentElement, SharedString, Styled, div, px};
+use gpui_kit::{App, FontWeight, IntoElement, ParentElement, SharedString, Styled, div};
 
-use crate::theme::{ActiveTheme, MONO, hsla};
+use crate::theme::{ActiveTheme, MONO, hsla, px};
 
 /// Glyph box width and type (the design's 16px box, 9px semibold mono).
 const BOX: f32 = 16.0;

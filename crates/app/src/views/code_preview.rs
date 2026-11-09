@@ -13,12 +13,12 @@ use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Window, div, img, px,
+    Styled, Subscription, Window, div, img,
 };
 
 use crate::runtime;
 use crate::state::Project;
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 
 /// Breadcrumb bar height.

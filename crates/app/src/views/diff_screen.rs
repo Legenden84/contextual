@@ -10,12 +10,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
     ListAlignment, ListState, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, list, px,
+    Styled, Subscription, Window, div, list,
 };
 
 use crate::state::chat::{CenterView, ChatModel, DiffMode};
 use crate::state::project::CheckState;
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Checkbox};
 use crate::views::changes_panel::{status_color, status_letter};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
@@ -42,6 +42,7 @@ pub struct DiffScreen {
     /// Source key and path to reveal once the background diff is ready.
     pending_file: Option<(String, String)>,
     list: ListState,
+    list_zoom: ListZoom,
     _subs: Vec<Subscription>,
 }
 
@@ -75,6 +76,7 @@ impl DiffScreen {
             file_rows: Vec::new(),
             pending_file: None,
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
+            list_zoom: ListZoom::default(),
             _subs: subs,
         }
     }
@@ -300,6 +302,7 @@ impl DiffScreen {
 impl Render for DiffScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh(cx);
+        self.list_zoom.refresh(&self.list, self.rows.len());
         let c = &cx.tokens().colors;
         let mode = self.mode(cx);
         let chat = self.chat.read(cx);

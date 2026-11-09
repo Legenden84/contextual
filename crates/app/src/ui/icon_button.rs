@@ -2,10 +2,10 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, hsla, row_height};
+use crate::theme::{ActiveTheme, hsla, px, row_height};
 
 const GLYPH: f32 = 14.0;
 

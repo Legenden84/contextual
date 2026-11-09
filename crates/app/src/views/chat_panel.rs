@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use contextual_core::chat::{ReadLog, Role, Tone, UiMessage};
 use contextual_core::llm::config;
+use contextual_core::logic::composer::{self, ComposerEdit};
 use contextual_core::logic::format::fmt_k;
 use contextual_core::logic::foundry_status::FoundryStatus;
 use contextual_core::logic::images::{
@@ -17,16 +18,16 @@ use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ListAlignment, ListState,
-    MouseButton, ParentElement, PathPromptOptions, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list, px,
+    AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, Entity,
+    EntityInputHandler, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, ParentElement, PathPromptOptions, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list,
 };
 
 use crate::runtime;
 use crate::state::chat::{CenterView, ChatModel, SendEnv};
 use crate::state::{AppModel, Project};
-use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, shadow, sp};
+use crate::theme::{ActiveTheme, ListZoom, TypeExt, control_height, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
@@ -37,7 +38,10 @@ pub struct ChatPanel {
     project: Entity<Project>,
     chat: Entity<ChatModel>,
     input: Entity<TextareaState>,
+    /// Last draft seen by the typing helper; distinguishes typing from bulk paste and undo.
+    composer_snapshot: String,
     list: ListState,
+    list_zoom: ListZoom,
     /// Code blocks the user expanded ("Show N more lines").
     expanded: HashSet<String>,
     rendered: usize,
@@ -150,6 +154,8 @@ impl ChatPanel {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(2, 12)
+                // Plain Enter is handled below. Shift+Enter stays a native newline.
+                .submit_on_enter(true)
                 .placeholder("Ask for a change… (Ctrl+Enter to send)")
         });
         let count = chat.read(cx).messages.len();
@@ -186,21 +192,34 @@ impl ChatPanel {
                 }
                 cx.notify();
             }),
-            cx.subscribe_in(&input, window, |this, _, e: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter {
-                    secondary: true, ..
-                } = e
-                {
-                    this.send(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &input,
+                window,
+                |this, _, e: &InputEvent, window, cx| match e {
+                    InputEvent::PressEnter {
+                        secondary: true, ..
+                    } => {
+                        if !this.composer_is_composing(window, cx) {
+                            this.send(window, cx);
+                        }
+                    }
+                    InputEvent::PressEnter {
+                        secondary: false,
+                        shift: false,
+                    } => this.composer_enter(window, cx),
+                    InputEvent::Change => this.composer_changed(window, cx),
+                    _ => {}
+                },
+            ),
         ];
         Self {
             app,
             project,
             chat,
             input,
+            composer_snapshot: String::new(),
             list: ListState::new(count, ListAlignment::Bottom, px(400.0)),
+            list_zoom: ListZoom::default(),
             expanded: HashSet::new(),
             rendered: count,
             thread_generation,
@@ -228,7 +247,52 @@ impl ChatPanel {
     /// Sends `text` as if typed (debug automation, see `dev.rs`).
     pub fn dev_send(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |s, cx| s.set_value(text, window, cx));
+        self.composer_snapshot = self.input.read(cx).value().to_string();
         self.send(window, cx);
+    }
+
+    fn composer_is_composing(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.input
+            .update(cx, |s, cx| s.marked_text_range(window, cx).is_some())
+    }
+
+    fn edit_composer(&mut self, edit: ComposerEdit, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |s, cx| {
+            if s.selected_range() != edit.range {
+                s.set_selected_range(edit.range, cx);
+            }
+            // Unlike set_value, replace is an atomic, undoable local edit.
+            s.replace(edit.text, window, cx);
+            if s.selected_range() != (edit.cursor..edit.cursor) {
+                s.set_selected_range(edit.cursor..edit.cursor, cx);
+            }
+        });
+        // Programmatic replacements do not emit Change.
+        self.composer_snapshot = self.input.read(cx).value().to_string();
+    }
+
+    fn composer_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.input.read(cx);
+        let text = input.value().to_string();
+        let selection = input.selected_range();
+        let previous = std::mem::replace(&mut self.composer_snapshot, text.clone());
+        if self.composer_is_composing(window, cx) {
+            return;
+        }
+        if let Some(edit) = composer::indent_on_space(&previous, &text, selection) {
+            self.edit_composer(edit, window, cx);
+        }
+    }
+
+    fn composer_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_is_composing(window, cx) {
+            return;
+        }
+        let input = self.input.read(cx);
+        let text = input.value().to_string();
+        if let Some(edit) = composer::newline(&text, input.selected_range()) {
+            self.edit_composer(edit, window, cx);
+        }
     }
 
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -260,6 +324,7 @@ impl ChatPanel {
         };
         let rules = p.rules_on();
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
+        self.composer_snapshot.clear();
         self.chat.update(cx, |c, cx| c.send(text, env, rules, cx));
     }
 
@@ -553,9 +618,7 @@ impl ChatPanel {
                         cx.stop_propagation();
                         cx.notify();
                     }
-                    "enter" | "space"
-                        if !t.image_loading && !t.chat.read(cx).streaming() =>
-                    {
+                    "enter" | "space" if !t.image_loading && !t.chat.read(cx).streaming() => {
                         cx.stop_propagation();
                         if t.attachment_menu_open {
                             t.choose_images(cx);
@@ -933,6 +996,7 @@ fn header(who: &str, m: &UiMessage, cx: &App) -> impl IntoElement + use<> {
 
 impl Render for ChatPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.list_zoom.refresh(&self.list, self.rendered);
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
         let streaming = chat.streaming();

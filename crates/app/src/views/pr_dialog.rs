@@ -21,14 +21,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyDownEvent,
     ListAlignment, ListState, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, list, px, relative,
+    Styled, Subscription, Window, div, list, relative,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
 use crate::state::chat::ChatModel;
 use crate::state::{AppModel, Project};
-use crate::theme::{ActiveTheme, TypeExt, hsla, shadow, sp};
+use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonVariant, Checkbox, IconButton, LinkButton};
 use crate::views::diff_rows::{self, FileRows, Row};
 
@@ -66,6 +66,7 @@ pub struct PrDialog {
     open_gaps: HashSet<(usize, usize)>,
     rows: Vec<Row>,
     list: ListState,
+    list_zoom: ListZoom,
     _subs: Vec<Subscription>,
 }
 
@@ -163,6 +164,7 @@ impl PrDialog {
             open_gaps: HashSet::new(),
             rows: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
+            list_zoom: ListZoom::default(),
             _subs: subs,
         };
         this.compare(None, None, cx);
@@ -507,6 +509,7 @@ impl PrDialog {
 
 impl Render for PrDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.list_zoom.refresh(&self.list, self.rows.len());
         // Apply values computed off-window.
         if let Some((names, base, head)) = self.pending.take() {
             for (sel, value) in [(&self.base_select, base), (&self.head_select, head)] {

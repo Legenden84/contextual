@@ -11,11 +11,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
     KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, px,
+    Subscription, Window, div,
 };
 
 use crate::runtime;
-use crate::theme::{ActiveTheme, TypeExt, hsla, row_height, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, row_height, sp};
 use crate::ui::{Button, ButtonVariant, IconButton, Switch, Tag, file_glyph, folder_glyph};
 
 const W: f32 = 680.0;
@@ -249,6 +249,8 @@ impl Render for EnvFileDialog {
                     .flex_col()
                     .w(px(W))
                     .h(px(H))
+                    .max_w_full()
+                    .max_h_full()
                     .overflow_hidden()
                     .rounded(px(contextual_theme::radius::LG))
                     .border_1()

@@ -6,6 +6,7 @@
 //! Offsets exposed to callers are UTF-8 byte offsets into Rust strings (see [`diff::DiffOp::r`]).
 
 pub mod changes;
+pub mod composer;
 pub mod context;
 pub mod defaults;
 pub mod diff;

@@ -23,7 +23,16 @@ use gpui_kit::{
 
 gpui_kit::actions!(
     contextual,
-    [Quit, ToggleTheme, OpenFolder, OpenSettings, CloseFolder]
+    [
+        Quit,
+        ToggleTheme,
+        OpenFolder,
+        OpenSettings,
+        CloseFolder,
+        ZoomIn,
+        ZoomOut,
+        ResetZoom
+    ]
 );
 
 struct Args {
@@ -124,8 +133,51 @@ fn main() {
     });
 }
 
+/// Include both representations of shifted `+`, plus unshifted `=`. Keyboard layouts and
+/// platform backends can report the shifted key differently.
+fn zoom_keys(macos: bool) -> [&'static str; 6] {
+    if macos {
+        [
+            "cmd-=",
+            "cmd-+",
+            "cmd-shift-=",
+            "cmd-shift-+",
+            "cmd--",
+            "cmd-0",
+        ]
+    } else {
+        [
+            "ctrl-=",
+            "ctrl-+",
+            "ctrl-shift-=",
+            "ctrl-shift-+",
+            "ctrl--",
+            "ctrl-0",
+        ]
+    }
+}
+
 fn keymap(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
+    // Fallback for toolkit popups whose focus lives outside Shell's subtree.
+    cx.on_action(|_: &ZoomIn, cx| {
+        theme::set_zoom(theme::zoom_percent() as i16 + 10, cx);
+    });
+    cx.on_action(|_: &ZoomOut, cx| {
+        theme::set_zoom(theme::zoom_percent() as i16 - 10, cx);
+    });
+    cx.on_action(|_: &ResetZoom, cx| {
+        theme::set_zoom(100, cx);
+    });
+    let zoom = zoom_keys(cfg!(target_os = "macos"));
+    cx.bind_keys([
+        KeyBinding::new(zoom[0], ZoomIn, None),
+        KeyBinding::new(zoom[1], ZoomIn, None),
+        KeyBinding::new(zoom[2], ZoomIn, None),
+        KeyBinding::new(zoom[3], ZoomIn, None),
+        KeyBinding::new(zoom[4], ZoomOut, None),
+        KeyBinding::new(zoom[5], ResetZoom, None),
+    ]);
     // Per-OS modifier (plan §6.4): cmd on macOS, ctrl on Windows (and Linux, for development).
     #[cfg(target_os = "macos")]
     const KEYS: [&str; 4] = ["cmd-q", "cmd-shift-t", "cmd-o", "cmd-,"];
@@ -145,8 +197,34 @@ fn keymap(cx: &mut App) {
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::action("Toggle theme", ToggleTheme),
             MenuItem::separator(),
+            MenuItem::action("Zoom in", ZoomIn),
+            MenuItem::action("Zoom out", ZoomOut),
+            MenuItem::action("Actual size", ResetZoom),
+            MenuItem::separator(),
             MenuItem::action("Quit", Quit),
         ],
         disabled: false,
     }]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_shortcuts_use_the_native_modifier_and_parse_on_both_platforms() {
+        for macos in [false, true] {
+            let keys = zoom_keys(macos);
+            let modifier = if macos { "cmd-" } else { "ctrl-" };
+            assert!(keys.iter().all(|key| key.starts_with(modifier)));
+            assert!(keys[0].ends_with('='));
+            assert!(keys[1].ends_with('+'));
+            assert!(keys[4].ends_with("--"));
+            assert!(keys[5].ends_with("-0"));
+            for key in keys {
+                // Also checks the pinned GPUI parser accepts literal '+' and '-' bindings.
+                let _ = KeyBinding::new(key, ZoomIn, None);
+            }
+        }
+    }
 }

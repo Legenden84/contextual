@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, Div, ElementId, Hsla, IntoElement, ParentElement,
-    Styled, div, px, svg,
+    Styled, div, svg,
 };
 
-use crate::theme::{ActiveTheme, hsla, sp};
+use crate::theme::{ActiveTheme, hsla, px, sp};
 
 /// The supplied Moss mark keeps its Moss/Algae colours even when previewed in another theme.
 pub fn moss_mark(size: f32) -> impl IntoElement {
@@ -114,9 +114,7 @@ mod tests {
     #[test]
     fn activity_loop_is_bounded_and_seamless() {
         for index in 0..3 {
-            assert!(
-                (stroke_opacity(0.0, index) - stroke_opacity(1.0, index)).abs() < 0.00001
-            );
+            assert!((stroke_opacity(0.0, index) - stroke_opacity(1.0, index)).abs() < 0.00001);
             for frame in 0..=180 {
                 let opacity = stroke_opacity(frame as f32 / 180.0, index);
                 assert!((0.28..=1.0).contains(&opacity));

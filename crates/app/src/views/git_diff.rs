@@ -10,13 +10,13 @@ use contextual_protocol::git::{DiffRequest, FileDiff};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, Entity, IntoElement, ListAlignment, ListState, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, list, px,
+    SharedString, Styled, Subscription, Window, div, list,
 };
 
 use crate::runtime;
 use crate::state::Project;
 use crate::state::scm::ScmModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 use crate::views::diff_rows::{self, FileRows, Row};
 
@@ -32,6 +32,7 @@ pub struct GitDiffView {
     open_gaps: HashSet<(usize, usize)>,
     rows: Vec<Row>,
     list: ListState,
+    list_zoom: ListZoom,
     _sub: Subscription,
 }
 
@@ -58,6 +59,7 @@ impl GitDiffView {
             open_gaps: HashSet::new(),
             rows: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(600.0)),
+            list_zoom: ListZoom::default(),
             _sub: sub,
         };
         this.load(cx);
@@ -140,6 +142,7 @@ impl GitDiffView {
 
 impl Render for GitDiffView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.list_zoom.refresh(&self.list, self.rows.len());
         let c = &cx.tokens().colors;
         let (adds, dels) = self
             .diff

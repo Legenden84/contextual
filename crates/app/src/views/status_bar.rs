@@ -1,15 +1,15 @@
- //! 24px status bar: branch, Foundry connection, scanning, Settings.
+//! 24px status bar: branch, Foundry connection, scanning, Settings.
 
 use contextual_core::logic::foundry_status::{FoundryStatus, Tone, describe_foundry};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, px,
+    StatefulInteractiveElement, Styled, div,
 };
 
 use crate::state::{AppModel, Screen};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::activity_mark;
 
 const H: f32 = 24.0;

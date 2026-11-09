@@ -7,12 +7,12 @@ use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::screens::welcome::ago;
 use crate::state::chat::ChatModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, pane_header};
 
 pub struct ChatsMenu {

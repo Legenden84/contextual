@@ -7,12 +7,12 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
+    div,
 };
 
 use crate::state::{AppModel, ConnectionTest};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, Switch};
 use crate::views::env_file_dialog::{EnvFileDialog, EnvFileEvent};
 use crate::views::presets_editor::PresetsEditor;
@@ -571,10 +571,9 @@ impl Render for SettingsScreen {
                     .w_full()
                     .max_w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
                     .child(
-                        IconButton::new("back", IconName::ArrowLeft, "Back")
-                            .on_click(cx.listener(|t, _, _, cx| {
-                                t.app.update(cx, |a, cx| a.close_settings(cx))
-                            })),
+                        IconButton::new("back", IconName::ArrowLeft, "Back").on_click(cx.listener(
+                            |t, _, _, cx| t.app.update(cx, |a, cx| a.close_settings(cx)),
+                        )),
                     )
                     .child(
                         div()
@@ -596,6 +595,7 @@ impl Render for SettingsScreen {
             .min_h_0()
             .items_center()
             .overflow_y_scroll()
+            .overflow_x_scroll()
             .px(sp(8))
             .bg(hsla(c.surface_100))
             .type_style(contextual_theme::type_style::UI_BODY)

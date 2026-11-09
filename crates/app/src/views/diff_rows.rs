@@ -8,10 +8,10 @@ use contextual_core::logic::diff::{Diff, DiffItem, DiffOp, OpKind, hunk_header, 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, HighlightStyle, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, StyledText, div, px,
+    StatefulInteractiveElement, Styled, StyledText, div,
 };
 
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 
 /// Unchanged lines kept around each change.
 const CONTEXT: usize = 3;

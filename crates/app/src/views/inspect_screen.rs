@@ -10,11 +10,11 @@ use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, TagTone, pane_header};
 
 const ROUND_LIST_W: f32 = 260.0;

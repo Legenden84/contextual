@@ -6,11 +6,11 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::AppModel;
-use crate::theme::{ActiveTheme, MONO, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, MONO, TypeExt, hsla, px, sp};
 use crate::ui::{Button, ButtonVariant, LinkButton, folder_glyph};
 
 const WIDTH: f32 = 860.0;
@@ -188,7 +188,8 @@ impl Render for WelcomeScreen {
             .bg(hsla(c.surface_100))
             .child(
                 div()
-                    .w(px(WIDTH))
+                    .w_full()
+                    .max_w(px(WIDTH))
                     .child(
                         div()
                             .mb(sp(8))

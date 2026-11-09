@@ -1069,7 +1069,9 @@ impl ChatModel {
                 Err(_) => {
                     this.toast = Some(Toast {
                         title: "Could not save the conversation".into(),
-                        detail: "It stays open, but won’t be available in chat history after a restart.".into(),
+                        detail:
+                            "It stays open, but won’t be available in chat history after a restart."
+                                .into(),
                         error: true,
                         backup_id: None,
                     });
@@ -1174,8 +1176,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.rename(&root, &id, &title).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(cx))
-                .ok();
+            this.update(cx, |this, cx| this.refresh_threads(cx)).ok();
         })
         .detach();
     }
@@ -1191,8 +1192,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.delete(&root, &id).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(cx))
-                .ok();
+            this.update(cx, |this, cx| this.refresh_threads(cx)).ok();
         })
         .detach();
     }
@@ -1206,8 +1206,7 @@ impl ChatModel {
         let job = runtime::spawn(cx, async move { store.delete_all(&root).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
-            this.update(cx, |this, cx| this.refresh_threads(cx))
-                .ok();
+            this.update(cx, |this, cx| this.refresh_threads(cx)).ok();
         })
         .detach();
     }
@@ -1332,7 +1331,8 @@ impl ChatModel {
                         this.contents.clear();
                         for change in &restored {
                             if change.status != ChangeStatus::A {
-                                this.contents.insert(change.path.clone(), change.old.clone());
+                                this.contents
+                                    .insert(change.path.clone(), change.old.clone());
                             }
                         }
                         this.set_changes(restored);

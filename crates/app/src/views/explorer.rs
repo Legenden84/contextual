@@ -10,11 +10,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, UniformListScrollHandle,
-    Window, div, px, uniform_list,
+    Window, div, uniform_list,
 };
 
 use crate::state::{AppModel, Project, Tab};
-use crate::theme::{ActiveTheme, TypeExt, hsla, row_height, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, row_height, sp};
 use crate::ui::{Checkbox, IconButton, LinkButton, Switch, Tag, TagTone, file_glyph, folder_glyph};
 
 const INDENT: f32 = 12.0;

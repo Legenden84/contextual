@@ -2,11 +2,11 @@
 
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px};
+use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div};
 
 use crate::state::AppModel;
 use crate::state::chat::ChatModel;
-use crate::theme::{ActiveTheme, TypeExt, hsla, shadow, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, shadow, sp};
 use crate::ui::{IconButton, LinkButton};
 
 const W: f32 = 360.0;

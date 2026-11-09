@@ -5,6 +5,7 @@
 //! - `gpui-component`'s own theme is set from the same tokens, so its widgets (inputs, dialogs,
 //!   selects, notifications, markdown) match the design system.
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use contextual_theme::{
@@ -15,13 +16,82 @@ use gpui_kit::component::Rope;
 use gpui_kit::component::highlighter::{HighlightTheme, SyntaxHighlighter};
 use gpui_kit::component::theme::{Theme as ComponentTheme, ThemeMode};
 use gpui_kit::{
-    App, BoxShadow, FontFeatures, FontWeight, Global, Hsla, Pixels, Styled, Window, point, px,
+    App, BoxShadow, FontFeatures, FontWeight, Global, Hsla, ListState, Pixels, Styled, Window,
+    point,
 };
 use serde_json::json;
 
 /// Bundled font families (see `assets.rs`).
 pub const SANS: &str = "Inter";
 pub const MONO: &str = "JetBrains Mono";
+
+thread_local! {
+    // GPUI renders on its UI thread. Keep the scale here so existing context-free token
+    // helpers and render-once primitives use the same application-wide scale. Background
+    // work must not use UI dimensions. This is session state, not a project setting.
+    static UI_ZOOM: Cell<u16> = const { Cell::new(100) };
+}
+
+pub fn zoom_percent() -> u16 {
+    UI_ZOOM.with(Cell::get)
+}
+
+pub fn zoom_factor() -> f32 {
+    f32::from(zoom_percent()) / 100.0
+}
+
+/// Converts a design-space pixel dimension to a GPUI logical-pixel dimension.
+/// Use this in views; use `gpui_kit::px` for native window bounds and already-measured values.
+/// OS display scaling remains GPUI's responsibility and is not included here.
+pub fn px(value: f32) -> Pixels {
+    gpui_kit::px(value * zoom_factor())
+}
+
+fn bounded_zoom(percent: i16) -> u16 {
+    percent.clamp(50, 200) as u16
+}
+
+/// Updates both explicit pixel dimensions and the toolkit's rem-based widgets.
+/// gpui-component's root sets the window's rem size from its theme's font_size every frame;
+/// changing window.rem_size directly would therefore be overwritten.
+pub fn set_zoom(percent: i16, cx: &mut App) {
+    let next = bounded_zoom(percent);
+    if next == zoom_percent() {
+        return;
+    }
+    UI_ZOOM.with(|zoom| zoom.set(next));
+    ComponentTheme::update(cx, configure_component_sizes);
+    cx.refresh_windows();
+}
+
+/// Invalidates cached variable-height list measurements after zoom, including lists that
+/// were hidden when the shortcut was pressed. Keep the visible item rather than rebuilding
+/// the view (which would discard drafts, expanded code blocks and other interaction state).
+pub struct ListZoom(u16);
+
+impl Default for ListZoom {
+    fn default() -> Self {
+        Self(zoom_percent())
+    }
+}
+
+impl ListZoom {
+    pub fn refresh(&mut self, list: &ListState, count: usize) {
+        let next = zoom_percent();
+        if self.0 == next {
+            return;
+        }
+        let ratio = f32::from(next) / f32::from(self.0);
+        self.0 = next;
+        if count == 0 {
+            return;
+        }
+        let mut top = list.logical_scroll_top();
+        top.offset_in_item *= ratio;
+        list.reset(count);
+        list.scroll_to(top);
+    }
+}
 
 pub fn hsla(c: Rgba) -> Hsla {
     gpui_kit::Rgba {
@@ -175,13 +245,19 @@ fn configure_components(t: &mut ComponentTheme, tokens: &Tokens) {
     k.window_border = h(c.border);
 
     t.font_family = SANS.into();
-    t.font_size = px(contextual_theme::type_style::UI_BODY.size);
     t.mono_font_family = MONO.into();
+    configure_component_sizes(t);
+    t.shadow = true;
+    t.highlight_theme = Arc::new(highlight_theme(tokens));
+}
+
+/// Recalculate from the original tokens, never from an already-scaled component theme.
+/// Theme switches call this too, preserving zoom without compounding it.
+fn configure_component_sizes(t: &mut ComponentTheme) {
+    t.font_size = px(contextual_theme::type_style::UI_BODY.size);
     t.mono_font_size = px(contextual_theme::type_style::CODE.size);
     t.radius = px(radius::MD);
     t.radius_lg = px(radius::LG);
-    t.shadow = true;
-    t.highlight_theme = Arc::new(highlight_theme(tokens));
 }
 
 /// Tree-sitter capture → `syn-*` token (the design README's code-rendering rules).
@@ -315,6 +391,36 @@ pub fn resolve(pref: contextual_core::settings::ThemePreference, window: &Window
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zoom_is_bounded_and_reset_is_exact() {
+        assert_eq!(bounded_zoom(i16::MIN), 50);
+        assert_eq!(bounded_zoom(50), 50);
+        assert_eq!(bounded_zoom(100), 100);
+        assert_eq!(bounded_zoom(150), 150);
+        assert_eq!(bounded_zoom(200), 200);
+        assert_eq!(bounded_zoom(i16::MAX), 200);
+    }
+
+    #[test]
+    fn pixel_spacing_and_row_metrics_share_one_scale() {
+        UI_ZOOM.with(|zoom| {
+            let original = zoom.get();
+            for percent in [50, 100, 150, 200, 100] {
+                zoom.set(percent);
+                let scale = f32::from(percent) / 100.0;
+                assert_eq!(px(80.0), gpui_kit::px(80.0 * scale));
+                assert_eq!(sp(4), gpui_kit::px(space::S4 * scale));
+                assert_eq!(row_height(), gpui_kit::px(space::ROW_HEIGHT * scale));
+                assert_eq!(
+                    control_height(),
+                    gpui_kit::px(space::CONTROL_HEIGHT * scale)
+                );
+                assert_eq!(px(0.0), gpui_kit::px(0.0));
+            }
+            zoom.set(original);
+        });
+    }
 
     #[test]
     fn highlights_code_in_syn_colours() {

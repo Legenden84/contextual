@@ -11,11 +11,11 @@ use contextual_core::logic::format::{fmt_k, fmt_n};
 use contextual_core::logic::types::Deployment;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, px, relative};
+use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, relative};
 
 use crate::state::chat::ChatModel;
 use crate::state::{AppModel, Project};
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 
 const BAR_H: f32 = 28.0;
 const METER_W: f32 = 140.0;

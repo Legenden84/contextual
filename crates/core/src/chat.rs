@@ -457,7 +457,12 @@ pub fn prepare_turn(
     let mut selected = selected.clone();
     let mut pending_paths = Vec::new();
     let mut deleted_paths = Vec::new();
-    for change in thread.pending_changes.iter().flatten().filter(|c| usable_proposal(c)) {
+    for change in thread
+        .pending_changes
+        .iter()
+        .flatten()
+        .filter(|c| usable_proposal(c))
+    {
         selected.insert(change.path.clone());
         read.retain(|f| f.path != change.path);
         if change.status == ChangeStatus::D {
@@ -484,7 +489,10 @@ pub fn prepare_turn(
              Return only files you change; other pending changes are kept.",
         );
         if !pending_paths.is_empty() {
-            note.push_str(&format!("\n\nPending file versions:\n- {}", pending_paths.join("\n- ")));
+            note.push_str(&format!(
+                "\n\nPending file versions:\n- {}",
+                pending_paths.join("\n- ")
+            ));
         }
         if !deleted_paths.is_empty() {
             note.push_str(&format!(
@@ -1022,12 +1030,7 @@ mod tests {
         assert_eq!(merged[1], first[1]);
         assert_eq!(merge_pending_changes(&merged, &[]), merged);
 
-        let cut_off = proposed_changes_on_top(
-            "### DELETE: b.txt",
-            true,
-            &ProposalDisk,
-            &merged,
-        );
+        let cut_off = proposed_changes_on_top("### DELETE: b.txt", true, &ProposalDisk, &merged);
         assert_eq!(merge_pending_changes(&merged, &cut_off), merged);
     }
 
@@ -1041,17 +1044,18 @@ mod tests {
             &first,
         );
         let merged = merge_pending_changes(&first, &next);
-        assert_eq!(merged, vec![proposal("new.txt", ChangeStatus::A, "", "second")].into_iter().map(|mut c| {
-            c.edits = next[0].edits.clone();
-            c.unplaced = next[0].unplaced.clone();
-            c
-        }).collect::<Vec<_>>());
-        let deleted = proposed_changes_on_top(
-            "### DELETE: new.txt",
-            false,
-            &ProposalDisk,
-            &merged,
+        assert_eq!(
+            merged,
+            vec![proposal("new.txt", ChangeStatus::A, "", "second")]
+                .into_iter()
+                .map(|mut c| {
+                    c.edits = next[0].edits.clone();
+                    c.unplaced = next[0].unplaced.clone();
+                    c
+                })
+                .collect::<Vec<_>>()
         );
+        let deleted = proposed_changes_on_top("### DELETE: new.txt", false, &ProposalDisk, &merged);
         assert!(merge_pending_changes(&merged, &deleted).is_empty());
     }
 

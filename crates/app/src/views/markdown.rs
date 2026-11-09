@@ -16,10 +16,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ElementId, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
     IntoElement, ParentElement, SharedString, StatefulInteractiveElement, StrikethroughStyle,
-    Styled, StyledText, UnderlineStyle, div, px,
+    Styled, StyledText, UnderlineStyle, div,
 };
 
-use crate::theme::{ActiveTheme, TypeExt, hsla, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 use crate::ui::{Tag, TagTone};
 
 /// Lines shown before "Show N more lines" (modified files are shown shorter).

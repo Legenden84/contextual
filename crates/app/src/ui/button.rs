@@ -2,10 +2,10 @@ use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, row_height, sp};
+use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, row_height, sp};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum ButtonVariant {

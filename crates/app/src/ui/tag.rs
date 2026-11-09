@@ -1,10 +1,10 @@
 use contextual_theme::Rgba;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div, px,
+    App, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, hsla};
+use crate::theme::{ActiveTheme, hsla, px};
 
 /// Tag height and type from the Controls spec (16px, 11px medium).
 const H: f32 = 16.0;

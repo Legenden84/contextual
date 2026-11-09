@@ -18,17 +18,21 @@ const LOGO: f32 = 16.0;
 pub fn title_bar(title: &str, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     let toggle = match cx.tokens().appearance {
-        Appearance::Light => {
-            IconButton::new("theme-toggle", IconName::Sun, "Light theme · Switch to Moss")
-        }
+        Appearance::Light => IconButton::new(
+            "theme-toggle",
+            IconName::Sun,
+            "Light theme · Switch to Moss",
+        ),
         Appearance::Moss => IconButton::with_glyph(
             "theme-toggle",
             moss_mark(LOGO),
             "Moss theme · Switch to dark",
         ),
-        Appearance::Dark => {
-            IconButton::new("theme-toggle", IconName::Moon, "Dark theme · Switch to light")
-        }
+        Appearance::Dark => IconButton::new(
+            "theme-toggle",
+            IconName::Moon,
+            "Dark theme · Switch to light",
+        ),
     };
     TitleBar::new()
         .bg(hsla(c.surface_000))
@@ -54,10 +58,10 @@ pub fn title_bar(title: &str, cx: &App) -> impl IntoElement + use<> {
                         .text_color(hsla(c.ink_muted))
                         .child(SharedString::from(title.to_string())),
                 )
-                .child(
-                    div().pr(sp(2)).child(toggle.on_click(|_, window, cx| {
+                .child(div().pr(sp(2)).child(
+                    toggle.on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(ToggleTheme), cx)
-                    })),
-                ),
+                    }),
+                )),
         )
 }

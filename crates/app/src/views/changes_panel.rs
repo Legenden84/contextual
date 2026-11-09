@@ -7,11 +7,11 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
-use crate::theme::{ActiveTheme, TypeExt, hsla, row_height, sp};
+use crate::theme::{ActiveTheme, TypeExt, hsla, px, row_height, sp};
 use crate::ui::{Button, ButtonVariant, Checkbox, pane_header};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 
