@@ -3,6 +3,7 @@
 //! Chat and previews keep a stable column beside responsive Changes and history docks.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use contextual_theme::layout;
 use gpui_kit::component::{Icon, IconName};
@@ -104,9 +105,9 @@ fn docked_explorer(viewport: f32) -> bool {
     viewport >= layout::EXPLORER_WIDTH + layout::CHAT_MIN_WIDTH
 }
 
-/// Keep the natural centre when there is room, then consume the empty left
-/// gutter before narrowing Chat. Below a comfortable chat + dock width, panels
-/// become explicit, full-width views instead of squeezing the composer.
+/// Centre the reading column in the area left after the visible docks.
+/// Two docks share the workspace when both fit alongside a full reading column;
+/// otherwise they share one slot. Compact layouts keep panels on demand.
 fn chat_layout(
     available: f32,
     changes_open: bool,
@@ -115,11 +116,9 @@ fn chat_layout(
 ) -> ChatLayout {
     let available = available.max(0.0);
     let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
-    let natural_width = available.min(max_width);
-    let natural_gutter = (available - natural_width) / 2.0;
     let compact = compact_workspace(available);
     let panel_width = layout::CHANGES_WIDTH.min(available);
-    let fits_both = natural_gutter >= 2.0 * layout::CHANGES_WIDTH;
+    let fits_both = available >= max_width + 2.0 * layout::CHANGES_WIDTH;
     let show_changes = !compact
         && changes_open
         && (!history_open || fits_both || front == DockPanel::Changes);
@@ -127,14 +126,90 @@ fn chat_layout(
         && history_open
         && (!changes_open || fits_both || front == DockPanel::History);
     let reserved = (usize::from(show_changes) + usize::from(show_history)) as f32 * panel_width;
-    let width = natural_width.min((available - reserved).max(0.0));
+    let remaining = (available - reserved).max(0.0);
+    let width = max_width.min(remaining);
 
     ChatLayout {
-        left_inset: ((available - width) / 2.0).min((available - reserved - width).max(0.0)),
+        left_inset: (remaining - width) / 2.0,
         width,
         panel_width,
         show_changes,
         show_history,
+    }
+}
+
+const CHAT_REFLOW_DURATION: Duration = Duration::from_millis(180);
+
+/// Animate layout, not text scale: the thread, budget and composer remain one
+/// reading column. The total dock reservation also eases when a second dock opens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ChatGeometry {
+    left_inset: f32,
+    width: f32,
+    dock_width: f32,
+}
+
+impl ChatGeometry {
+    fn from_layout(panes: &ChatLayout) -> Self {
+        let count = usize::from(panes.show_changes) + usize::from(panes.show_history);
+        Self {
+            left_inset: panes.left_inset,
+            width: panes.width,
+            dock_width: count as f32 * panes.panel_width,
+        }
+    }
+
+    fn interpolate(self, target: Self, progress: f32) -> Self {
+        let lerp = |from: f32, to: f32| from + (to - from) * progress;
+        Self {
+            left_inset: lerp(self.left_inset, target.left_inset),
+            width: lerp(self.width, target.width),
+            dock_width: lerp(self.dock_width, target.dock_width),
+        }
+    }
+}
+
+struct ChatReflow {
+    from: ChatGeometry,
+    target: ChatGeometry,
+    started: Instant,
+}
+
+impl ChatReflow {
+    fn settled(target: ChatGeometry, now: Instant) -> Self {
+        Self {
+            from: target,
+            target,
+            started: now,
+        }
+    }
+
+    fn running(&self, now: Instant) -> bool {
+        self.from != self.target
+            && now.saturating_duration_since(self.started) < CHAT_REFLOW_DURATION
+    }
+
+    fn sample(&self, now: Instant) -> ChatGeometry {
+        if !self.running(now) {
+            return self.target;
+        }
+        let progress = (now.saturating_duration_since(self.started).as_secs_f32()
+            / CHAT_REFLOW_DURATION.as_secs_f32())
+        .clamp(0.0, 1.0);
+        // Ease out without overshoot. No bouncing or scaling of code/text.
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        self.from.interpolate(self.target, eased)
+    }
+
+    fn retarget(&mut self, target: ChatGeometry, now: Instant) {
+        if self.target == target {
+            return;
+        }
+        // A quick second toggle starts from what is currently on screen, not
+        // from the previous endpoint.
+        self.from = self.sample(now);
+        self.target = target;
+        self.started = now;
     }
 }
 
@@ -157,6 +232,9 @@ pub struct WorkspaceScreen {
     /// merely because the window was resized.
     compact_panel: Option<DockPanel>,
     compact_project: bool,
+    chat_reflow: Option<ChatReflow>,
+    reflow_available: Option<f32>,
+    reflow_frame_pending: bool,
     save_dialog: Option<Entity<SaveDialog>>,
     context: ContextCache,
     _subs: Vec<Subscription>,
@@ -321,6 +399,9 @@ impl WorkspaceScreen {
             docks: DockState::new(),
             compact_panel: None,
             compact_project: false,
+            chat_reflow: None,
+            reflow_available: None,
+            reflow_frame_pending: false,
             save_dialog: None,
             chat,
             app,
@@ -329,6 +410,41 @@ impl WorkspaceScreen {
             context: ContextCache::default(),
             _subs: subs,
         }
+    }
+
+    fn chat_geometry(
+        &mut self,
+        panes: &ChatLayout,
+        available: f32,
+        animate: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> ChatGeometry {
+        let now = Instant::now();
+        let target = ChatGeometry::from_layout(panes);
+        // Native resizing follows the window immediately. Animate dock changes,
+        // not startup, zoom, compact navigation or entry into a feature tab.
+        let snap = !animate || self.reflow_available != Some(available);
+        self.reflow_available = Some(available);
+        if snap || self.chat_reflow.is_none() {
+            self.chat_reflow = Some(ChatReflow::settled(target, now));
+        }
+        let reflow = self.chat_reflow.as_mut().expect("reflow initialised");
+        reflow.retarget(target, now);
+        let geometry = reflow.sample(now);
+        if reflow.running(now) && !self.reflow_frame_pending {
+            self.reflow_frame_pending = true;
+            let entity = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                entity
+                    .update(cx, |this, cx| {
+                        this.reflow_frame_pending = false;
+                        cx.notify();
+                    })
+                    .ok();
+            });
+        }
+        geometry
     }
 
     fn tab(
@@ -500,6 +616,13 @@ impl Render for WorkspaceScreen {
         );
         let changes_visible = !feature_view && (panes.show_changes || compact_changes);
         let history_visible = !feature_view && (panes.show_history || compact_history);
+        let animate = !feature_view
+            && !auxiliary_view
+            && !compact
+            && !self.app.read(cx).settings.reduce_motion;
+        let geometry = self.chat_geometry(&panes, available, animate, window, cx);
+        let dock_count = usize::from(panes.show_changes) + usize::from(panes.show_history);
+        let animated_panel_width = geometry.dock_width / dock_count.max(1) as f32;
 
         let body = if project_visible {
             div()
@@ -714,7 +837,7 @@ impl Render for WorkspaceScreen {
                     .min_h_0()
                     .min_w_0()
                     .when(!feature_view && !auxiliary_view, |d| {
-                        d.child(div().flex_none().w(px(panes.left_inset)))
+                        d.child(div().flex_none().w(px(geometry.left_inset)))
                     })
                     .child(
                         div()
@@ -724,7 +847,7 @@ impl Render for WorkspaceScreen {
                             .min_h_0()
                             .min_w_0()
                             .when(!feature_view && !auxiliary_view, |d| {
-                                d.flex_none().w(px(panes.width))
+                                d.flex_none().w(px(geometry.width))
                             })
                             .child(body),
                     )
@@ -744,10 +867,10 @@ impl Render for WorkspaceScreen {
                                             .id("changes-dock-slot")
                                             .flex()
                                             .flex_none()
-                                            .w(px(panes.panel_width))
+                                            .w(px(animated_panel_width))
                                             .h_full()
                                             .min_h_0()
-                                            .overflow_x_scroll()
+                                            .overflow_hidden()
                                             .child(self.changes.clone()),
                                     )
                                 })
@@ -757,10 +880,10 @@ impl Render for WorkspaceScreen {
                                             .id("history-dock-slot")
                                             .flex()
                                             .flex_none()
-                                            .w(px(panes.panel_width))
+                                            .w(px(animated_panel_width))
                                             .h_full()
                                             .min_h_0()
-                                            .overflow_x_scroll()
+                                            .overflow_hidden()
                                             .child(self.chats.clone()),
                                     )
                                 }),
@@ -824,6 +947,11 @@ mod tests {
                             panel_count > 0,
                             !compact_workspace(available) && (changes || history)
                         );
+                        let remaining = available - panel_count as f32 * panes.panel_width;
+                        assert!(
+                            (panes.left_inset + panes.width / 2.0 - remaining / 2.0).abs()
+                                < 0.001
+                        );
                         if panel_count > 0 {
                             assert!(panes.width >= layout::CHAT_MIN_WIDTH);
                         } else {
@@ -836,8 +964,8 @@ mod tests {
     }
 
     #[test]
-    fn two_panels_use_the_natural_gutter_without_narrowing_chat() {
-        let threshold = full_chat_width() + 4.0 * layout::CHANGES_WIDTH;
+    fn two_panels_fit_beside_a_full_reading_column() {
+        let threshold = full_chat_width() + 2.0 * layout::CHANGES_WIDTH;
         for front in [DockPanel::Changes, DockPanel::History] {
             let below = chat_layout(threshold - 1.0, true, true, front);
             assert_eq!(below.show_changes, front == DockPanel::Changes);
@@ -891,13 +1019,16 @@ mod tests {
                 for history in [false, true] {
                     let panes = chat_layout(available, changes, history, DockPanel::History);
                     assert_eq!(panes.width, full_chat_width());
-                    assert_eq!(panes.left_inset, (available - full_chat_width()) / 2.0);
+                    let count =
+                        usize::from(panes.show_changes) + usize::from(panes.show_history);
+                    let remaining = available - count as f32 * panes.panel_width;
+                    assert_eq!(panes.left_inset, (remaining - full_chat_width()) / 2.0);
                 }
             }
         }
         let below = chat_layout(threshold - 2.0, true, true, DockPanel::Changes);
         assert_eq!(below.width, full_chat_width());
-        assert_eq!(below.left_inset, layout::CHANGES_WIDTH - 2.0);
+        assert_eq!(below.left_inset, (layout::CHANGES_WIDTH - 2.0) / 2.0);
     }
 
     #[test]
@@ -912,6 +1043,63 @@ mod tests {
         assert_eq!(narrower.left_inset, 0.0);
         assert!(narrower.show_changes);
         assert!(!narrower.show_history);
+    }
+
+    #[test]
+    fn reflow_moves_the_column_and_lands_exactly_on_target() {
+        let now = Instant::now();
+        let available = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
+        let closed = ChatGeometry::from_layout(&chat_layout(
+            available, false, false, DockPanel::History,
+        ));
+        let opened = ChatGeometry::from_layout(&chat_layout(
+            available, false, true, DockPanel::History,
+        ));
+        let mut reflow = ChatReflow::settled(closed, now);
+        assert!(!reflow.running(now));
+        reflow.retarget(opened, now);
+        assert_eq!(reflow.sample(now), closed);
+
+        let middle = reflow.sample(now + CHAT_REFLOW_DURATION / 2);
+        assert!(middle.left_inset < closed.left_inset);
+        assert!(middle.left_inset > opened.left_inset);
+        assert_eq!(middle.width, full_chat_width());
+        assert!(
+            (middle.left_inset + middle.width / 2.0
+                - (available - middle.dock_width) / 2.0)
+                .abs()
+                < 0.001
+        );
+
+        let end = now + CHAT_REFLOW_DURATION;
+        assert_eq!(reflow.sample(end), opened);
+        assert!(!reflow.running(end));
+    }
+
+    #[test]
+    fn reflow_retargets_without_jumping_or_restarting_on_notifications() {
+        let now = Instant::now();
+        let available = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
+        let closed = ChatGeometry::from_layout(&chat_layout(
+            available, false, false, DockPanel::History,
+        ));
+        let both = ChatGeometry::from_layout(&chat_layout(
+            available, true, true, DockPanel::History,
+        ));
+        let mut reflow = ChatReflow::settled(closed, now);
+        reflow.retarget(both, now);
+        let interrupted = now + CHAT_REFLOW_DURATION / 3;
+        let current = reflow.sample(interrupted);
+        reflow.retarget(both, interrupted);
+        assert_eq!(reflow.started, now);
+        reflow.retarget(closed, interrupted);
+        assert_eq!(reflow.sample(interrupted), current);
+        assert_eq!(reflow.sample(interrupted + CHAT_REFLOW_DURATION), closed);
+
+        // Reduced motion / resizing uses the same settled path as startup.
+        let snapped = ChatReflow::settled(both, interrupted);
+        assert_eq!(snapped.sample(interrupted), both);
+        assert!(!snapped.running(interrupted));
     }
 
     #[test]

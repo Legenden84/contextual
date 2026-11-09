@@ -14,13 +14,19 @@ The main workspace with a project open, files selected and a finished assistant 
 - Switching tabs preserves the composer draft and the feature view state.
 - Diff and Inspect use the full area beneath the header, hiding the right sidebar.
   Chat and file previews are capped at the 820px reading width plus horizontal padding.
-  On wide windows they stay centred in the area to the right of the explorer. When a
-  panel needs more room, consume the empty left gutter before narrowing the reading
-  column; keeping the composer usable takes priority over preserving its centre.
-- Changes and chat history dock side by side when two standard sidebar widths fit in
-  the centred column's natural right gutter, with history rightmost. Otherwise they
-  share one slot, with the most recently opened panel on top. The covered panel keeps
-  its state but is not painted or interactive; its header button brings it forward.
+  Centre the reading column in the area remaining after the explorer and all visible
+  right panels have been subtracted. Responses, context summary and composer share
+  this column; neither side should carry an oversized empty gutter.
+- Changes and chat history dock side by side when two standard sidebar widths fit
+  alongside a full reading column, with history rightmost. Otherwise they share one
+  slot, with the most recently opened panel on top. The covered panel keeps its state
+  but is not painted or interactive; its header button brings it forward.
+- Dock changes move the reading column into place with a 180ms ease-out transition.
+  Position, width and dock reservation move together; code and text are never scaled.
+  A second toggle retargets from the current position without jumping. Ordinary chat
+  updates do not restart the transition. Initial layout, window resizing, zoom and
+  compact navigation use their final geometry immediately. Reduce motion disables
+  the transition. No animation frames are requested after it settles.
 - Dock a right panel only when there is room for its standard width and at least a
   480px chat column. Below that threshold, History and Changes become explicit
   full-width views beneath the header. Their buttons open or hide them; Chat returns
@@ -52,10 +58,10 @@ The main workspace with a project open, files selected and a finished assistant 
   windows start with Chat visible and expose history through the header button.
 - Selecting a saved chat explicitly loads it and closes history. New chat also closes
   history. Search, rename and deletion remain available in the panel.
-- On wide windows, closing history preserves the messages' and composer's horizontal
-  centre. Smaller docked layouts reclaim the available width. Closing the front dock
-  reveals the other if it is still open; on wider windows both remain visible side by
-  side. Opening history from Diff or Inspect returns to Chat. Compact views show one
+- Closing history recentres the messages and composer in the newly available area,
+  using the same eased transition as opening it. Closing the front dock reveals the
+  other if it is still open; on wider windows both remain visible side by side.
+  Opening history from Diff or Inspect returns to Chat. Compact views show one
   auxiliary panel at a time and return to Chat when hidden.
 
 ## Native Source Control workflow
