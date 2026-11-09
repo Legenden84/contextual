@@ -307,6 +307,32 @@ async fn parity_with_node_server() {
 }
 
 #[tokio::test]
+async fn conversation_requests_use_the_configured_completion_limit() {
+    for deployment in ["gpt-resp", "gpt-chat"] {
+        for limit in [8_192, 32_768] {
+            let server = azure_like().await;
+            let mut config = cfg(&server.uri(), deployment);
+            config.max_completion_tokens = limit;
+            let client = FoundryClient::new(config).unwrap().with_max_retries(0);
+
+            chat(&client, req(vec![], "Hello", None)).await;
+
+            let requests = server.received_requests().await.unwrap();
+            assert_eq!(requests.len(), if deployment == "gpt-chat" { 2 } else { 1 });
+            for request in requests {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let field = if request.url.path().starts_with("/openai/v1/responses") {
+                    "max_output_tokens"
+                } else {
+                    "max_completion_tokens"
+                };
+                assert_eq!(body[field], json!(limit), "{deployment}: {field}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn streams_deltas_usage_and_done_over_a_channel() {
     let server = azure_like().await;
     let c = client(&server.uri(), "gpt-resp");

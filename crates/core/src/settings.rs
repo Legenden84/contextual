@@ -553,6 +553,23 @@ mod tests {
     }
 
     #[test]
+    fn completion_limit_uses_settings_then_environment_override() {
+        let secrets = MemorySecretStore::new();
+        secrets.set(API_KEY_SECRET, "k").unwrap();
+        let mut settings = settings();
+        settings.foundry.max_completion_tokens = Some(8_192);
+
+        let from_settings = resolve_foundry_config(&settings, &secrets, |_| None).unwrap();
+        assert_eq!(from_settings.max_completion_tokens, 8_192);
+
+        let from_env = resolve_foundry_config(&settings, &secrets, |name| {
+            (name == config::ENV_MAX_COMPLETION_TOKENS).then(|| "32768".into())
+        })
+        .unwrap();
+        assert_eq!(from_env.max_completion_tokens, 32_768);
+    }
+
+    #[test]
     fn file_round_trip_keeps_unknown_keys_and_never_the_key() {
         let dir = tempfile::tempdir().unwrap();
         let store = SettingsStore::new(dir.path().join("cfg").join("settings.json"));

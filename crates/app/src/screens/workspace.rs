@@ -9,8 +9,8 @@ use contextual_theme::layout;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyView, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    AnyView, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Pixels,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, canvas, div,
 };
 
 use crate::state::chat::{ChatModel, Toast};
@@ -254,6 +254,8 @@ pub struct WorkspaceScreen {
     /// merely because the window was resized.
     compact_panel: Option<DockPanel>,
     compact_project: bool,
+    /// Actual allocated width, excluding any surrounding native window chrome.
+    workspace_width: Option<Pixels>,
     chat_reflow: Option<ChatReflow>,
     reflow_available: Option<f32>,
     reflow_frame_pending: bool,
@@ -441,6 +443,7 @@ impl WorkspaceScreen {
             docks: DockState::new(),
             compact_panel: None,
             compact_project: false,
+            workspace_width: None,
             chat_reflow: None,
             reflow_available: None,
             reflow_frame_pending: false,
@@ -626,9 +629,11 @@ impl Render for WorkspaceScreen {
         let has_changes = chat.change_message().is_some();
         let feature_view = matches!(active, Tab::Diff | Tab::Inspect);
         let history_open = self.chats.read(cx).open && !feature_view;
-        // Convert measured logical pixels back to design space before doing layout.
-        // The resulting dimensions are scaled exactly once by theme::px below.
-        let viewport = f32::from(window.viewport_size().width) / crate::theme::zoom_factor();
+        // Budget from the allocated workspace, not the native viewport: decorations
+        // and ancestor layout can leave less room than the window reports.
+        // Store logical pixels so zoom is applied exactly once, here and in theme::px.
+        let viewport =
+            self.workspace_width.map(f32::from).unwrap_or_default() / crate::theme::zoom_factor();
         let explorer_docked = docked_explorer(viewport);
         let available = (viewport
             - if explorer_docked {
@@ -901,8 +906,11 @@ impl Render for WorkspaceScreen {
                             .flex_1()
                             .min_h_0()
                             .min_w_0()
+                            .overflow_hidden()
                             .when(!feature_view && !auxiliary_view, |d| {
-                                d.flex_none().w(px(geometry.width))
+                                d.flex_none()
+                                    .min_w(px(layout::CHAT_MIN_WIDTH.min(available)))
+                                    .w(px(geometry.width))
                             })
                             .child(body),
                     )
@@ -946,14 +954,46 @@ impl Render for WorkspaceScreen {
                     }),
             );
 
+        let measured_width = self.workspace_width;
+        let workspace = cx.entity().downgrade();
+
         div()
             .relative()
             .flex()
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .when(explorer_docked, |d| d.child(self.sidebar.clone()))
-            .child(main)
+            .overflow_hidden()
+            .child(
+                canvas(
+                    |bounds, _, _| bounds.size.width,
+                    move |_, width, window, _| {
+                        if measured_width == Some(width) {
+                            return;
+                        }
+                        // Layout is complete; update on the next frame rather than
+                        // mutating an entity during paint. Settled layouts schedule nothing.
+                        window.on_next_frame(move |_, cx| {
+                            workspace
+                                .update(cx, |this, cx| {
+                                    if this.workspace_width != Some(width) {
+                                        this.workspace_width = Some(width);
+                                        cx.notify();
+                                    }
+                                })
+                                .ok();
+                        });
+                    },
+                )
+                .absolute()
+                .inset_0()
+                .size_full(),
+            )
+            // First measure the allocation without guessing at dock widths.
+            .when(measured_width.is_some(), |d| {
+                d.when(explorer_docked, |d| d.child(self.sidebar.clone()))
+                    .child(main)
+            })
             .when_some(toast(&self.app, &self.chat, cx), |d, t| d.child(t))
             .when_some(self.save_dialog.clone(), |d, s| d.child(s))
             .when_some(self.pr_dialog.clone(), |d, s| d.child(s))
@@ -1122,6 +1162,34 @@ mod tests {
         let end = now + CHAT_REFLOW_DURATION;
         assert_eq!(reflow.sample(end), opened);
         assert!(!reflow.running(end));
+    }
+
+    #[test]
+    fn history_reflow_preserves_chat_minimum_and_never_crosses_its_column() {
+        let now = Instant::now();
+        for available in [
+            layout::CHAT_MIN_WIDTH + layout::CHANGES_WIDTH,
+            1280.0 - layout::EXPLORER_WIDTH,
+        ] {
+            let closed =
+                ChatGeometry::from_layout(&chat_layout(available, false, false, DockPanel::History));
+            let opened =
+                ChatGeometry::from_layout(&chat_layout(available, false, true, DockPanel::History));
+
+            for (from, target) in [(closed, opened), (opened, closed)] {
+                let mut reflow = ChatReflow::settled(from, now);
+                reflow.retarget(target, now);
+                for step in 0..=18 {
+                    let geometry = reflow.sample(now + Duration::from_millis(step * 10));
+                    assert!(geometry.width >= layout::CHAT_MIN_WIDTH);
+                    assert!(
+                        geometry.left_inset + geometry.width
+                            <= available - geometry.dock_width + 0.001,
+                        "Chat must end before the reserved history area: {geometry:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
