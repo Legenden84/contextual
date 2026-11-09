@@ -270,6 +270,12 @@ impl WorkspaceScreen {
         cx: &mut Context<Self>,
     ) -> Self {
         let subs = vec![
+            cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+                if window.is_window_active() {
+                    // Git may have changed in another shell while the app was inactive.
+                    this.scm.update(cx, |scm, cx| scm.refresh(cx));
+                }
+            }),
             cx.observe_in(&project, window, |this: &mut Self, project, window, cx| {
                 // Feature tabs have their own persistent entities, not file previews.
                 let tabs = project.read(cx).tabs.clone();

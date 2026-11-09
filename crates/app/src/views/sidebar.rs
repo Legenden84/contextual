@@ -62,9 +62,10 @@ impl Sidebar {
         }
     }
 
-    /// Shows the Source Control tab (debug automation, see `dev.rs`).
+    /// Shows Source Control with fresh Git status (also used by debug automation).
     pub fn show_scm(&mut self, cx: &mut Context<Self>) {
         self.tab = SideTab::Scm;
+        self.scm.update(cx, |scm, cx| scm.refresh(cx));
         cx.notify();
     }
 
@@ -96,8 +97,12 @@ impl Sidebar {
             .text_color(hsla(if active { c.ink_strong } else { c.ink_muted }))
             .cursor_pointer()
             .on_click(cx.listener(move |t, _, _, cx| {
-                t.tab = tab;
-                cx.notify();
+                if tab == SideTab::Scm {
+                    t.show_scm(cx);
+                } else {
+                    t.tab = tab;
+                    cx.notify();
+                }
             }))
             .child(Icon::new(icon).size(px(14.0)))
             .child(SharedString::from(label))

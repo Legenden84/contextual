@@ -35,6 +35,8 @@ pub struct ScmModel {
     pub branch_picker_open: bool,
     pub branch_error: Option<String>,
     seen_rescans: u64,
+    refreshing: bool,
+    refresh_pending: bool,
     _sub: Subscription,
 }
 
@@ -68,6 +70,8 @@ impl ScmModel {
             branch_picker_open: false,
             branch_error: None,
             seen_rescans,
+            refreshing: false,
+            refresh_pending: false,
             _sub: sub,
         };
         this.refresh(cx);
@@ -94,6 +98,12 @@ impl ScmModel {
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.refreshing {
+            // A fresh read must follow the current one: it may predate an external commit.
+            self.refresh_pending = true;
+            return;
+        }
+        self.refreshing = true;
         let host = self.host.clone();
         let req = RootRequest {
             root: self.root(cx),
@@ -102,6 +112,12 @@ impl ScmModel {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                this.refreshing = false;
+                if std::mem::take(&mut this.refresh_pending) {
+                    // Don't publish a snapshot that another refresh has already superseded.
+                    this.refresh(cx);
+                    return;
+                }
                 match result {
                     Ok(s) => {
                         this.status = Some(s);
