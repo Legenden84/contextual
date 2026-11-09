@@ -96,10 +96,17 @@ struct ChatLayout {
     show_history: bool,
 }
 
-/// Centre in the entire area after the explorer. Use the natural right gutter
-/// first; only shrink the chat when one open panel cannot fit there. Shrinking
-/// is symmetric, so its centre never moves. Two panels must fit without further
-/// shrinking; otherwise only the front panel is painted in their shared slot.
+fn compact_workspace(available: f32) -> bool {
+    available < layout::CHAT_MIN_WIDTH + layout::CHANGES_WIDTH
+}
+
+fn docked_explorer(viewport: f32) -> bool {
+    viewport >= layout::EXPLORER_WIDTH + layout::CHAT_MIN_WIDTH
+}
+
+/// Keep the natural centre when there is room, then consume the empty left
+/// gutter before narrowing Chat. Below a comfortable chat + dock width, panels
+/// become explicit, full-width views instead of squeezing the composer.
 fn chat_layout(
     available: f32,
     changes_open: bool,
@@ -110,25 +117,24 @@ fn chat_layout(
     let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
     let natural_width = available.min(max_width);
     let natural_gutter = (available - natural_width) / 2.0;
-    // At extreme zoom/narrow widths, keep a third for Chat and a third for the
-    // dock. Its contents remain accessible through horizontal scrolling.
-    let panel_width = layout::CHANGES_WIDTH.min(available / 3.0);
-    let any_open = changes_open || history_open;
-    let width = if any_open {
-        natural_width.min((available - 2.0 * panel_width).max(0.0))
-    } else {
-        natural_width
-    };
+    let compact = compact_workspace(available);
+    let panel_width = layout::CHANGES_WIDTH.min(available);
     let fits_both = natural_gutter >= 2.0 * layout::CHANGES_WIDTH;
+    let show_changes = !compact
+        && changes_open
+        && (!history_open || fits_both || front == DockPanel::Changes);
+    let show_history = !compact
+        && history_open
+        && (!changes_open || fits_both || front == DockPanel::History);
+    let reserved = (usize::from(show_changes) + usize::from(show_history)) as f32 * panel_width;
+    let width = natural_width.min((available - reserved).max(0.0));
 
     ChatLayout {
-        left_inset: (available - width) / 2.0,
+        left_inset: ((available - width) / 2.0).min((available - reserved - width).max(0.0)),
         width,
         panel_width,
-        show_changes: changes_open
-            && (!history_open || fits_both || front == DockPanel::Changes),
-        show_history: history_open
-            && (!changes_open || fits_both || front == DockPanel::History),
+        show_changes,
+        show_history,
     }
 }
 
@@ -147,6 +153,10 @@ pub struct WorkspaceScreen {
     inspect: Entity<InspectScreen>,
     chats: Entity<ChatsMenu>,
     docks: DockState,
+    /// Compact navigation is explicit: default-open history must not replace Chat
+    /// merely because the window was resized.
+    compact_panel: Option<DockPanel>,
+    compact_project: bool,
     save_dialog: Option<Entity<SaveDialog>>,
     context: ContextCache,
     _subs: Vec<Subscription>,
@@ -199,6 +209,8 @@ impl WorkspaceScreen {
             }),
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.subscribe_in(&app, window, |this, _, _: &ReturnToChat, window, cx| {
+                this.compact_panel = None;
+                this.compact_project = false;
                 this.project.update(cx, |p, cx| {
                     p.activate(Tab::Chat);
                     cx.notify();
@@ -307,6 +319,8 @@ impl WorkspaceScreen {
             inspect: cx.new(|cx| InspectScreen::new(chat.clone(), window, cx)),
             chats,
             docks: DockState::new(),
+            compact_panel: None,
+            compact_project: false,
             save_dialog: None,
             chat,
             app,
@@ -363,6 +377,8 @@ impl Render for WorkspaceScreen {
         let chat_tab = self
             .tab("tab-chat".into(), active == Tab::Chat, cx)
             .on_click(cx.listener(|t, _, window, cx| {
+                t.compact_panel = None;
+                t.compact_project = false;
                 t.project.update(cx, |p, cx| {
                     p.activate(Tab::Chat);
                     cx.notify()
@@ -417,6 +433,8 @@ impl Render for WorkspaceScreen {
                 let close_label = format!("Close {name}");
                 self.tab(SharedString::from(format!("tab:{id}")), &active == tab, cx)
                     .on_click(cx.listener(move |t, _, _, cx| {
+                        t.compact_panel = None;
+                        t.compact_project = false;
                         t.project.update(cx, |p, cx| {
                             p.activate(activate.clone());
                             cx.notify()
@@ -452,17 +470,53 @@ impl Render for WorkspaceScreen {
         let history_open = self.chats.read(cx).open && !feature_view;
         // Convert measured logical pixels back to design space before doing layout.
         // The resulting dimensions are scaled exactly once by theme::px below.
+        let viewport = f32::from(window.viewport_size().width) / crate::theme::zoom_factor();
+        let explorer_docked = docked_explorer(viewport);
+        let available = (viewport
+            - if explorer_docked {
+                layout::EXPLORER_WIDTH
+            } else {
+                0.0
+            })
+        .max(0.0);
+        let compact = compact_workspace(available);
+        let project_visible = !explorer_docked && self.compact_project;
+        let compact_changes = compact
+            && !feature_view
+            && !project_visible
+            && has_changes
+            && self.compact_panel == Some(DockPanel::Changes);
+        let compact_history = compact
+            && !feature_view
+            && !project_visible
+            && history_open
+            && self.compact_panel == Some(DockPanel::History);
+        let auxiliary_view = project_visible || compact_changes || compact_history;
         let panes = chat_layout(
-            f32::from(window.viewport_size().width) / crate::theme::zoom_factor()
-                - layout::EXPLORER_WIDTH,
+            available,
             has_changes && self.docks.changes_open,
             history_open,
             self.docks.front,
         );
-        let changes_visible = !feature_view && panes.show_changes;
-        let history_visible = !feature_view && panes.show_history;
+        let changes_visible = !feature_view && (panes.show_changes || compact_changes);
+        let history_visible = !feature_view && (panes.show_history || compact_history);
 
-        let body = match &active {
+        let body = if project_visible {
+            div()
+                .id("compact-project")
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .overflow_x_scroll()
+                .child(self.sidebar.clone())
+                .into_any_element()
+        } else if compact_changes {
+            self.changes.clone().into_any_element()
+        } else if compact_history {
+            self.chats.clone().into_any_element()
+        } else {
+            match &active {
             Tab::Preview(path) => {
                 let view = self
                     .previews
@@ -497,13 +551,15 @@ impl Render for WorkspaceScreen {
             Tab::Chat => self.chat_panel.clone().into_any_element(),
             Tab::Diff => self.diff.clone().into_any_element(),
             Tab::Inspect => self.inspect.clone().into_any_element(),
+            }
         };
 
         let tab_bar = div()
             .id("center-tabs")
             .flex()
             .flex_none()
-            .h(px(TABS_H))
+            .min_w_0()
+            .when(compact, |d| d.flex_col())
             .border_b_1()
             .border_color(hsla(c.border))
             .bg(hsla(c.surface_000))
@@ -514,6 +570,8 @@ impl Render for WorkspaceScreen {
                     .flex()
                     .flex_1()
                     .min_w_0()
+                    .h(px(TABS_H))
+                    .when(compact, |d| d.flex_none().w_full())
                     .overflow_x_scroll()
                     .child(chat_tab)
                     .children(open_tabs),
@@ -525,6 +583,34 @@ impl Render for WorkspaceScreen {
                     .items_center()
                     .gap(sp(1))
                     .px(sp(2))
+                    .when(compact, |d| {
+                        d.flex_wrap().py(sp(1)).border_t_1().border_color(hsla(c.border))
+                    })
+                    .when(!explorer_docked, |d| {
+                        d.child(
+                            Button::new(
+                                "toggle-project",
+                                if project_visible { "Back to chat" } else { "Project" },
+                            )
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .selected(project_visible)
+                            .on_click(cx.listener(|t, _, window, cx| {
+                                t.compact_project = !t.compact_project;
+                                t.compact_panel = None;
+                                if !t.compact_project {
+                                    t.project.update(cx, |p, cx| {
+                                        p.activate(Tab::Chat);
+                                        cx.notify();
+                                    });
+                                    t.chat_panel.update(cx, |panel, cx| {
+                                        panel.focus_input(window, cx);
+                                    });
+                                }
+                                cx.notify();
+                            })),
+                        )
+                    })
                     .when(has_changes, |d| {
                         d.child(
                             Button::new(
@@ -537,14 +623,25 @@ impl Render for WorkspaceScreen {
                             )
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(move |t, _, _, cx| {
+                            .on_click(cx.listener(move |t, _, window, cx| {
+                                t.compact_project = false;
                                 if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
                                     t.project.update(cx, |p, cx| {
                                         p.activate(Tab::Chat);
                                         cx.notify();
                                     });
                                 }
-                                t.docks.toggle_changes(changes_visible);
+                                if compact {
+                                    t.compact_panel =
+                                        (!changes_visible).then_some(DockPanel::Changes);
+                                    if changes_visible {
+                                        t.chat_panel.update(cx, |panel, cx| {
+                                            panel.focus_input(window, cx);
+                                        });
+                                    }
+                                } else {
+                                    t.docks.toggle_changes(changes_visible);
+                                }
                                 cx.notify();
                             })),
                         )
@@ -560,12 +657,29 @@ impl Render for WorkspaceScreen {
                         )
                         .size(ButtonSize::Xs)
                         .variant(ButtonVariant::Ghost)
-                        .on_click(cx.listener(move |t, _, _, cx| {
+                        .on_click(cx.listener(move |t, _, window, cx| {
+                            t.compact_project = false;
                             if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
                                 t.project.update(cx, |p, cx| {
                                     p.activate(Tab::Chat);
                                     cx.notify();
                                 });
+                            }
+                            if compact {
+                                t.compact_panel =
+                                    (!history_visible).then_some(DockPanel::History);
+                                if history_visible {
+                                    t.chat_panel.update(cx, |panel, cx| {
+                                        panel.focus_input(window, cx);
+                                    });
+                                } else {
+                                    t.chats.update(cx, |m, cx| {
+                                        m.open = true;
+                                        cx.notify();
+                                    });
+                                }
+                                cx.notify();
+                                return;
                             }
                             if history_visible {
                                 t.docks.sync_history(false);
@@ -599,7 +713,7 @@ impl Render for WorkspaceScreen {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .when(!feature_view, |d| {
+                    .when(!feature_view && !auxiliary_view, |d| {
                         d.child(div().flex_none().w(px(panes.left_inset)))
                     })
                     .child(
@@ -609,10 +723,12 @@ impl Render for WorkspaceScreen {
                             .flex_1()
                             .min_h_0()
                             .min_w_0()
-                            .when(!feature_view, |d| d.flex_none().w(px(panes.width)))
+                            .when(!feature_view && !auxiliary_view, |d| {
+                                d.flex_none().w(px(panes.width))
+                            })
                             .child(body),
                     )
-                    .when(!feature_view, |d| {
+                    .when(!feature_view && !auxiliary_view, |d| {
                         d.child(
                             div()
                                 .id("workspace-right-dock")
@@ -658,7 +774,7 @@ impl Render for WorkspaceScreen {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .child(self.sidebar.clone())
+            .when(explorer_docked, |d| d.child(self.sidebar.clone()))
             .child(main)
             .when_some(toast(&self.app, &self.chat, cx), |d, t| d.child(t))
             .when_some(self.save_dialog.clone(), |d, s| d.child(s))
@@ -681,10 +797,11 @@ mod tests {
     }
 
     #[test]
-    fn chat_is_always_centered_and_panels_stay_inside_the_workspace() {
+    fn chat_and_panels_stay_inside_the_workspace() {
         for available in [
             0.0,
             300.0,
+            layout::CHAT_MIN_WIDTH + layout::CHANGES_WIDTH,
             full_chat_width(),
             full_chat_width() + layout::CHANGES_WIDTH,
             full_chat_width() + 2.0 * layout::CHANGES_WIDTH,
@@ -694,18 +811,24 @@ mod tests {
                 for history in [false, true] {
                     for front in [DockPanel::Changes, DockPanel::History] {
                         let panes = chat_layout(available, changes, history, front);
-                        assert!(
-                            (panes.left_inset + panes.width / 2.0 - available / 2.0).abs()
-                                < 0.001
-                        );
                         let panel_count =
                             usize::from(panes.show_changes) + usize::from(panes.show_history);
+                        assert!(panes.left_inset >= 0.0);
+                        assert!(panes.width >= 0.0);
                         assert!(
                             panes.left_inset + panes.width
                                 + panel_count as f32 * panes.panel_width
                                 <= available + 0.001
                         );
-                        assert_eq!(panel_count > 0, changes || history);
+                        assert_eq!(
+                            panel_count > 0,
+                            !compact_workspace(available) && (changes || history)
+                        );
+                        if panel_count > 0 {
+                            assert!(panes.width >= layout::CHAT_MIN_WIDTH);
+                        } else {
+                            assert_eq!(panes.width, available.min(full_chat_width()));
+                        }
                     }
                 }
             }
@@ -731,23 +854,29 @@ mod tests {
     }
 
     #[test]
-    fn zoomed_or_narrow_windows_shrink_chat_instead_of_hiding_open_panels() {
+    fn narrow_and_zoomed_windows_prioritise_chat() {
+        let threshold = layout::CHAT_MIN_WIDTH + layout::CHANGES_WIDTH;
         for scale in [1.0, 1.5, 2.0] {
-            let available = 300.0;
-            let viewport = (available + layout::EXPLORER_WIDTH) * scale;
-            let design_width = viewport / scale - layout::EXPLORER_WIDTH;
-            for front in [DockPanel::Changes, DockPanel::History] {
-                let panes = chat_layout(design_width, true, true, front);
-                assert_eq!(panes.width, available / 3.0);
-                assert_eq!(panes.left_inset, available / 3.0);
-                assert_eq!(panes.panel_width, available / 3.0);
-                assert_eq!(panes.show_changes, front == DockPanel::Changes);
-                assert_eq!(panes.show_history, front == DockPanel::History);
+            for available in [300.0, threshold - 1.0] {
+                let measured = available * scale;
+                let design_width = measured / scale;
+                for front in [DockPanel::Changes, DockPanel::History] {
+                    let panes = chat_layout(design_width, true, true, front);
+                    assert_eq!(panes.width, available);
+                    assert_eq!(panes.left_inset, 0.0);
+                    assert!(!panes.show_changes);
+                    assert!(!panes.show_history);
+                }
             }
-            let closed = chat_layout(design_width, false, false, DockPanel::History);
-            assert_eq!(closed.width, available);
-            assert_eq!(closed.left_inset, 0.0);
         }
+        let panes = chat_layout(threshold, true, true, DockPanel::History);
+        assert_eq!(panes.width, layout::CHAT_MIN_WIDTH);
+        assert!(panes.show_history);
+
+        let explorer_threshold = layout::EXPLORER_WIDTH + layout::CHAT_MIN_WIDTH;
+        assert!(!docked_explorer(explorer_threshold - 1.0));
+        assert!(docked_explorer(explorer_threshold));
+
         let panes = chat_layout(-10.0, true, true, DockPanel::History);
         assert_eq!(panes.width, 0.0);
         assert_eq!(panes.left_inset, 0.0);
@@ -767,8 +896,22 @@ mod tests {
             }
         }
         let below = chat_layout(threshold - 2.0, true, true, DockPanel::Changes);
-        assert_eq!(below.width, full_chat_width() - 2.0);
-        assert_eq!(below.left_inset, layout::CHANGES_WIDTH);
+        assert_eq!(below.width, full_chat_width());
+        assert_eq!(below.left_inset, layout::CHANGES_WIDTH - 2.0);
+    }
+
+    #[test]
+    fn medium_windows_spend_the_empty_gutter_before_chat_width() {
+        let available = full_chat_width() + layout::CHANGES_WIDTH;
+        let panes = chat_layout(available, true, true, DockPanel::History);
+        assert_eq!(panes.width, full_chat_width());
+        assert_eq!(panes.left_inset, 0.0);
+
+        let narrower = chat_layout(available - 100.0, true, true, DockPanel::Changes);
+        assert_eq!(narrower.width, full_chat_width() - 100.0);
+        assert_eq!(narrower.left_inset, 0.0);
+        assert!(narrower.show_changes);
+        assert!(!narrower.show_history);
     }
 
     #[test]

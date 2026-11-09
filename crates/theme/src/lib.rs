@@ -121,6 +121,8 @@ pub mod layout {
     pub const CHANGES_WIDTH: f32 = 320.0;
     /// Chat thread reading width.
     pub const CONTENT_MAX_WIDTH: f32 = 820.0;
+    /// Minimum comfortable chat column before auxiliary panes become on-demand views.
+    pub const CHAT_MIN_WIDTH: f32 = 480.0;
     /// Compact warning before sending with incomplete AI settings.
     pub const SETTINGS_PROMPT_WIDTH: f32 = 440.0;
     /// Tab width in code views.

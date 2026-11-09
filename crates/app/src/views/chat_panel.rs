@@ -153,7 +153,7 @@ impl ChatPanel {
     ) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(2, 12)
+                .auto_grow(2, 6)
                 // Plain Enter is handled below. Shift+Enter stays a native newline.
                 .submit_on_enter(true)
                 .placeholder("Ask for a change… (Ctrl+Enter to send)")
@@ -761,9 +761,10 @@ fn render_message(
     let Some(m) = chat.messages.get(ix) else {
         return div().into_any_element();
     };
-    let row = div().w_full().flex().justify_center().px(sp(4)).py(sp(3));
+    let row = div().w_full().min_w_0().flex().justify_center().px(sp(4)).py(sp(3));
     let column = div()
         .w_full()
+        .min_w_0()
         .max_w(px(layout::CONTENT_MAX_WIDTH))
         .type_style(contextual_theme::type_style::UI_PROSE);
     let el = match m.role {
@@ -838,6 +839,7 @@ fn render_message(
                         div()
                             .mt(sp(2))
                             .flex()
+                            .flex_wrap()
                             .items_center()
                             .gap(sp(2))
                             .type_style(contextual_theme::type_style::UI_SMALL)
@@ -967,6 +969,7 @@ fn read_row(
             d.child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(sp(2))
                     .text_color(hsla(c.warning))
@@ -1001,6 +1004,8 @@ fn header(who: &str, m: &UiMessage, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()
         .flex()
+        .flex_wrap()
+        .min_w_0()
         .items_center()
         .gap(sp(2))
         .type_style(contextual_theme::type_style::UI_SMALL)
@@ -1098,16 +1103,23 @@ impl Render for ChatPanel {
             .map(|(i, (id, name, w, h, tokens))| {
                 div()
                     .flex()
+                    .max_w_full()
+                    .min_w_0()
                     .items_center()
                     .gap(sp(1))
                     .pl(sp(2))
                     .rounded(px(contextual_theme::radius::SM))
                     .bg(hsla(c.pill_bg))
                     .type_style(contextual_theme::type_style::UI_SMALL)
-                    .child(SharedString::from(format!(
-                        "{name} · {w}×{h} · ~{}",
-                        fmt_k(tokens)
-                    )))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .child(SharedString::from(format!(
+                                "{name} · {w}×{h} · ~{}",
+                                fmt_k(tokens)
+                            ))),
+                    )
                     .child(
                         Button::new(("rm-img", i), "Remove")
                             .size(ButtonSize::Xs)
@@ -1143,6 +1155,8 @@ impl Render for ChatPanel {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
+            .w_full()
             .when(!streaming && !self.image_loading, |d| {
                 d.drag_over::<ExternalPaths>(|s, _, _, cx| {
                     s.bg(hsla(cx.tokens().colors.surface_selected))
@@ -1157,22 +1171,28 @@ impl Render for ChatPanel {
                     .flex()
                     .flex_col()
                     .flex_none()
+                    .min_w_0()
+                    .w_full()
                     .items_center()
                     .px(sp(4))
                     .pb(sp(3))
                     .child(
                         div()
+                            .flex()
+                            .flex_col()
+                            .flex_none()
+                            .min_w_0()
                             .w_full()
                             .max_w(px(layout::CONTENT_MAX_WIDTH))
                             .child(
                                 div()
                                     .flex()
-                                    .flex_wrap()
-                                    .items_center()
+                                    .min_w_0()
+                                    .items_start()
                                     .justify_end()
                                     .gap(sp(2))
                                     .child(
-                                        div().flex_1().child(context_bar(
+                                        div().flex_1().min_w_0().child(context_bar(
                                             &self.app,
                                             &self.project,
                                             Some(&self.chat),
@@ -1187,6 +1207,8 @@ impl Render for ChatPanel {
                                     .id("composer")
                                     .flex()
                                     .flex_col()
+                                    .min_w_0()
+                                    .w_full()
                                     .gap(sp(2))
                                     .p(sp(2))
                                     .rounded(px(contextual_theme::radius::MD))
@@ -1218,7 +1240,17 @@ impl Render for ChatPanel {
                                         )
                                     })
                                     .when(!chips.is_empty(), |d| {
-                                        d.child(div().flex().flex_wrap().gap(sp(1)).children(chips))
+                                        d.child(
+                                            div()
+                                                .id("composer-attachments")
+                                                .flex()
+                                                .flex_wrap()
+                                                .min_w_0()
+                                                .max_h(px(contextual_theme::space::ROW_HEIGHT * 3.0))
+                                                .overflow_y_scroll()
+                                                .gap(sp(1))
+                                                .children(chips),
+                                        )
                                     })
                                     .child(Textarea::new(&self.input).appearance(false).on_paste(
                                         move |item, _, cx| {
@@ -1256,8 +1288,7 @@ impl Render for ChatPanel {
                                                                 .child(
                                                                     div()
                                                                         .min_w_0()
-                                                                        .overflow_hidden()
-                                                                        .whitespace_nowrap()
+                                                                        .whitespace_normal()
                                                                         .child(label),
                                                                 ),
                                                         )
@@ -1274,6 +1305,7 @@ impl Render for ChatPanel {
                                                     d.child(
                                                         div()
                                                             .id("send-tooltip")
+                                                            .flex_none()
                                                             .tooltip(|window, cx| {
                                                                 gpui_kit::component::tooltip::Tooltip::new(
                                                                     "Send (Ctrl+Enter)",

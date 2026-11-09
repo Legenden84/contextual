@@ -1,7 +1,6 @@
 //! Chat history: saved conversations of this project (search, open, rename, delete, delete all)
 //! and New chat. Docked on the right, open by default when a project opens.
 
-use contextual_theme::layout;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -173,7 +172,8 @@ impl Render for ChatsMenu {
 
         div()
             .id("chats-menu")
-            .w(px(layout::CHANGES_WIDTH))
+            .w_full()
+            .min_w_0()
             .h_full()
             .min_h_0()
             .flex()
@@ -198,7 +198,7 @@ impl Render for ChatsMenu {
                     .border_b_1()
                     .border_color(hsla(c.border))
                     .child(
-                        div().flex_1().child(
+                        div().flex_1().min_w_0().child(
                             Input::new(&self.search)
                                 .small()
                                 .prefix(Icon::new(IconName::Search).size(px(14.0))),

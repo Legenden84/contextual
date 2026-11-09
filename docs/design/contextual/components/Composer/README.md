@@ -7,6 +7,17 @@ based on their hashes. Unchanged files remain available through the conversation
 duplicating their contents in the new turn. The model can request additional files as needed.
 There is no context-mode selector. Ctrl+Enter sends.
 
+## Responsive layout
+
+The composer fills the available chat column up to the reading-width cap; its flex
+children must be allowed to shrink. Context counts, budget warnings and estimated
+cost wrap onto additional lines instead of overflowing behind an adjacent panel.
+Inspect remains a separate control at the top right of the context summary.
+
+The input grows from two to six lines before scrolling internally. Attachment lists
+scroll after three standard row heights so a large batch does not consume the thread.
+Activity labels and message metadata wrap when needed; Send / Stop do not shrink.
+
 ## Markdown typing
 
 The composer remains a native plain-text input: Markdown markers stay visible and editable.

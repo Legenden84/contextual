@@ -17,7 +17,6 @@ use crate::state::chat::ChatModel;
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
 
-const BAR_H: f32 = 28.0;
 const METER_W: f32 = 140.0;
 const METER_H: f32 = 4.0;
 
@@ -183,28 +182,33 @@ pub fn context_bar(
 
     div()
         .flex()
+        .flex_wrap()
+        .w_full()
+        .min_w_0()
         .items_center()
         .gap(sp(2))
-        .h(px(BAR_H))
+        .py(sp(1))
         .type_style(contextual_theme::type_style::UI_SMALL)
         .text_color(hsla(c.ink_muted))
         .child(Icon::new(IconName::File).size(px(14.0)))
         .child(
             div()
                 .flex()
+                .flex_wrap()
+                .min_w_0()
                 .gap(sp(1))
-                .whitespace_nowrap()
                 .child(
                     div()
                         .text_color(hsla(c.ink))
                         .font_weight(gpui_kit::FontWeight::MEDIUM)
                         .child(SharedString::from(format!("{} files", t.files))),
                 )
-                .child(SharedString::from(format!(
-                    "· {} rules · ~{} tokens",
-                    t.rules,
-                    fmt_n(t.tokens)
-                ))),
+                .child(SharedString::from(format!("· {} rules", t.rules)))
+                .child(
+                    div()
+                        .type_style(contextual_theme::type_style::CODE_SMALL)
+                        .child(SharedString::from(format!("· ~{} tokens", fmt_n(t.tokens)))),
+                ),
         )
         .child(
             div()
@@ -252,18 +256,16 @@ pub fn context_bar(
                 d.child(
                     div()
                         .min_w_0()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
+                        .whitespace_normal()
                         .child(SharedString::from(h)),
                 )
             })
         })
-        .child(div().flex_1())
         .child(
             div()
+                .min_w_0()
                 .type_style(contextual_theme::type_style::CODE_SMALL)
-                .whitespace_nowrap()
+                .whitespace_normal()
                 .child(SharedString::from(if priced && t.long_context {
                     let above = deployment.long_context.as_ref().map_or(0, |l| l.above);
                     format!(

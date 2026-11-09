@@ -2,7 +2,6 @@
 //! saving, with counts, +/− and conflicts; Open diff and Save N files….
 
 use contextual_core::logic::types::ChangeStatus;
-use contextual_theme::layout;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -184,7 +183,9 @@ impl Render for ChangesPanel {
             .flex()
             .flex_col()
             .flex_none()
-            .w(px(layout::CHANGES_WIDTH))
+            .w_full()
+            .min_w_0()
+            .min_h_0()
             .h_full()
             .border_l_1()
             .border_color(hsla(c.border))
@@ -225,6 +226,7 @@ impl Render for ChangesPanel {
                 div()
                     .flex()
                     .gap(sp(2))
+                    .flex_wrap()
                     .p(sp(3))
                     .border_t_1()
                     .border_color(hsla(c.border))
