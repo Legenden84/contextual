@@ -955,6 +955,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "keyring",
+ "rust-embed",
  "serde",
  "serde_json",
  "time",
