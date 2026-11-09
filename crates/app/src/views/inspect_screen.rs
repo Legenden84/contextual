@@ -12,8 +12,8 @@ use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ListAlignment,
-    ListOffset, ListState, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, list,
+    ListOffset, ListState, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, canvas, div, list,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
@@ -25,6 +25,46 @@ const TOOLBAR_H: f32 = 36.0;
 
 const NOT_RECORDED: &str =
     "The system prompt was not recorded for this round: the chat was saved before the app kept it.";
+
+/// Bound ingestion independently of source-line length. One pane advances per frame.
+/// These bound submitted text, not the editor's deferred layout/highlighting time.
+const LOAD_CHUNK_BYTES: usize = 16 * 1024;
+const LOAD_CHUNK_LINES: usize = 256;
+
+/// A viewport can show no more logical lines than visual rows. Wrapping only reduces that
+/// number. Include two extra lines so a partially visible row does not leave a gap.
+fn initial_line_count(height: Pixels) -> usize {
+    ((height / px(contextual_theme::type_style::CODE.line_height))
+        .ceil()
+        .max(1.0) as usize)
+        .saturating_add(2)
+}
+
+/// A bounded source slice, including its final newline when possible. Never split UTF-8 or
+/// CRLF. A minimum four-byte budget guarantees progress even for a four-byte character.
+/// `start` is always an endpoint returned by this function, beginning at zero.
+fn chunk_end(text: &str, start: usize, lines: usize, bytes: usize) -> usize {
+    if start >= text.len() {
+        return text.len();
+    }
+    let mut end = start.saturating_add(bytes.max(4)).min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if let Some((offset, _)) = text[start..end]
+        .match_indices('\n')
+        .nth(lines.max(1) - 1)
+    {
+        end = start + offset + 1;
+    }
+    if end < text.len()
+        && text.as_bytes()[end - 1] == b'\r'
+        && text.as_bytes()[end] == b'\n'
+    {
+        end -= 1;
+    }
+    end
+}
 
 /// Opt-in CPU timings. Only static stage names and numeric metadata are logged.
 /// Editor layout/highlighting may also run after these synchronous operations.
@@ -100,6 +140,37 @@ enum CopySource {
     Output,
 }
 
+/// A cancelled callback may still arrive after another load has been queued. Its ticket
+/// must not consume the newer callback's scheduled flag.
+#[derive(Default)]
+struct LoadQueue {
+    generation: u64,
+    scheduled: bool,
+}
+
+impl LoadQueue {
+    fn enqueue(&mut self) -> Option<u64> {
+        if self.scheduled {
+            return None;
+        }
+        self.scheduled = true;
+        Some(self.generation)
+    }
+
+    fn begin(&mut self, ticket: u64) -> bool {
+        if ticket != self.generation || !self.scheduled {
+            return false;
+        }
+        self.scheduled = false;
+        true
+    }
+
+    fn cancel(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.scheduled = false;
+    }
+}
+
 /// Prepared only when rounds are rebuilt, never while rendering or receiving deltas.
 struct RoundSummary {
     input: SharedString,
@@ -147,6 +218,13 @@ fn editor_changes(
     )
 }
 
+fn output_can_append(
+    shown: Option<(usize, InputMode, usize)>,
+    next: (usize, InputMode, usize),
+) -> bool {
+    shown.is_some_and(|previous| previous.0 == next.0 && previous.2 <= next.2)
+}
+
 pub struct InspectScreen {
     chat: Entity<ChatModel>,
     rounds: Vec<Round>,
@@ -161,7 +239,15 @@ pub struct InspectScreen {
     mode: InputMode,
     input: Entity<EditorState>,
     output: Entity<EditorState>,
-    /// What the editors show (round, mode, reply length), to skip needless updates.
+    /// Source byte offsets already submitted to each editor.
+    input_loaded: usize,
+    output_loaded: usize,
+    input_height: Option<Pixels>,
+    output_height: Option<Pixels>,
+    load_queue: LoadQueue,
+    next_pane: CopySource,
+    /// The source being displayed (round, mode, reply length). The loaded offsets can lag
+    /// behind this revision while the remaining text is ingested between frames.
     shown: Option<(usize, InputMode, usize)>,
     _sub: Subscription,
 }
@@ -175,6 +261,39 @@ fn editor(window: &mut Window, cx: &mut Context<InspectScreen>) -> Entity<Editor
         s.set_readonly(true, cx);
         s
     })
+}
+
+fn show_prefix(
+    editor: &Entity<EditorState>,
+    text: &str,
+    height: Pixels,
+    window: &mut Window,
+    cx: &mut Context<InspectScreen>,
+) -> usize {
+    let end = chunk_end(text, 0, initial_line_count(height), LOAD_CHUNK_BYTES);
+    let prefix = text[..end].to_owned();
+    editor.update(cx, |editor, cx| editor.set_value(prefix, window, cx));
+    end
+}
+
+/// Use an incremental edit, not set_value with an ever-growing prefix. The readonly flag
+/// is restored before returning to the event loop; this only changes the display buffer.
+/// Keep the user's selection rather than leaving it at the insertion point.
+fn append_chunk(
+    editor: &Entity<EditorState>,
+    text: String,
+    window: &mut Window,
+    cx: &mut Context<InspectScreen>,
+) {
+    editor.update(cx, |editor, cx| {
+        let selection = editor.selected_range();
+        let end = editor.value().len();
+        editor.set_readonly(false, cx);
+        editor.set_selected_range(end..end, cx);
+        editor.replace(text, window, cx);
+        editor.set_selected_range(selection, cx);
+        editor.set_readonly(true, cx);
+    });
 }
 
 fn usage_text(u: &Usage) -> String {
@@ -191,6 +310,9 @@ impl InspectScreen {
         let sub = cx.observe_in(&chat, window, |this: &mut Self, _, window, cx| {
             if this.chat.read(cx).center(cx) == CenterView::Inspect {
                 this.refresh(window, cx);
+            } else {
+                // Keep the already-loaded buffers, but do not ingest hidden documents.
+                this.load_queue.cancel();
             }
         });
         let mut this = Self {
@@ -205,6 +327,12 @@ impl InspectScreen {
             built: (u64::MAX, usize::MAX, false),
             selected: None,
             mode: InputMode::Message,
+            input_loaded: 0,
+            output_loaded: 0,
+            input_height: None,
+            output_height: None,
+            load_queue: LoadQueue::default(),
+            next_pane: CopySource::Input,
             shown: None,
             _sub: sub,
         };
@@ -274,33 +402,140 @@ impl InspectScreen {
 
     fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(i) = self.current() else {
-            let changed = self.shown.take().is_some();
+            self.load_queue.cancel();
+            let changed = self.shown.take().is_some()
+                || self.input_loaded > 0
+                || self.output_loaded > 0;
             if changed {
                 self.input.update(cx, |e, cx| e.set_value("", window, cx));
                 self.output.update(cx, |e, cx| e.set_value("", window, cx));
             }
+            self.input_loaded = 0;
+            self.output_loaded = 0;
             return changed;
         };
         let r = &self.rounds[i];
         let key = (i, self.mode, r.reply.len());
         let (input_changed, output_changed) = editor_changes(self.shown, key);
+        let reset_output = output_changed && !output_can_append(self.shown, key);
+        if input_changed || reset_output {
+            self.load_queue.cancel();
+            self.next_pane = CopySource::Input;
+        }
+
+        // Before the first layout, window height is a conservative upper bound on the pane
+        // height. Later selections use the actual measured pane, at the current zoom.
+        let fallback_height = window.viewport_size().height;
         if input_changed {
             let text = match self.mode {
                 InputMode::Message => r.input.as_str(),
                 InputMode::System => r.system.as_deref().unwrap_or(NOT_RECORDED),
             };
             let _timing = InspectTiming::start("input_editor", text.len(), self.rounds.len());
-            let text = text.to_owned();
-            self.input.update(cx, |e, cx| e.set_value(text, window, cx));
+            self.input_loaded = show_prefix(
+                &self.input,
+                text,
+                self.input_height.unwrap_or(fallback_height),
+                window,
+                cx,
+            );
         }
-        if output_changed {
+        if reset_output {
             let _timing = InspectTiming::start("output_editor", r.reply.len(), self.rounds.len());
-            let reply = r.reply.clone();
-            self.output
-                .update(cx, |e, cx| e.set_value(reply, window, cx));
+            self.output_loaded = show_prefix(
+                &self.output,
+                &r.reply,
+                self.output_height.unwrap_or(fallback_height),
+                window,
+                cx,
+            );
         }
+
+        // A live revision merely extends the target. It neither replaces the editor nor
+        // restarts its queued work, even when deltas arrive faster than it can display them.
         self.shown = Some(key);
+        self.schedule_loading(window, cx);
         input_changed || output_changed
+    }
+
+    fn source_text(&self, source: CopySource) -> Option<&str> {
+        let round = &self.rounds[self.current()?];
+        Some(match source {
+            CopySource::Input => match self.mode {
+                InputMode::Message => round.input.as_str(),
+                InputMode::System => round.system.as_deref().unwrap_or(NOT_RECORDED),
+            },
+            CopySource::Output => round.reply.as_str(),
+        })
+    }
+
+    fn loading(&self, source: CopySource) -> bool {
+        let loaded = match source {
+            CopySource::Input => self.input_loaded,
+            CopySource::Output => self.output_loaded,
+        };
+        self.source_text(source)
+            .is_some_and(|text| loaded < text.len())
+    }
+
+    fn schedule_loading(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.loading(CopySource::Input) && !self.loading(CopySource::Output) {
+            return;
+        }
+        let Some(ticket) = self.load_queue.enqueue() else {
+            return;
+        };
+        let weak = cx.entity().downgrade();
+        window.on_next_frame(move |window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                if !this.load_queue.begin(ticket) {
+                    return;
+                }
+                if this.chat.read(cx).center(cx) != CenterView::Inspect {
+                    this.load_queue.cancel();
+                    return;
+                }
+                this.load_one_chunk(window, cx);
+                this.schedule_loading(window, cx);
+                cx.notify();
+            });
+        });
+        // Loading is scheduled from observers and next-frame callbacks, outside painting.
+        // Entity notification requests a redraw without requiring an active painted view.
+        cx.notify();
+    }
+
+    fn load_one_chunk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let source = match (
+            self.loading(CopySource::Input),
+            self.loading(CopySource::Output),
+        ) {
+            (false, false) => return,
+            (true, false) => CopySource::Input,
+            (false, true) => CopySource::Output,
+            (true, true) => self.next_pane,
+        };
+        let loaded = match source {
+            CopySource::Input => self.input_loaded,
+            CopySource::Output => self.output_loaded,
+        };
+        let Some(text) = self.source_text(source) else {
+            return;
+        };
+        let end = chunk_end(text, loaded, LOAD_CHUNK_LINES, LOAD_CHUNK_BYTES);
+        let chunk = text[loaded..end].to_owned();
+        match source {
+            CopySource::Input => {
+                append_chunk(&self.input, chunk, window, cx);
+                self.input_loaded = end;
+                self.next_pane = CopySource::Output;
+            }
+            CopySource::Output => {
+                append_chunk(&self.output, chunk, window, cx);
+                self.output_loaded = end;
+                self.next_pane = CopySource::Input;
+            }
+        }
     }
 
     fn select(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -388,9 +623,11 @@ impl InspectScreen {
         actions: impl IntoElement,
         summary: impl IntoElement,
         editor: &Entity<EditorState>,
+        source: CopySource,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let c = &cx.tokens().colors;
+        let weak = cx.entity().downgrade();
         div()
             .flex()
             .flex_col()
@@ -416,8 +653,31 @@ impl InspectScreen {
             )
             .child(
                 div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| {
+                                let weak = weak.clone();
+                                // Record layout metadata after this frame; measuring a pane
+                                // must not mutate its view while GPUI is laying it out.
+                                cx.defer(move |cx| {
+                                    let _ = weak.update(cx, |this, _| match source {
+                                        CopySource::Input => {
+                                            this.input_height = Some(bounds.size.height);
+                                        }
+                                        CopySource::Output => {
+                                            this.output_height = Some(bounds.size.height);
+                                        }
+                                    });
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
                     .child(Editor::new(editor).readonly(true).bordered(false).h_full()),
             )
     }
@@ -520,7 +780,7 @@ impl Render for InspectScreen {
                         ),
                     )
                     .child(self.copy_button("copy-input", CopySource::Input, cx));
-                let input_summary: Vec<gpui_kit::AnyElement> = match mode {
+                let mut input_summary: Vec<gpui_kit::AnyElement> = match mode {
                     InputMode::Message => {
                         let mut v: Vec<gpui_kit::AnyElement> = r
                             .sections
@@ -559,11 +819,17 @@ impl Render for InspectScreen {
                         ],
                     },
                 };
+                if self.loading(CopySource::Input) {
+                    input_summary.push(Tag::new("Loading remaining text…").into_any_element());
+                }
                 let output_summary = div()
                     .flex()
                     .items_center()
                     .gap(sp(2))
                     .child(summary.reply.clone())
+                    .when(self.loading(CopySource::Output), |d| {
+                        d.child(Tag::new("Loading remaining text…"))
+                    })
                     .when(r.usage.is_some(), |d| {
                         d.child(
                             div()
@@ -581,6 +847,7 @@ impl Render for InspectScreen {
                         input_actions,
                         div().flex().flex_wrap().gap(sp(1)).children(input_summary),
                         &self.input,
+                        CopySource::Input,
                         cx,
                     ))
                     .child(div().w(px(1.0)).h_full().bg(hsla(c.border)))
@@ -589,6 +856,7 @@ impl Render for InspectScreen {
                         self.copy_button("copy-output", CopySource::Output, cx),
                         output_summary,
                         &self.output,
+                        CopySource::Output,
                         cx,
                     ))
                     .into_any_element()
@@ -647,6 +915,112 @@ impl Render for InspectScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_prefix_tracks_the_scaled_line_height() {
+        let line_height = px(contextual_theme::type_style::CODE.line_height);
+        assert_eq!(initial_line_count(line_height * 20.0), 22);
+        assert_eq!(initial_line_count(line_height * 40.0), 42);
+        assert_eq!(initial_line_count(line_height * 20.5), 23);
+    }
+
+    #[test]
+    fn chunks_include_complete_line_endings() {
+        let text = "one\r\ntwo\nthree";
+        assert_eq!(&text[..chunk_end(text, 0, 1, 1024)], "one\r\n");
+        assert_eq!(&text[..chunk_end(text, 0, 2, 1024)], "one\r\ntwo\n");
+    }
+
+    #[test]
+    fn byte_budget_does_not_split_crlf() {
+        let text = "abc\r\ndef";
+        assert_eq!(chunk_end(text, 0, 10, 4), 3);
+        assert_eq!(chunk_end(text, 3, 1, 4), 5);
+    }
+
+    #[test]
+    fn long_lines_are_bounded_without_losing_unicode_or_whitespace() {
+        let text = format!("{}\r\n\tcafé ☕ 😀\n\n", "😀".repeat(100));
+        let mut start = 0;
+        let mut reconstructed = String::new();
+        while start < text.len() {
+            let end = chunk_end(&text, start, 2, 17);
+            assert!(end > start);
+            assert!(end - start <= 17);
+            assert!(text.is_char_boundary(end));
+            reconstructed.push_str(&text[start..end]);
+            start = end;
+        }
+        assert_eq!(reconstructed, text);
+    }
+
+    #[test]
+    fn tiny_budget_still_advances_over_a_four_byte_character() {
+        assert_eq!(chunk_end("😀next", 0, 1, 1), 4);
+    }
+
+    #[test]
+    fn empty_and_exhausted_sources_need_no_chunk() {
+        assert_eq!(chunk_end("", 0, 1, 16), 0);
+        assert_eq!(chunk_end("done", 4, 1, 16), 4);
+    }
+
+    #[test]
+    fn repeated_notifications_queue_only_one_callback() {
+        let mut queue = LoadQueue::default();
+        let ticket = queue.enqueue().unwrap();
+        assert_eq!(queue.enqueue(), None);
+        assert!(queue.begin(ticket));
+        assert!(!queue.begin(ticket));
+        assert!(queue.enqueue().is_some());
+    }
+
+    #[test]
+    fn cancelled_callback_cannot_consume_a_new_rounds_callback() {
+        let mut queue = LoadQueue::default();
+        let old = queue.enqueue().unwrap();
+        queue.cancel();
+        let current = queue.enqueue().unwrap();
+        assert!(!queue.begin(old));
+        assert!(queue.begin(current));
+    }
+
+    #[test]
+    fn cancellation_without_a_replacement_stops_loading() {
+        let mut queue = LoadQueue::default();
+        let ticket = queue.enqueue().unwrap();
+        queue.cancel();
+        assert!(!queue.begin(ticket));
+    }
+
+    #[test]
+    fn live_output_extends_the_existing_editor() {
+        assert!(output_can_append(
+            Some((2, InputMode::Message, 120)),
+            (2, InputMode::Message, 140),
+        ));
+    }
+
+    #[test]
+    fn switching_input_mode_does_not_require_output_replacement() {
+        assert!(output_can_append(
+            Some((2, InputMode::Message, 120)),
+            (2, InputMode::System, 120),
+        ));
+    }
+
+    #[test]
+    fn another_round_or_shorter_reply_cannot_append() {
+        assert!(!output_can_append(
+            Some((2, InputMode::Message, 120)),
+            (3, InputMode::Message, 140),
+        ));
+        assert!(!output_can_append(
+            Some((2, InputMode::Message, 120)),
+            (2, InputMode::Message, 100),
+        ));
+        assert!(!output_can_append(None, (2, InputMode::Message, 140)));
+    }
 
     #[test]
     fn list_rebuild_retains_the_visible_round_and_offset() {

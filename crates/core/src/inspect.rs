@@ -150,20 +150,23 @@ impl Round {
         if self.followup {
             return "Requested context".into();
         }
-        let request = match format!("\n{}", self.input).rfind("\n# Request\n") {
-            Some(i) => &self.input[i + "# Request\n".len()..],
-            None => self.input.as_str(),
-        };
+        let request = self
+            .input
+            .rsplit_once("\n# Request\n")
+            .map(|(_, request)| request)
+            .or_else(|| self.input.strip_prefix("# Request\n"))
+            .unwrap_or(self.input.as_str());
         let first = request
             .lines()
             .map(str::trim)
             .find(|l| !l.is_empty())
             .unwrap_or("");
-        if first.chars().count() > 60 {
-            format!("{}…", first.chars().take(60).collect::<String>())
-        } else {
-            first.to_string()
+        let mut chars = first.chars();
+        let mut label: String = chars.by_ref().take(60).collect();
+        if chars.next().is_some() {
+            label.push('…');
         }
+        label
     }
 
     /// What the reply did: asked for context, proposed changes, or answered.
@@ -258,6 +261,29 @@ mod tests {
         );
         assert!(r[2].live && r[2].system_changed);
         assert_eq!(r[2].reply_label(), "Streaming…");
+    }
+
+    #[test]
+    fn input_labels_use_the_last_request_without_copying_the_input() {
+        let input = ApiContent::Text(
+            "# Request\nfirst\n# Context files (1)\ncontent\n# Request\n\nlast".into(),
+        );
+        assert_eq!(round(1, &input, false).input_label(), "last");
+    }
+
+    #[test]
+    fn input_labels_accept_a_request_at_the_start() {
+        let input = ApiContent::Text("# Request\n\nFix this".into());
+        assert_eq!(round(1, &input, false).input_label(), "Fix this");
+    }
+
+    #[test]
+    fn input_labels_truncate_at_character_boundaries() {
+        let input = ApiContent::Text("😀".repeat(61));
+        assert_eq!(
+            round(1, &input, false).input_label(),
+            format!("{}…", "😀".repeat(60)),
+        );
     }
 
     #[test]
