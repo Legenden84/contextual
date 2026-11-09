@@ -1,11 +1,10 @@
 //! Assistant replies rendered natively from `contextual_core::logic::markdown` blocks (plan §9.2:
-//! model output is never interpreted as HTML). Prose uses styled text runs; code blocks and
-//! whole files use the kit's highlighted code block. `### EDIT:` blocks show the rebuilt file,
+//! model output is never interpreted as HTML). Prose and code use the kit's selectable text
+//! views, including native keyboard copying. `### EDIT:` blocks show the rebuilt file,
 //! never the edit format (CLAUDE.md).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ops::Range;
 use std::sync::Arc;
 
 use contextual_core::logic::diff::Diff;
@@ -16,9 +15,8 @@ use contextual_core::logic::types::{Change, ChangeStatus};
 use gpui_kit::base::text::TextView;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClipboardItem, ElementId, FontStyle, FontWeight, HighlightStyle,
-    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
-    StrikethroughStyle, Styled, StyledText, UnderlineStyle, div,
+    AnyElement, App, ClipboardItem, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
@@ -110,123 +108,77 @@ impl ReplyCache {
 
 type ChangeEntry<'a> = (&'a Change, Option<&'a Diff>);
 
-/// Flattens inline runs into one string with highlight ranges.
-fn runs(inline: &[Inline], cx: &App) -> (String, Vec<(Range<usize>, HighlightStyle)>) {
-    let c = &cx.tokens().colors;
-    let mut text = String::new();
-    let mut hl = Vec::new();
-    fn walk(
-        nodes: &[Inline],
-        style: HighlightStyle,
-        text: &mut String,
-        hl: &mut Vec<(Range<usize>, HighlightStyle)>,
-        c: &contextual_theme::Colors,
-    ) {
-        for n in nodes {
-            match n {
-                Inline::Text { text: t } => {
-                    let start = text.len();
-                    text.push_str(t);
-                    if style != HighlightStyle::default() {
-                        hl.push((start..text.len(), style));
+/// Encode only our parsed inline formatting for the selectable Markdown view. Literal
+/// punctuation is escaped so text cannot become HTML, an image, a link or a block construct.
+/// Link destinations are deliberately omitted: replies do not gain URL-opening behaviour.
+fn selectable_markdown(inline: &[Inline]) -> String {
+    fn walk(nodes: &[Inline], out: &mut String) {
+        for node in nodes {
+            match node {
+                Inline::Text { text } => {
+                    for ch in text.chars() {
+                        if ch.is_ascii_punctuation() {
+                            out.push('\\');
+                        }
+                        out.push(ch);
                     }
                 }
-                Inline::Code { text: t } => {
-                    let start = text.len();
-                    text.push_str(t);
-                    hl.push((
-                        start..text.len(),
-                        HighlightStyle {
-                            background_color: Some(hsla(c.pill_bg)),
-                            color: Some(hsla(c.ink_strong)),
-                            ..style
-                        },
-                    ));
+                Inline::Code { text } => {
+                    let longest = text
+                        .split(|ch| ch != '`')
+                        .map(str::len)
+                        .max()
+                        .unwrap_or(0);
+                    let fence = "`".repeat(longest + 1);
+                    // CommonMark removes one surrounding space when the content is not
+                    // entirely spaces. Padding protects backticks and significant spaces.
+                    let pad = !text.chars().all(|ch| ch == ' ')
+                        && (text.starts_with(['`', ' ']) || text.ends_with(['`', ' ']));
+                    out.push_str(&fence);
+                    if pad {
+                        out.push(' ');
+                    }
+                    out.push_str(text);
+                    if pad {
+                        out.push(' ');
+                    }
+                    out.push_str(&fence);
                 }
-                Inline::Bold { children } => walk(
-                    children,
-                    HighlightStyle {
-                        font_weight: Some(FontWeight::SEMIBOLD),
-                        color: Some(hsla(c.ink_strong)),
-                        ..style
-                    },
-                    text,
-                    hl,
-                    c,
-                ),
-                Inline::Italic { children } => walk(
-                    children,
-                    HighlightStyle {
-                        font_style: Some(FontStyle::Italic),
-                        ..style
-                    },
-                    text,
-                    hl,
-                    c,
-                ),
-                Inline::Strike { children } => walk(
-                    children,
-                    HighlightStyle {
-                        strikethrough: Some(StrikethroughStyle {
-                            thickness: px(1.0),
-                            color: None,
-                        }),
-                        color: Some(hsla(c.ink_muted)),
-                        ..style
-                    },
-                    text,
-                    hl,
-                    c,
-                ),
-                // Links are shown, not followed, until click handling lands (plan §9.2: http(s) only).
-                Inline::Link { children, .. } => walk(
-                    children,
-                    HighlightStyle {
-                        color: Some(hsla(c.accent_ink)),
-                        underline: Some(UnderlineStyle {
-                            thickness: px(1.0),
-                            color: None,
-                            wavy: false,
-                        }),
-                        ..style
-                    },
-                    text,
-                    hl,
-                    c,
-                ),
+                Inline::Bold { children }
+                | Inline::Italic { children }
+                | Inline::Strike { children } => {
+                    let marker = match node {
+                        Inline::Bold { .. } => "**",
+                        Inline::Italic { .. } => "*",
+                        _ => "~~",
+                    };
+                    out.push_str(marker);
+                    walk(children, out);
+                    out.push_str(marker);
+                }
+                Inline::Link { children, .. } => walk(children, out),
             }
         }
     }
-    walk(inline, HighlightStyle::default(), &mut text, &mut hl, c);
-    // Nested styles produce overlapping ranges; StyledText wants them sorted and disjoint.
-    hl.sort_by_key(|(r, _)| r.start);
-    let mut flat: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
-    for (r, s) in hl {
-        match flat.last_mut() {
-            Some((last, _)) if r.start < last.end => {
-                let start = last.end.min(r.end);
-                if start < r.end {
-                    flat.push((start..r.end, s));
-                }
-            }
-            _ => flat.push((r, s)),
-        }
-    }
-    (text, flat)
+
+    let mut out = String::new();
+    walk(inline, &mut out);
+    out
 }
 
-fn inline_text(inline: &[Inline], cx: &App) -> StyledText {
-    let (text, hl) = runs(inline, cx);
-    StyledText::new(text).with_highlights(hl)
+/// Stable, message-scoped ids let the toolkit own focus, selection and native Copy handling.
+/// This is read-only display, not an input, and never intercepts the composer's shortcuts.
+fn inline_text(id: String, inline: &[Inline]) -> impl IntoElement + use<> {
+    TextView::markdown(ElementId::Name(id.into()), selectable_markdown(inline)).selectable(true)
 }
 
-fn list(items: &[ListItem], cx: &App) -> impl IntoElement + use<> {
+fn list(id: &str, items: &[ListItem], cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()
         .flex()
         .flex_col()
         .mb(sp(3))
-        .children(items.iter().map(|it| {
+        .children(items.iter().enumerate().map(|(index, it)| {
             let marker = match (&it.checked, &it.number) {
                 (Some(true), _) => "☑".to_string(),
                 (Some(false), _) => "☐".to_string(),
@@ -253,7 +205,12 @@ fn list(items: &[ListItem], cx: &App) -> impl IntoElement + use<> {
                         .text_color(hsla(c.ink_muted))
                         .child(SharedString::from(marker)),
                 )
-                .child(div().flex_1().min_w_0().child(inline_text(&it.inline, cx)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(inline_text(format!("{id}-item-{index}"), &it.inline)),
+                )
         }))
 }
 
@@ -599,7 +556,7 @@ fn blocks(
         let el = match b {
             Block::P { inline } => div()
                 .mb(sp(3))
-                .child(inline_text(inline, cx))
+                .child(inline_text(format!("{key}-text"), inline))
                 .into_any_element(),
             Block::Heading { level, inline } => {
                 let style = match level {
@@ -616,10 +573,10 @@ fn blocks(
                     .when(*level == 1, |d| {
                         d.pb(sp(1)).border_b_1().border_color(hsla(c.border))
                     })
-                    .child(inline_text(inline, cx))
+                    .child(inline_text(format!("{key}-text"), inline))
                     .into_any_element()
             }
-            Block::List { items } => list(items, cx).into_any_element(),
+            Block::List { items } => list(&key, items, cx).into_any_element(),
             Block::Quote { blocks: inner } => {
                 let mut kids = Vec::new();
                 blocks(
@@ -645,7 +602,7 @@ fn blocks(
                     .into_any_element()
             }
             Block::Table { head, align, rows } => {
-                let cell = |content: &Vec<Inline>, j: usize, head: bool| {
+                let cell = |content: &[Inline], row: usize, j: usize, head: bool| {
                     div()
                         .flex_1()
                         .min_w_0()
@@ -663,7 +620,7 @@ fn blocks(
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(hsla(c.ink_strong))
                         })
-                        .child(inline_text(content, cx))
+                        .child(inline_text(format!("{key}-cell-{row}-{j}"), content))
                 };
                 div()
                     .mb(sp(3))
@@ -672,13 +629,12 @@ fn blocks(
                     .child(
                         div()
                             .flex()
-                            .children(head.iter().enumerate().map(|(j, h)| cell(h, j, true))),
+                            .children(head.iter().enumerate().map(|(j, h)| cell(h, 0, j, true))),
                     )
-                    .children(rows.iter().map(|r| {
-                        div().flex().children(
-                            (0..head.len())
-                                .map(|j| cell(r.get(j).unwrap_or(&Vec::new()), j, false)),
-                        )
+                    .children(rows.iter().enumerate().map(|(row, r)| {
+                        div().flex().children((0..head.len()).map(|j| {
+                            cell(r.get(j).map(Vec::as_slice).unwrap_or(&[]), row + 1, j, false)
+                        }))
                     }))
                     .into_any_element()
             }
@@ -756,6 +712,52 @@ fn blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selectable_prose_escapes_literal_markup_and_preserves_unicode() {
+        let inline = vec![Inline::Text {
+            text: "<img> [x](file:///secret) ![image](https://example.com) café ☕".into(),
+        }];
+        assert_eq!(
+            selectable_markdown(&inline),
+            r"\<img\> \[x\]\(file\:\/\/\/secret\) \!\[image\]\(https\:\/\/example\.com\) café ☕"
+        );
+    }
+
+    #[test]
+    fn selectable_prose_retains_formatting_without_enabling_links() {
+        let inline = vec![
+            Inline::Bold {
+                children: vec![Inline::Text {
+                    text: "Important".into(),
+                }],
+            },
+            Inline::Text { text: " ".into() },
+            Inline::Link {
+                href: "file:///secret".into(),
+                children: vec![Inline::Text {
+                    text: "label".into(),
+                }],
+            },
+        ];
+        assert_eq!(selectable_markdown(&inline), "**Important** label");
+    }
+
+    #[test]
+    fn selectable_inline_code_protects_backticks_and_spaces() {
+        for (text, expected) in [
+            ("a*b", "`a*b`"),
+            ("a`b", "``a`b``"),
+            ("`x`", "`` `x` ``"),
+            (" x ", "`  x  `"),
+            ("   ", "`   `"),
+        ] {
+            assert_eq!(
+                selectable_markdown(&[Inline::Code { text: text.into() }]),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn file_status_distinguishes_drafting_checking_and_review() {

@@ -7,6 +7,7 @@
 
 use std::cell::Cell;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use contextual_theme::{
     Appearance, FontFamily, Rgba, Shadow, Theme as Tokens, TypeStyle, radius, space,
@@ -51,17 +52,53 @@ fn bounded_zoom(percent: i16) -> u16 {
     percent.clamp(50, 200) as u16
 }
 
+/// Transient feedback is shared by keyboard, menu and toolkit-popup zoom actions.
+struct ZoomNotice {
+    percent: u16,
+    shown_at: Instant,
+}
+
+impl Global for ZoomNotice {}
+
+const ZOOM_NOTICE_DURATION: Duration = Duration::from_secs(2);
+
+pub fn zoom_notice_percent(cx: &App) -> Option<u16> {
+    let notice = cx.try_global::<ZoomNotice>()?;
+    (notice.shown_at.elapsed() < ZOOM_NOTICE_DURATION).then_some(notice.percent)
+}
+
 /// Updates both explicit pixel dimensions and the toolkit's rem-based widgets.
 /// gpui-component's root sets the window's rem size from its theme's font_size every frame;
 /// changing window.rem_size directly would therefore be overwritten.
 pub fn set_zoom(percent: i16, cx: &mut App) {
     let next = bounded_zoom(percent);
-    if next == zoom_percent() {
-        return;
+    if next != zoom_percent() {
+        UI_ZOOM.with(|zoom| zoom.set(next));
+        ComponentTheme::update(cx, configure_component_sizes);
     }
-    UI_ZOOM.with(|zoom| zoom.set(next));
-    ComponentTheme::update(cx, configure_component_sizes);
+
+    // Show the actual bounded value even when already at a limit or at actual size.
+    let shown_at = Instant::now();
+    cx.set_global(ZoomNotice {
+        percent: next,
+        shown_at,
+    });
     cx.refresh_windows();
+
+    let timer = cx.background_executor().timer(ZOOM_NOTICE_DURATION);
+    cx.spawn(async move |cx| {
+        timer.await;
+        let _ = cx.update(|cx| {
+            // An older timer must not dismiss a more recent zoom notification.
+            if cx
+                .try_global::<ZoomNotice>()
+                .is_some_and(|notice| notice.shown_at == shown_at)
+            {
+                cx.refresh_windows();
+            }
+        });
+    })
+    .detach();
 }
 
 /// Invalidates cached variable-height list measurements after zoom, including lists that

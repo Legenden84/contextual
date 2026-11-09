@@ -14,6 +14,7 @@ use crate::theme::{ActiveTheme, TypeExt, hsla};
 use crate::views::folder_dialog::FolderDialog;
 use crate::views::status_bar::status_bar;
 use crate::views::title_bar::title_bar;
+use crate::views::toast::zoom_toast;
 use crate::{CloseFolder, OpenFolder, OpenSettings, ResetZoom, ToggleTheme, ZoomIn, ZoomOut};
 
 pub struct Shell {
@@ -179,7 +180,8 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .child(body)
-                    .when_some(self.folder_dialog.clone(), |d, f| d.child(f)),
+                    .when_some(self.folder_dialog.clone(), |d, f| d.child(f))
+                    .when_some(zoom_toast(cx), |d, t| d.child(t)),
             )
             .child(status_bar(&self.app, cx))
     }
