@@ -13,13 +13,20 @@ The main workspace with a project open, files selected and a finished assistant 
   feature selects its existing tab rather than adding a duplicate.
 - Switching tabs preserves the composer draft and the feature view state.
 - Diff and Inspect use the full area beneath the header, hiding the right sidebar.
-  Chat and file previews use a stable column capped at the 820px reading width plus
-  horizontal padding, centred between the explorer and one reserved right sidebar.
-  Its width and position depend only on window size, even when neither panel is visible.
-- Changes and chat history dock side by side when two standard sidebar widths fit to the
-  right of that centred column, with history rightmost. Otherwise they share one sidebar:
-  history takes priority while open, and closing it reveals Changes when available.
-  Neither panel overlays the other or resizes/recentres the chat when toggled.
+  Chat and file previews are centred in the entire area to the right of the explorer,
+  capped at the 820px reading width plus horizontal padding. Their horizontal centre
+  never changes when panels open or close.
+- Changes and chat history dock side by side when two standard sidebar widths fit in
+  the centred column's natural right gutter, with history rightmost. Otherwise they
+  share one slot, with the most recently opened panel on top. The covered panel keeps
+  its state but is not painted or interactive; its header button brings it forward.
+- When even one sidebar cannot fit in the natural gutter, the chat narrows symmetrically
+  just enough to fit one. Opening a second panel does not narrow it further. At extreme
+  zoom or narrow widths, the slot is capped at one third of the available area and its
+  contents scroll horizontally rather than disappearing.
+- A new proposal opens Changes in front. Updating an existing proposal, searching history
+  or resizing the window does not change the stacking order. Header buttons can hide
+  the visible panel or bring a covered panel forward.
 - Closing the active tab selects its next neighbour, then its previous neighbour,
   falling back to Chat. Closing an inactive tab does not change the selection.
 - Starting or opening another conversation closes Diff and Inspect and selects Chat;
@@ -36,10 +43,10 @@ The main workspace with a project open, files selected and a finished assistant 
   width and a hairline separator, not a floating popover, and stays open while composing.
 - Selecting a saved chat explicitly loads it and closes history. New chat also closes
   history. Search, rename and deletion remain available in the panel.
-- Close history or use the header toggle without moving the messages or composer.
-  On narrower windows this reveals the Changes panel when available; on wider windows
-  Changes remains visible beside history. Opening history from Diff or Inspect returns
-  to Chat.
+- Close history or use the header toggle without shifting the messages or composer's
+  horizontal centre. Their width changes only when space is needed for a sidebar.
+  Closing the front panel reveals the other if it is still open; on wider windows
+  both remain visible side by side. Opening history from Diff or Inspect returns to Chat.
 
 ## Native Source Control workflow
 

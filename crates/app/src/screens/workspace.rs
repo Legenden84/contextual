@@ -36,40 +36,99 @@ use contextual_core::logic::git_tabs::parse_git_tab;
 /// Centre tab bar height.
 const TABS_H: f32 = 36.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DockPanel {
+    Changes,
+    History,
+}
+
+/// Visibility and stacking are independent of the window width. Resizing must
+/// never close a panel or change which one was opened most recently.
+struct DockState {
+    changes_key: Option<(u64, String)>,
+    changes_open: bool,
+    history_open: bool,
+    front: DockPanel,
+}
+
+impl DockState {
+    fn new() -> Self {
+        Self {
+            changes_key: None,
+            changes_open: false,
+            history_open: true,
+            front: DockPanel::History,
+        }
+    }
+
+    fn sync_changes(&mut self, key: Option<(u64, String)>) {
+        if self.changes_key == key {
+            return;
+        }
+        self.changes_open = key.is_some();
+        self.changes_key = key;
+        if self.changes_open {
+            self.front = DockPanel::Changes;
+        }
+    }
+
+    fn sync_history(&mut self, open: bool) {
+        if open && !self.history_open {
+            self.front = DockPanel::History;
+        }
+        self.history_open = open;
+    }
+
+    fn toggle_changes(&mut self, visible: bool) {
+        // A covered panel is raised, not closed.
+        self.changes_open = !visible;
+        if self.changes_open {
+            self.front = DockPanel::Changes;
+        }
+    }
+}
+
 struct ChatLayout {
     left_inset: f32,
     width: f32,
+    panel_width: f32,
     show_changes: bool,
     show_history: bool,
 }
 
-/// `available` is the width after the fixed explorer column. Centre the chat in the
-/// space before one reserved sidebar, capped at its reading width plus padding.
-/// Panels may use the remaining right gutter, but never move or resize the chat.
-fn chat_layout(available: f32, has_changes: bool, history_open: bool) -> ChatLayout {
-    // Zoom reduces available design-space width just like shrinking the window.
-    // Do not reserve a dock when that would leave less than one panel-width for Chat.
-    // This breakpoint depends only on width, never panel visibility.
-    if available < 2.0 * layout::CHANGES_WIDTH {
-        return ChatLayout {
-            left_inset: 0.0,
-            width: available.max(0.0),
-            show_changes: false,
-            show_history: false,
-        };
-    }
+/// Centre in the entire area after the explorer. Use the natural right gutter
+/// first; only shrink the chat when one open panel cannot fit there. Shrinking
+/// is symmetric, so its centre never moves. Two panels must fit without further
+/// shrinking; otherwise only the front panel is painted in their shared slot.
+fn chat_layout(
+    available: f32,
+    changes_open: bool,
+    history_open: bool,
+    front: DockPanel,
+) -> ChatLayout {
+    let available = available.max(0.0);
     let max_width = layout::CONTENT_MAX_WIDTH + 2.0 * contextual_theme::space::S4;
-    let center_width = (available - layout::CHANGES_WIDTH).max(0.0);
-    let width = center_width.min(max_width);
-    let left_inset = (center_width - width) / 2.0;
-    let right_width = available - left_inset - width;
-    let fits_both = right_width >= 2.0 * layout::CHANGES_WIDTH;
+    let natural_width = available.min(max_width);
+    let natural_gutter = (available - natural_width) / 2.0;
+    // At extreme zoom/narrow widths, keep a third for Chat and a third for the
+    // dock. Its contents remain accessible through horizontal scrolling.
+    let panel_width = layout::CHANGES_WIDTH.min(available / 3.0);
+    let any_open = changes_open || history_open;
+    let width = if any_open {
+        natural_width.min((available - 2.0 * panel_width).max(0.0))
+    } else {
+        natural_width
+    };
+    let fits_both = natural_gutter >= 2.0 * layout::CHANGES_WIDTH;
 
     ChatLayout {
-        left_inset,
+        left_inset: (available - width) / 2.0,
         width,
-        show_changes: has_changes && (!history_open || fits_both),
-        show_history: history_open,
+        panel_width,
+        show_changes: changes_open
+            && (!history_open || fits_both || front == DockPanel::Changes),
+        show_history: history_open
+            && (!changes_open || fits_both || front == DockPanel::History),
     }
 }
 
@@ -87,6 +146,7 @@ pub struct WorkspaceScreen {
     diff: Entity<DiffScreen>,
     inspect: Entity<InspectScreen>,
     chats: Entity<ChatsMenu>,
+    docks: DockState,
     save_dialog: Option<Entity<SaveDialog>>,
     context: ContextCache,
     _subs: Vec<Subscription>,
@@ -158,6 +218,12 @@ impl WorkspaceScreen {
         let mut subs = subs;
         subs.push(
             cx.observe_in(&chat, window, |this: &mut Self, chat, window, cx| {
+                let model = chat.read(cx);
+                this.docks.sync_changes(
+                    model
+                        .change_message()
+                        .map(|m| (model.thread_generation, m.id.clone())),
+                );
                 // The Save and pull request dialogs live while the model says they're open.
                 let open = chat.read(cx).save_dialog_open;
                 if open && this.save_dialog.is_none() {
@@ -212,8 +278,12 @@ impl WorkspaceScreen {
         // The settings warning is owned by the composer but overlays the whole workspace.
         subs.push(cx.observe(&chat_panel, |_, _, cx| cx.notify()));
         let chats = cx.new(|cx| ChatsMenu::new(chat.clone(), window, cx));
-        // History visibility changes the workspace layout, not just the panel's contents.
-        subs.push(cx.observe(&chats, |_, _, cx| cx.notify()));
+        // Only opening history raises it; search, rename and model notifications
+        // must not steal the shared slot back from Changes.
+        subs.push(cx.observe(&chats, |this: &mut Self, chats, cx| {
+            this.docks.sync_history(chats.read(cx).open);
+            cx.notify();
+        }));
         crate::dev::install(&app, &project, &chat, &chat_panel, &chats, window, cx);
         let sidebar =
             cx.new(|cx| Sidebar::new(app.clone(), project.clone(), scm.clone(), window, cx));
@@ -236,6 +306,7 @@ impl WorkspaceScreen {
             diff,
             inspect: cx.new(|cx| InspectScreen::new(chat.clone(), window, cx)),
             chats,
+            docks: DockState::new(),
             save_dialog: None,
             chat,
             app,
@@ -384,9 +455,12 @@ impl Render for WorkspaceScreen {
         let panes = chat_layout(
             f32::from(window.viewport_size().width) / crate::theme::zoom_factor()
                 - layout::EXPLORER_WIDTH,
-            has_changes,
+            has_changes && self.docks.changes_open,
             history_open,
+            self.docks.front,
         );
+        let changes_visible = !feature_view && panes.show_changes;
+        let history_visible = !feature_view && panes.show_history;
 
         let body = match &active {
             Tab::Preview(path) => {
@@ -451,10 +525,34 @@ impl Render for WorkspaceScreen {
                     .items_center()
                     .gap(sp(1))
                     .px(sp(2))
+                    .when(has_changes, |d| {
+                        d.child(
+                            Button::new(
+                                "toggle-changes",
+                                if changes_visible {
+                                    "Hide changes"
+                                } else {
+                                    "Changes"
+                                },
+                            )
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .on_click(cx.listener(move |t, _, _, cx| {
+                                if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
+                                    t.project.update(cx, |p, cx| {
+                                        p.activate(Tab::Chat);
+                                        cx.notify();
+                                    });
+                                }
+                                t.docks.toggle_changes(changes_visible);
+                                cx.notify();
+                            })),
+                        )
+                    })
                     .child(
                         Button::new(
                             "chats",
-                            if history_open {
+                            if history_visible {
                                 "Hide history"
                             } else {
                                 "Chat history"
@@ -462,19 +560,26 @@ impl Render for WorkspaceScreen {
                         )
                         .size(ButtonSize::Xs)
                         .variant(ButtonVariant::Ghost)
-                        .on_click(cx.listener(|t, _, _, cx| {
+                        .on_click(cx.listener(move |t, _, _, cx| {
                             if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
                                 t.project.update(cx, |p, cx| {
                                     p.activate(Tab::Chat);
                                     cx.notify();
                                 });
+                            }
+                            if history_visible {
+                                t.docks.sync_history(false);
+                                t.chats.update(cx, |m, cx| m.toggle(cx));
+                            } else {
+                                // History may already be open underneath Changes.
+                                t.docks.sync_history(true);
+                                t.docks.front = DockPanel::History;
                                 t.chats.update(cx, |m, cx| {
                                     m.open = true;
                                     cx.notify();
                                 });
-                            } else {
-                                t.chats.update(cx, |m, cx| m.toggle(cx));
                             }
+                            cx.notify();
                         })),
                     ),
             );
@@ -517,8 +622,32 @@ impl Render for WorkspaceScreen {
                                 .min_h_0()
                                 .h_full()
                                 .justify_end()
-                                .when(panes.show_changes, |d| d.child(self.changes.clone()))
-                                .when(panes.show_history, |d| d.child(self.chats.clone())),
+                                .when(panes.show_changes, |d| {
+                                    d.child(
+                                        div()
+                                            .id("changes-dock-slot")
+                                            .flex()
+                                            .flex_none()
+                                            .w(px(panes.panel_width))
+                                            .h_full()
+                                            .min_h_0()
+                                            .overflow_x_scroll()
+                                            .child(self.changes.clone()),
+                                    )
+                                })
+                                .when(panes.show_history, |d| {
+                                    d.child(
+                                        div()
+                                            .id("history-dock-slot")
+                                            .flex()
+                                            .flex_none()
+                                            .w(px(panes.panel_width))
+                                            .h_full()
+                                            .min_h_0()
+                                            .overflow_x_scroll()
+                                            .child(self.chats.clone()),
+                                    )
+                                }),
                         )
                     }),
             );
@@ -552,84 +681,128 @@ mod tests {
     }
 
     #[test]
-    fn panel_visibility_never_changes_chat_position_or_width() {
+    fn chat_is_always_centered_and_panels_stay_inside_the_workspace() {
         for available in [
+            0.0,
+            300.0,
             full_chat_width(),
             full_chat_width() + layout::CHANGES_WIDTH,
             full_chat_width() + 2.0 * layout::CHANGES_WIDTH,
-            full_chat_width() + 3.0 * layout::CHANGES_WIDTH,
             full_chat_width() + 4.0 * layout::CHANGES_WIDTH,
         ] {
-            let expected = chat_layout(available, false, false);
-            for has_changes in [false, true] {
-                for history_open in [false, true] {
-                    let panes = chat_layout(available, has_changes, history_open);
-                    assert_eq!(panes.width, expected.width);
-                    assert_eq!(panes.left_inset, expected.left_inset);
-                    assert_eq!(
-                        panes.left_inset + panes.width / 2.0,
-                        (available - layout::CHANGES_WIDTH) / 2.0,
-                    );
-                    let panel_count =
-                        usize::from(panes.show_changes) + usize::from(panes.show_history);
-                    assert!(
-                        panes.left_inset + panes.width + panel_count as f32 * layout::CHANGES_WIDTH
-                            <= available
-                    );
+            for changes in [false, true] {
+                for history in [false, true] {
+                    for front in [DockPanel::Changes, DockPanel::History] {
+                        let panes = chat_layout(available, changes, history, front);
+                        assert!(
+                            (panes.left_inset + panes.width / 2.0 - available / 2.0).abs()
+                                < 0.001
+                        );
+                        let panel_count =
+                            usize::from(panes.show_changes) + usize::from(panes.show_history);
+                        assert!(
+                            panes.left_inset + panes.width
+                                + panel_count as f32 * panes.panel_width
+                                <= available + 0.001
+                        );
+                        assert_eq!(panel_count > 0, changes || history);
+                    }
                 }
             }
         }
     }
 
     #[test]
-    fn both_panels_require_two_full_sidebar_widths_after_centering() {
-        // Half the spare centre space becomes the left inset; only the other half
-        // can supplement the reserved right sidebar.
-        let threshold = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
+    fn two_panels_use_the_natural_gutter_without_narrowing_chat() {
+        let threshold = full_chat_width() + 4.0 * layout::CHANGES_WIDTH;
+        for front in [DockPanel::Changes, DockPanel::History] {
+            let below = chat_layout(threshold - 1.0, true, true, front);
+            assert_eq!(below.show_changes, front == DockPanel::Changes);
+            assert_eq!(below.show_history, front == DockPanel::History);
+            assert_eq!(below.width, full_chat_width());
 
-        let below = chat_layout(threshold - 1.0, true, true);
-        assert!(!below.show_changes);
-        assert!(below.show_history);
-        assert_eq!(below.width, full_chat_width());
-
-        for available in [threshold, threshold + layout::CHANGES_WIDTH] {
-            let panes = chat_layout(available, true, true);
-            assert!(panes.show_changes);
-            assert!(panes.show_history);
-            assert_eq!(panes.width, full_chat_width());
+            for available in [threshold, threshold + layout::CHANGES_WIDTH] {
+                let panes = chat_layout(available, true, true, front);
+                assert!(panes.show_changes);
+                assert!(panes.show_history);
+                assert_eq!(panes.width, full_chat_width());
+            }
         }
     }
 
     #[test]
-    fn zoomed_or_narrow_windows_keep_chat_instead_of_reserving_a_dock() {
+    fn zoomed_or_narrow_windows_shrink_chat_instead_of_hiding_open_panels() {
         for scale in [1.0, 1.5, 2.0] {
             let available = 300.0;
             let viewport = (available + layout::EXPLORER_WIDTH) * scale;
             let design_width = viewport / scale - layout::EXPLORER_WIDTH;
-            for has_changes in [false, true] {
-                for history_open in [false, true] {
-                    let panes = chat_layout(design_width, has_changes, history_open);
-                    assert_eq!(panes.width, available);
-                    assert_eq!(panes.left_inset, 0.0);
-                    assert!(!panes.show_changes);
-                    assert!(!panes.show_history);
-                }
+            for front in [DockPanel::Changes, DockPanel::History] {
+                let panes = chat_layout(design_width, true, true, front);
+                assert_eq!(panes.width, available / 3.0);
+                assert_eq!(panes.left_inset, available / 3.0);
+                assert_eq!(panes.panel_width, available / 3.0);
+                assert_eq!(panes.show_changes, front == DockPanel::Changes);
+                assert_eq!(panes.show_history, front == DockPanel::History);
             }
+            let closed = chat_layout(design_width, false, false, DockPanel::History);
+            assert_eq!(closed.width, available);
+            assert_eq!(closed.left_inset, 0.0);
         }
-        assert_eq!(chat_layout(-10.0, true, true).width, 0.0);
+        let panes = chat_layout(-10.0, true, true, DockPanel::History);
+        assert_eq!(panes.width, 0.0);
+        assert_eq!(panes.left_inset, 0.0);
+        assert_eq!(panes.panel_width, 0.0);
     }
 
     #[test]
-    fn narrow_layout_reserves_the_same_sidebar_when_empty() {
-        let available = full_chat_width();
-        for has_changes in [false, true] {
-            for history_open in [false, true] {
-                let panes = chat_layout(available, has_changes, history_open);
-                assert_eq!(panes.width, available - layout::CHANGES_WIDTH);
-                assert_eq!(panes.left_inset, 0.0);
-                assert_eq!(panes.show_changes, has_changes && !history_open);
-                assert_eq!(panes.show_history, history_open);
+    fn toggling_panels_preserves_full_width_whenever_one_fits() {
+        let threshold = full_chat_width() + 2.0 * layout::CHANGES_WIDTH;
+        for available in [threshold, threshold + layout::CHANGES_WIDTH] {
+            for changes in [false, true] {
+                for history in [false, true] {
+                    let panes = chat_layout(available, changes, history, DockPanel::History);
+                    assert_eq!(panes.width, full_chat_width());
+                    assert_eq!(panes.left_inset, (available - full_chat_width()) / 2.0);
+                }
             }
         }
+        let below = chat_layout(threshold - 2.0, true, true, DockPanel::Changes);
+        assert_eq!(below.width, full_chat_width() - 2.0);
+        assert_eq!(below.left_inset, layout::CHANGES_WIDTH);
+    }
+
+    #[test]
+    fn latest_opened_panel_wins_without_notifications_stealing_priority() {
+        let mut docks = DockState::new();
+        let first = Some((0, "reply-1".to_string()));
+        docks.sync_changes(first.clone());
+        assert_eq!(docks.front, DockPanel::Changes);
+        assert!(docks.history_open);
+
+        // History search and chat updates do not count as opening a panel.
+        docks.sync_history(true);
+        assert_eq!(docks.front, DockPanel::Changes);
+        docks.sync_history(false);
+        docks.sync_history(true);
+        assert_eq!(docks.front, DockPanel::History);
+        docks.sync_changes(first.clone());
+        assert_eq!(docks.front, DockPanel::History);
+
+        // Raising a covered Changes panel does not close history.
+        docks.toggle_changes(false);
+        assert_eq!(docks.front, DockPanel::Changes);
+        assert!(docks.history_open);
+        docks.toggle_changes(true);
+        assert!(!docks.changes_open);
+        docks.sync_changes(first);
+        assert!(!docks.changes_open);
+
+        // A new proposal opens Changes, including a replaced conversation.
+        docks.sync_changes(Some((1, "reply-1".to_string())));
+        assert!(docks.changes_open);
+        assert_eq!(docks.front, DockPanel::Changes);
+        docks.sync_changes(None);
+        assert!(!docks.changes_open);
+        assert!(docks.history_open);
     }
 }

@@ -14,13 +14,13 @@ use contextual_core::logic::types::{Change, ChangeStatus};
 use gpui_kit::base::text::TextView;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ElementId, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
-    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, StrikethroughStyle,
-    Styled, StyledText, UnderlineStyle, div,
+    AnyElement, App, ClipboardItem, ElementId, FontStyle, FontWeight, HighlightStyle,
+    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
+    StrikethroughStyle, Styled, StyledText, UnderlineStyle, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
-use crate::ui::{Tag, TagTone};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Tag, TagTone};
 
 /// Lines shown before "Show N more lines" (modified files are shown shorter).
 const MAX_LINES: usize = 28;
@@ -241,8 +241,8 @@ fn badge(change: &Change, diff: Option<&Diff>) -> AnyElement {
     Tag::new(label).into_any_element()
 }
 
-/// A code block: header with path or language and an optional badge, then highlighted code,
-/// cut after `max` lines with "Show N more lines".
+/// A code block: header with path or language, optional badge and Copy, then highlighted code,
+/// cut after `max` lines with "Show N more lines". Copy always includes the hidden lines.
 #[allow(clippy::too_many_arguments)]
 fn code_block<F: Fn(&mut App) + 'static>(
     id: ElementId,
@@ -268,6 +268,8 @@ fn code_block<F: Fn(&mut App) + 'static>(
         code.to_string()
     };
     let fence = format!("```{lang}\n{shown}\n```");
+    // Copy the source, not the truncated display or its synthetic Markdown fence.
+    let copy_text = code.to_string();
     div()
         .mb(sp(3))
         .rounded(px(contextual_theme::radius::MD))
@@ -295,7 +297,16 @@ fn code_block<F: Fn(&mut App) + 'static>(
                         .whitespace_nowrap()
                         .child(SharedString::from(label.to_string())),
                 )
-                .when_some(badge, |d, b| d.child(b)),
+                .when_some(badge, |d, b| d.child(b))
+                .child(
+                    Button::new(ElementId::Name(format!("{id}-copy").into()), "Copy")
+                        .size(ButtonSize::Xs)
+                        .variant(ButtonVariant::Ghost)
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                        }),
+                ),
         )
         .child(
             div().type_style(contextual_theme::type_style::CODE).child(
