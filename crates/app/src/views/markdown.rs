@@ -16,7 +16,7 @@ use gpui_kit::base::text::TextView;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClipboardItem, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
+    MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
@@ -315,6 +315,8 @@ fn code_block<F: Fn(&mut App) + 'static>(
             d.child(
                 div()
                     .id(ElementId::Name(format!("{id}-more").into()))
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .px(sp(3))
                     .py(sp(1))
                     .border_t_1()
@@ -323,7 +325,10 @@ fn code_block<F: Fn(&mut App) + 'static>(
                     .type_style(contextual_theme::type_style::UI_SMALL)
                     .text_color(hsla(c.accent_ink))
                     .cursor_pointer()
-                    .on_click(move |_, _, cx| on_expand(cx))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        on_expand(cx);
+                    })
                     .child(SharedString::from(format!("Show {hidden} more lines"))),
             )
         })

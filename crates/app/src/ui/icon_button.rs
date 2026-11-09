@@ -1,8 +1,8 @@
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use crate::theme::{ActiveTheme, hsla, px, row_height};
@@ -56,6 +56,8 @@ impl RenderOnce for IconButton {
         let label = self.label.clone();
         div()
             .id(self.id)
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex()
             .flex_none()
             .items_center()
@@ -76,8 +78,11 @@ impl RenderOnce for IconButton {
                 gpui_kit::component::tooltip::Tooltip::new(label.clone()).build(window, cx)
             })
             .child(self.icon)
-            .when_some(self.on_click.filter(|_| !self.disabled), |d, f| {
-                d.on_click(move |e, w, cx| f(e, w, cx))
+            .on_click(move |e, w, cx| {
+                cx.stop_propagation();
+                if !self.disabled && let Some(f) = &self.on_click {
+                    f(e, w, cx);
+                }
             })
     }
 }

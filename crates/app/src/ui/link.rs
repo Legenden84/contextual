@@ -1,6 +1,6 @@
 use gpui_kit::{
-    App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, hsla};
@@ -35,12 +35,17 @@ impl RenderOnce for LinkButton {
         let f = self.on_click;
         div()
             .id(self.id)
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex_none()
             .cursor_pointer()
             .type_style(contextual_theme::type_style::UI_SMALL)
             .text_color(hsla(c.accent_ink))
             .hover(|s| s.underline())
-            .on_click(move |e, w, cx| f(e, w, cx))
+            .on_click(move |e, w, cx| {
+                cx.stop_propagation();
+                f(e, w, cx);
+            })
             .child(self.label)
     }
 }

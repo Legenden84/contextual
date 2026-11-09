@@ -4,7 +4,7 @@
 use contextual_core::logic::types::ChangeStatus;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
+    App, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
     div,
 };
@@ -138,6 +138,8 @@ impl Render for SaveDialog {
             .id("save-scrim")
             .absolute()
             .inset_0()
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex()
             .items_center()
             .justify_center()
@@ -148,7 +150,10 @@ impl Render for SaveDialog {
                     t.close(cx);
                 }
             }))
-            .on_click(cx.listener(|t, _, _, cx| t.close(cx)))
+            .on_click(cx.listener(|t, _, _, cx| {
+                cx.stop_propagation();
+                t.close(cx);
+            }))
             .child(
                 div()
                     .id("save-dialog")

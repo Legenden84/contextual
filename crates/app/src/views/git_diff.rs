@@ -7,6 +7,7 @@ use std::sync::Arc;
 use contextual_core::host::WorkspaceHost;
 use contextual_core::logic::diff::{Diff, compute_diff};
 use contextual_protocol::git::{DiffRequest, FileDiff};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, Context, Entity, IntoElement, ListAlignment, ListState, ParentElement, Render,
@@ -158,6 +159,8 @@ impl Render for GitDiffView {
             .flex()
             .flex_col()
             .flex_1()
+            .w_full()
+            .min_w_0()
             .min_h_0()
             .child(
                 div()
@@ -246,13 +249,26 @@ impl Render for GitDiffView {
                     )
                 } else {
                     d.child(
-                        list(self.list.clone(), move |ix, _, cx| {
-                            weak.upgrade()
-                                .map(|e| e.update(cx, |t, cx| t.render_row(ix, cx)))
-                                .unwrap_or_else(|| div().into_any_element())
-                        })
-                        .flex_1()
-                        .min_h_0(),
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(
+                                list(self.list.clone(), move |ix, _, cx| {
+                                    weak.upgrade()
+                                        .map(|e| e.update(cx, |t, cx| t.render_row(ix, cx)))
+                                        .unwrap_or_else(|| div().into_any_element())
+                                })
+                                .flex_1()
+                                .w_full()
+                                .min_w_0()
+                                .min_h_0(),
+                            )
+                            .child(Scrollbar::vertical(&self.list)),
                     )
                 }
             })

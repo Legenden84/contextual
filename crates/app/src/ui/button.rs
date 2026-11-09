@@ -1,8 +1,8 @@
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, row_height, sp};
@@ -105,6 +105,10 @@ impl RenderOnce for Button {
         let disabled = self.disabled;
         div()
             .id(self.id)
+            .occlude()
+            // Consume presses before they can start a text selection behind the control.
+            // Leave mouse-up alone so an existing selection drag can still finish.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex()
             .flex_none()
             .items_center()
@@ -133,8 +137,11 @@ impl RenderOnce for Button {
                 d.cursor_pointer()
                     .hover(|s| s.bg(hsla(hover)).text_color(hsla(ink_hover)))
             })
-            .when_some(self.on_click.filter(|_| !disabled), |d, f| {
-                d.on_click(move |e, w, cx| f(e, w, cx))
+            .on_click(move |e, w, cx| {
+                cx.stop_propagation();
+                if !disabled && let Some(f) = &self.on_click {
+                    f(e, w, cx);
+                }
             })
             .when_some(self.icon, |d, icon| d.child(Icon::new(icon).size(sp(4))))
             .child(self.label)

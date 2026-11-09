@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use contextual_core::logic::diff::{Diff, unified_patch};
 use contextual_core::logic::types::{Change, ChangeStatus};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
@@ -373,6 +374,7 @@ impl Render for DiffScreen {
             .flex_col()
             .flex_1()
             .min_w_0()
+            .min_h_0()
             .bg(hsla(c.surface_100))
             .child(
                 div()
@@ -499,16 +501,29 @@ impl Render for DiffScreen {
                         )
                     })
                     .child(
-                        list(self.list.clone(), {
-                            let weak = cx.entity().downgrade();
-                            move |ix, _, cx| {
-                                weak.upgrade()
-                                    .map(|e| e.update(cx, |t, cx| t.render_row(ix, cx)))
-                                    .unwrap_or_else(|| div().into_any_element())
-                            }
-                        })
-                        .flex_1()
-                        .min_w_0(),
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(
+                                list(self.list.clone(), {
+                                    let weak = cx.entity().downgrade();
+                                    move |ix, _, cx| {
+                                        weak.upgrade()
+                                            .map(|e| e.update(cx, |t, cx| t.render_row(ix, cx)))
+                                            .unwrap_or_else(|| div().into_any_element())
+                                    }
+                                })
+                                .flex_1()
+                                .w_full()
+                                .min_w_0()
+                                .min_h_0(),
+                            )
+                            .child(Scrollbar::vertical(&self.list)),
                     ),
             )
     }
