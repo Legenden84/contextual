@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use super::defaults::{EST_OUTPUT_TOKENS, USER_MESSAGE_TOKENS};
-use super::format::{estimate_tokens, fmt_k};
+use super::format::{TextTokenEstimate, estimate_tokens, fmt_k};
 use super::prompt::{ApiContent, content_images, content_text, system_prompt};
 use super::tree::{Selection, biggest_folder, node_stats};
 use super::types::{Deployment, NodeKind, Rule, TreeNode};
@@ -110,6 +110,54 @@ pub struct Totals {
     pub hint: Option<String>,
 }
 
+impl Totals {
+    /// Reprices and reclassifies a raw input estimate without recounting files or history.
+    /// Used by the live gauge; callers supply the full estimate, not a rounded delta.
+    pub fn with_input_tokens(mut self, raw: u64, deployment: &Deployment) -> Self {
+        self.tokens = round_100(raw);
+        self.share = self.tokens as f64 / deployment.limit.max(1) as f64;
+        self.level = if self.share >= 0.95 {
+            Level::Danger
+        } else if self.share >= 0.75 {
+            Level::Warn
+        } else {
+            Level::Ok
+        };
+        self.cost = deployment.cost(self.tokens, 0, EST_OUTPUT_TOKENS);
+        self.long_context = deployment.rates(self.tokens).long_context;
+        if self.level == Level::Ok {
+            self.hint = None;
+        }
+        self
+    }
+}
+
+/// Provisional context contributed by the current round. Never persisted: a completed round
+/// replaces it in the transcript, while a stopped or failed round is discarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveContextTokens {
+    input: u64,
+    reply: TextTokenEstimate,
+}
+
+impl LiveContextTokens {
+    pub fn new(system: &str, input: &ApiContent) -> Self {
+        Self {
+            input: estimate_tokens(system) + content_tokens(input),
+            reply: TextTokenEstimate::default(),
+        }
+    }
+
+    pub fn push_reply(&mut self, text: &str) {
+        self.reply.push(text);
+    }
+
+    /// Includes the system prompt once, the prepared input and the reply so far.
+    pub fn tokens(self) -> u64 {
+        self.input + self.reply.tokens()
+    }
+}
+
 /// Everything the totals depend on.
 pub struct ContextInput<'a> {
     pub tree: &'a [TreeNode],
@@ -190,36 +238,27 @@ pub fn totals_with_conversation_tokens(
     let raw = estimate_tokens(&system_prompt(input.rules_on, input.output_format))
         + conversation_tokens
         + new_tokens;
-    let tokens = round_100(raw);
-    let limit = input.deployment.limit.max(1);
-    let share = tokens as f64 / limit as f64;
-    let level = if share >= 0.95 {
-        Level::Danger
-    } else if share >= 0.75 {
-        Level::Warn
+    let hint = if conversation_tokens > file_tok && conversation_tokens > rule_tokens {
+        Some(format!("Earlier conversation: {}", fmt_k(conversation_tokens)))
     } else {
-        Level::Ok
+        biggest_folder(input.tree, input.selected)
+            .map(|b| format!("{}: {}", b.name, fmt_k(b.tokens)))
     };
-    let cost = input.deployment.cost(tokens, 0, EST_OUTPUT_TOKENS);
-    let long_context = input.deployment.rates(tokens).long_context;
-    let hint = (level != Level::Ok)
-        .then(|| biggest_folder(input.tree, input.selected))
-        .flatten()
-        .map(|b| format!("{}: {}", b.name, fmt_k(b.tokens)));
     Totals {
         files,
         rules: input.rules_on.len(),
         file_tokens: file_tok,
         rule_tokens,
-        tokens,
+        tokens: 0,
         new_tokens: round_100(new_tokens),
         conversation_tokens,
-        share,
-        level,
-        cost,
-        long_context,
+        share: 0.0,
+        level: Level::Ok,
+        cost: 0.0,
+        long_context: false,
         hint,
     }
+    .with_input_tokens(raw, input.deployment)
 }
 
 #[cfg(test)]
@@ -335,6 +374,59 @@ mod tests {
                     + content_images(content) as u64 * PICTURE_TOKENS
             );
         }
+    }
+
+    #[test]
+    fn live_round_matches_completed_content_without_counting_files_twice() {
+        use crate::logic::prompt::{ContextImage, with_images};
+
+        let system = "System instructions";
+        let input = with_images(
+            "Prepared input already contains the selected files".into(),
+            &[ContextImage {
+                name: "screenshot.png".into(),
+                url: "data:image/png;base64,AAAA".into(),
+            }],
+        );
+        let mut live = LiveContextTokens::new(system, &input);
+        live.push_reply("A reply ");
+        live.push_reply("with Unicode 😀");
+        assert_eq!(
+            live.tokens(),
+            estimate_tokens(system)
+                + content_tokens(&input)
+                + estimate_tokens("A reply with Unicode 😀")
+        );
+    }
+
+    #[test]
+    fn deselecting_files_does_not_remove_earlier_conversation() {
+        let selected = Selection::new();
+        let versions = HashMap::new();
+        let stale = HashSet::new();
+        let deployment = Deployment {
+            limit: 10_000,
+            ..Deployment::default()
+        };
+        let t = totals_with_conversation_tokens(
+            &ContextInput {
+                tree: &[],
+                selected: &selected,
+                rules_on: &[],
+                output_format: "",
+                transcript: &[],
+                file_versions: &versions,
+                stale: &stale,
+                resend_all: false,
+                picture_tokens: 0,
+                auto_tokens: 0,
+                deployment: &deployment,
+            },
+            8_000,
+        );
+        assert_eq!(t.files, 0);
+        assert!(t.tokens >= 8_000);
+        assert_eq!(t.hint.as_deref(), Some("Earlier conversation: 8k"));
     }
 
     #[test]

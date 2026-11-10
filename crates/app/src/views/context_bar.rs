@@ -1,5 +1,5 @@
-//! Context budget above the input. Cache accounting separately from rendering: streaming
-//! deltas do not change the next request's stored conversation, selection or settings.
+//! Context budget above the input. Cache stored context separately from the provisional
+//! live-round estimate so streaming never rescans history or copies proposal contents.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -7,11 +7,15 @@ use std::collections::{HashMap, HashSet};
 use contextual_core::logic::context::{
     ContextInput, Level, Totals, content_tokens, totals_with_conversation_tokens,
 };
+use contextual_core::logic::defaults::{EST_OUTPUT_TOKENS, USER_MESSAGE_TOKENS};
 use contextual_core::logic::format::{fmt_k, fmt_n};
 use contextual_core::logic::types::Deployment;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::{App, Entity, IntoElement, ParentElement, SharedString, Styled, div, relative};
+use gpui_kit::{
+    App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, div, relative,
+};
 
 use crate::state::chat::ChatModel;
 use crate::state::{AppModel, Project};
@@ -97,6 +101,16 @@ fn compute_totals(
     deployment: &Deployment,
 ) -> Totals {
     let rules_on = p.rules_on();
+    let mut selected = p.selected.clone();
+    if let Some(chat) = chat {
+        selected.extend(chat.thread.loaded.iter().cloned());
+    }
+    let (pending_paths, pending_tokens) = chat
+        .map(|chat| contextual_core::chat::pending_context_tokens(&chat.thread, &selected))
+        .unwrap_or_default();
+    // Send substitutes usable proposals for disk copies, including newly created files.
+    // Do not count both versions as new context.
+    selected.retain(|path| !pending_paths.contains(path));
     // Borrow each stored message. In particular, never clone image data URLs for this meter.
     let conversation_tokens = chat
         .map(|c| {
@@ -117,8 +131,7 @@ fn compute_totals(
         })
         .unwrap_or_default();
     // Accounting must not depend on the explorer's current filter.
-    let stale: HashSet<String> = p
-        .selected
+    let stale: HashSet<String> = selected
         .iter()
         .filter(|path| {
             contextual_core::logic::tree::find_node(p.tree(), path)
@@ -141,10 +154,10 @@ fn compute_totals(
                 estimate_tokens(&reads::tree_section(&p.model_tree))
             }
     };
-    totals_with_conversation_tokens(
+    let mut totals = totals_with_conversation_tokens(
         &ContextInput {
             tree: p.tree(),
-            selected: &p.selected,
+            selected: &selected,
             rules_on: &rules_on,
             output_format: &a.settings.workspace.output_prompt,
             transcript: &[],
@@ -152,11 +165,14 @@ fn compute_totals(
             stale: &stale,
             resend_all: false,
             picture_tokens: picture_tokens(chat),
-            auto_tokens,
+            auto_tokens: auto_tokens + pending_tokens,
             deployment,
         },
         conversation_tokens,
-    )
+    );
+    // This count describes explorer selection, not every file retained in history or proposals.
+    totals.files = p.selection_totals().0;
+    totals
 }
 
 pub fn context_bar(
@@ -171,7 +187,15 @@ pub fn context_bar(
     let p = project.read(cx);
     let deployment = a.deployment();
     let chat = chat.map(|c| c.read(cx));
-    let t = cache.get(a, p, chat, &deployment);
+    let mut t = cache.get(a, p, chat, &deployment);
+    let live = chat.and_then(|chat| chat.live_context);
+    if let Some(live) = live {
+        // The prepared input already includes files, images, tree and pending versions.
+        // Replace the speculative next-input estimate, rather than adding them twice.
+        let raw = t.conversation_tokens + live.tokens() + USER_MESSAGE_TOKENS;
+        t.hint = None;
+        t = t.with_input_tokens(raw, &deployment);
+    }
     let (fill, ink) = match t.level {
         Level::Ok => (c.accent, c.ink_muted),
         Level::Warn => (c.warning, c.warning),
@@ -179,8 +203,26 @@ pub fn context_bar(
     };
     let pct = (t.share * 100.0).round() as u64;
     let priced = deployment.priced();
+    let detail = format!(
+        "Estimated input for the next API round, not cumulative billed usage. \
+         Includes earlier messages and replies, instructions, and new context. \
+         Saving or deselecting files does not erase earlier conversation.\n\n\
+         The draft uses a fixed allowance of {} tokens; it is not counted as you type. \
+         Text and image counts are approximate and the display rounds to 100 tokens. \
+         While streaming, the current input and reply are provisional; stopped or failed \
+         rounds are removed from the estimate.\n\n\
+         Cost assumes {} output tokens, no cache discount, and one API round. \
+         Automatic reads and edit repair can add more rounds. The send-time safety \
+         check can reject a request before the gauge reaches 100%.",
+        USER_MESSAGE_TOKENS,
+        fmt_n(EST_OUTPUT_TOKENS),
+    );
 
     div()
+        .id("context-budget")
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(detail.clone()).build(window, cx)
+        })
         .flex()
         .flex_wrap()
         .w_full()
@@ -201,14 +243,14 @@ pub fn context_bar(
                     div()
                         .text_color(hsla(c.ink))
                         .font_weight(gpui_kit::FontWeight::MEDIUM)
-                        .child(SharedString::from(format!("{} files", t.files))),
+                        .child(SharedString::from(format!("{} selected files", t.files))),
                 )
                 .child(SharedString::from(format!("· {} rules", t.rules)))
                 .child(
                     div()
                         .type_style(contextual_theme::type_style::CODE_SMALL)
                         .child(SharedString::from(format!(
-                            "· ~{} input tokens",
+                            "· ~{} next input tokens",
                             fmt_n(t.tokens)
                         ))),
                 ),
@@ -249,10 +291,10 @@ pub fn context_bar(
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .whitespace_nowrap()
                     .child(Icon::new(IconName::TriangleAlert).size(px(14.0)))
-                    .child(if t.level == Level::Warn {
-                        "Near limit"
-                    } else {
+                    .child(if t.share >= 1.0 {
                         "Over limit"
+                    } else {
+                        "Near limit"
                     }),
             )
             .when_some(t.hint.clone(), |d, h| {
@@ -272,12 +314,12 @@ pub fn context_bar(
                 .child(SharedString::from(if priced && t.long_context {
                     let above = deployment.long_context.as_ref().map_or(0, |l| l.above);
                     format!(
-                        "~${:.3} / message (long-context rates, over {})",
+                        "~${:.3} / round (long-context rates, over {})",
                         t.cost,
                         fmt_k(above)
                     )
                 } else if priced {
-                    format!("~${:.3} / message", t.cost)
+                    format!("~${:.3} / round", t.cost)
                 } else {
                     "Cost: prices not set".into()
                 })),

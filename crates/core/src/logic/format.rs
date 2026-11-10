@@ -61,11 +61,29 @@ pub fn split_path(path: &str) -> SplitPath<'_> {
     }
 }
 
+/// Incremental equivalent of `estimate_tokens`, without retaining or rescanning the text.
+/// Count characters before rounding so the estimate does not depend on stream chunk sizes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TextTokenEstimate {
+    utf16_units: u64,
+}
+
+impl TextTokenEstimate {
+    pub fn push(&mut self, text: &str) {
+        self.utf16_units += js::len16(text) as u64;
+    }
+
+    pub fn tokens(self) -> u64 {
+        // Math.round(len / 4)
+        ((self.utf16_units + 2) / 4).max(1)
+    }
+}
+
 /// Rough token estimate for text the app hasn't counted yet (about 4 UTF-16 characters per token).
 pub fn estimate_tokens(text: &str) -> u64 {
-    let len = js::len16(text) as u64;
-    // Math.round(len / 4)
-    ((len + 2) / 4).max(1)
+    let mut estimate = TextTokenEstimate::default();
+    estimate.push(text);
+    estimate.tokens()
 }
 
 #[cfg(test)]
@@ -91,6 +109,18 @@ mod tests {
     fn dedents() {
         assert_eq!(dedent("\n  a\n    b\n\n  c\n  "), "a\n  b\n\nc");
         assert_eq!(dedent("\n \n"), "");
+    }
+
+    #[test]
+    fn streaming_estimate_matches_whole_text_at_every_character_boundary() {
+        let mut estimate = TextTokenEstimate::default();
+        let mut text = String::new();
+        for character in "Small chunks, Unicode 😀, and code: fn main() {}".chars() {
+            let mut buffer = [0; 4];
+            estimate.push(character.encode_utf8(&mut buffer));
+            text.push(character);
+            assert_eq!(estimate.tokens(), estimate_tokens(&text));
+        }
     }
 
     #[test]

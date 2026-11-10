@@ -337,9 +337,36 @@ impl WorkspaceScreen {
         let diffs = cx.new(|_| DiffStore::default());
         let mut subs = subs;
         let mut chat_state = WorkspaceChatState::read(chat.read(cx));
+        let mut budget_state = {
+            let model = chat.read(cx);
+            (
+                model.context_revision,
+                model.live_context.map(|live| live.tokens()),
+                model.attachments.iter().map(|a| a.tokens).sum::<u64>(),
+            )
+        };
         subs.push(
             cx.observe_in(&chat, window, move |this: &mut Self, chat, window, cx| {
-                let next = WorkspaceChatState::read(chat.read(cx));
+                // Finish reading the entity before notifying or otherwise mutating cx.
+                let (next_budget, next) = {
+                    let model = chat.read(cx);
+                    (
+                        (
+                            model.context_revision,
+                            model.live_context.map(|live| live.tokens()),
+                            model.attachments.iter().map(|a| a.tokens).sum::<u64>(),
+                        ),
+                        WorkspaceChatState::read(model),
+                    )
+                };
+                if next_budget != budget_state {
+                    budget_state = next_budget;
+                    // Chat owns its own gauge. The preview gauge is rendered here, so it
+                    // must observe accounting updates even when no proposals/dialogs change.
+                    if matches!(this.project.read(cx).active, Tab::Preview(_)) {
+                        cx.notify();
+                    }
+                }
                 if next == chat_state {
                     return;
                 }

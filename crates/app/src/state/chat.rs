@@ -14,6 +14,7 @@ use contextual_core::inspect::LiveRound;
 use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, RepairInput};
 use contextual_core::llm::{FoundryClient, FoundryConfig};
 use contextual_core::logic::changes::ChangeContext;
+use contextual_core::logic::context::LiveContextTokens;
 use contextual_core::logic::edits::format_edits;
 use contextual_core::logic::format::estimate_tokens;
 use contextual_core::logic::images::Attachment;
@@ -188,6 +189,8 @@ pub struct ChatModel {
     pub pending: Option<PendingReads>,
     /// The round streaming now, as sent (the Inspect view shows it before it completes).
     pub live: Option<LiveRound>,
+    /// Small, incremental gauge estimate; never persisted or added to stored history.
+    pub live_context: Option<LiveContextTokens>,
     _navigation_sub: Subscription,
     _tasks: Vec<Task<()>>,
 }
@@ -263,6 +266,7 @@ impl ChatModel {
             threads_revision: 0,
             pending: None,
             live: None,
+            live_context: None,
             _navigation_sub: navigation_sub,
             _tasks: Vec::new(),
         };
@@ -327,6 +331,8 @@ impl ChatModel {
             }
         }
         self.thread.pending_changes = Some(changes.clone());
+        // Pending versions are part of the next input, even before Save.
+        self.context_revision = self.context_revision.wrapping_add(1);
         self.change_snapshot = if changes.is_empty() {
             None
         } else {
@@ -512,6 +518,7 @@ impl ChatModel {
             system = with_reads(system, &env.skill_index);
         }
         let _ = this.update(cx, |this, cx| {
+            this.live_context = Some(LiveContextTokens::new(&system, &prepared.input));
             this.live = Some(LiveRound {
                 input: prepared.input.clone(),
                 system: system.clone(),
@@ -589,6 +596,9 @@ impl ChatModel {
                             if let Some(l) = this.live.as_mut() {
                                 l.reply.push_str(&text);
                             }
+                            if let Some(context) = this.live_context.as_mut() {
+                                context.push_reply(&text);
+                            }
                             cx.notify();
                         })
                         .is_ok();
@@ -651,6 +661,7 @@ impl ChatModel {
                 this.context_revision = this.context_revision.wrapping_add(1);
             }
             this.live = None;
+            this.live_context = None;
             this.activity = ChatActivity::CheckingEdits;
             cx.notify();
             if !(env.auto && completed && !truncated) {
@@ -907,10 +918,14 @@ impl ChatModel {
             );
             cx.notify();
         });
+        let loaded_before = self.thread.loaded.len();
         for f in &r.skill_files {
             if !self.thread.loaded.contains(f) {
                 self.thread.loaded.push(f.clone());
             }
+        }
+        if self.thread.loaded.len() != loaded_before {
+            self.context_revision = self.context_revision.wrapping_add(1);
         }
         let paths: Vec<String> = r.files.iter().chain(&r.skill_files).cloned().collect();
         let mut selected = self.project.read(cx).selected.clone();
@@ -1052,6 +1067,8 @@ impl ChatModel {
             cx.notify()
         });
         self.thread = ThreadState::fresh();
+        self.live = None;
+        self.live_context = None;
         self.context_revision = self.context_revision.wrapping_add(1);
         self.thread_generation = self.thread_generation.wrapping_add(1);
         self.messages.clear();
@@ -1178,6 +1195,8 @@ impl ChatModel {
                 }
                 this.attachments.clear();
                 this.thread = saved.thread;
+                this.live = None;
+                this.live_context = None;
                 this.set_changes(changes);
                 this.context_revision = this.context_revision.wrapping_add(1);
                 this.thread_generation = this.thread_generation.wrapping_add(1);

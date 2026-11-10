@@ -578,6 +578,38 @@ pub fn prepare_turn(
     }
 }
 
+/// Paths whose disk estimates must be replaced, and the estimated context for their pending
+/// versions. Reuse turn preparation so deletions, conflicts and already-sent hashes obey the
+/// same rules as Send. Call only when stored context changes, not on streaming deltas.
+pub fn pending_context_tokens(
+    thread: &ThreadState,
+    selected: &HashSet<String>,
+) -> (HashSet<String>, u64) {
+    let paths: HashSet<String> = thread
+        .pending_changes
+        .iter()
+        .flatten()
+        .filter(|change| usable_proposal(change))
+        .map(|change| change.path.clone())
+        .collect();
+    if paths.is_empty() {
+        return (paths, 0);
+    }
+    let prepared = prepare_turn(
+        thread,
+        &[],
+        selected,
+        "",
+        &[],
+        0,
+        TurnOptions::default(),
+    );
+    (
+        paths,
+        crate::logic::context::content_tokens(&prepared.input),
+    )
+}
+
 /// The transcript as Foundry request messages.
 pub fn history(thread: &ThreadState) -> Vec<LlmMessage> {
     thread
@@ -1106,6 +1138,78 @@ mod tests {
         assert_eq!(turn.versions["a.txt"], hash_text("pending"));
         assert_eq!(turn.versions["new.txt"], hash_text("created"));
         assert!(!text.contains("# Removed from context"));
+    }
+
+    #[test]
+    fn pending_context_counts_new_files_before_they_exist_on_disk() {
+        let mut thread = ThreadState::fresh();
+        let content = "new contents\n".repeat(1_000);
+        thread.pending_changes = Some(vec![proposal("new.txt", ChangeStatus::A, "", &content)]);
+        let (paths, tokens) = pending_context_tokens(&thread, &HashSet::new());
+        assert_eq!(paths, HashSet::from(["new.txt".into()]));
+        assert!(tokens >= crate::logic::format::estimate_tokens(&content));
+
+        // After that version has been sent, only the pending-state note is needed.
+        thread
+            .file_versions
+            .insert("new.txt".into(), hash_text(&content));
+        let (_, unchanged_tokens) = pending_context_tokens(&thread, &HashSet::new());
+        assert!(unchanged_tokens < tokens);
+    }
+
+    #[test]
+    fn conflicted_proposals_do_not_replace_disk_token_estimates() {
+        let mut thread = ThreadState::fresh();
+        let mut change = proposal("a.txt", ChangeStatus::M, "disk", "proposal");
+        change.conflict = Some("Changed on disk".into());
+        thread.pending_changes = Some(vec![change]);
+        assert_eq!(
+            pending_context_tokens(&thread, &HashSet::new()),
+            (HashSet::new(), 0)
+        );
+    }
+
+    #[test]
+    fn context_estimates_survive_reopening_a_saved_thread() {
+        use crate::logic::context::content_tokens;
+
+        let mut thread = ThreadState::fresh();
+        thread.record_round(
+            ApiContent::Text("Implement the change".into()),
+            "system",
+            false,
+            "Proposed changes".repeat(100),
+            None,
+        );
+        thread.pending_changes = Some(vec![proposal(
+            "new.txt",
+            ChangeStatus::A,
+            "",
+            &"new contents".repeat(100),
+        )]);
+        let selected = HashSet::new();
+        let before_pending = pending_context_tokens(&thread, &selected);
+        let before_history: u64 = thread
+            .transcript
+            .iter()
+            .map(|message| content_tokens(&message.content))
+            .sum();
+        let saved = SavedThread::new(thread, Vec::new());
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(
+            pending_context_tokens(&restored.thread, &selected),
+            before_pending
+        );
+        assert_eq!(
+            restored
+                .thread
+                .transcript
+                .iter()
+                .map(|message| content_tokens(&message.content))
+                .sum::<u64>(),
+            before_history
+        );
     }
 
     #[test]
