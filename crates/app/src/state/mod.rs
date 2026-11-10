@@ -135,7 +135,10 @@ impl AppModel {
     /// Re-resolves the Foundry config from settings, env vars and the keychain.
     fn refresh_foundry(&mut self) {
         match resolve_foundry_config_from_env(&self.settings, self.secrets.as_ref()) {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
+                // Every client gets the same effective limit as the context bar, including
+                // custom model entries. This only changes the runtime config, not Settings.
+                cfg.context_limit = Some(self.settings.deployment(Some(&cfg)).limit);
                 self.foundry = FoundryStatus::Ready {
                     health: ReadyHealth {
                         endpoint: cfg.endpoint.clone(),

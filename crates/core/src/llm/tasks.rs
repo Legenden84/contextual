@@ -3,7 +3,9 @@
 //! old `foundry.ts`.
 
 use super::client::{FoundryClient, FoundryError};
-use super::types::{PrDraftInput, RepairInput, RepairResult};
+use super::types::{
+    ChatMessage, MESSAGE_OVERHEAD_TOKENS, PrDraftInput, RepairInput, RepairResult,
+};
 use contextual_protocol::git::PrDraft;
 use regex::Regex;
 use serde_json::{Value, json};
@@ -65,14 +67,28 @@ pub fn clean_commit_message(text: &str) -> String {
 }
 
 impl FoundryClient {
+    /// One-off requests use the same admission policy as conversations, with their own
+    /// completion limit. Build the HTTP body only after admission succeeds.
+    fn task_body(
+        &self,
+        messages: &[ChatMessage],
+        output_tokens: u32,
+    ) -> Result<Value, FoundryError> {
+        let input_tokens = messages.iter().fold(MESSAGE_OVERHEAD_TOKENS, |total, m| {
+            total.saturating_add(m.estimated_tokens())
+        });
+        self.check_input_budget(input_tokens, output_tokens)?;
+        Ok(json!({
+            "model": self.cfg.deployment,
+            "messages": messages,
+            "max_completion_tokens": output_tokens,
+        }))
+    }
+
     /// Round-trip check for Settings → Test connection (16-token chat completion). Returns ms.
     pub async fn test_connection(&self, cancel: &CancellationToken) -> crate::Result<u64> {
         let started = Instant::now();
-        let body = json!({
-            "model": self.cfg.deployment,
-            "messages": [{ "role": "user", "content": "ping" }],
-            "max_completion_tokens": 16,
-        });
+        let body = self.task_body(&[ChatMessage::user("ping")], 16)?;
         self.chat_json(&body, cancel).await?;
         Ok(started.elapsed().as_millis() as u64)
     }
@@ -83,14 +99,13 @@ impl FoundryClient {
         diff: &str,
         cancel: &CancellationToken,
     ) -> crate::Result<String> {
-        let body = json!({
-            "model": self.cfg.deployment,
-            "max_completion_tokens": 1000,
-            "messages": [
-                { "role": "system", "content": COMMIT_DRAFT_SYSTEM },
-                { "role": "user", "content": format!("```diff\n{diff}\n```") },
+        let body = self.task_body(
+            &[
+                ChatMessage::system(COMMIT_DRAFT_SYSTEM),
+                ChatMessage::user(format!("```diff\n{diff}\n```")),
             ],
-        });
+            1000,
+        )?;
         let res = self.chat_json(&body, cancel).await?;
         Ok(clean_commit_message(&message_content(&res)))
     }
@@ -115,14 +130,13 @@ impl FoundryClient {
             "Branch: {}\n\n# Commits\n\n{commits}\n\n# What was asked and explained in the chat\n\n{notes}\n\n# Diff\n\n```diff\n{}\n```",
             input.branch, input.diff
         );
-        let body = json!({
-            "model": self.cfg.deployment,
-            "max_completion_tokens": 2000,
-            "messages": [
-                { "role": "system", "content": PR_DRAFT_SYSTEM },
-                { "role": "user", "content": user },
+        let body = self.task_body(
+            &[
+                ChatMessage::system(PR_DRAFT_SYSTEM),
+                ChatMessage::user(user),
             ],
-        });
+            2000,
+        )?;
         let res = self.chat_json(&body, cancel).await?;
         Ok(parse_pr_draft(&message_content(&res)))
     }
@@ -134,20 +148,16 @@ impl FoundryClient {
         input: &RepairInput,
         cancel: &CancellationToken,
     ) -> crate::Result<RepairResult> {
-        let body = json!({
-            "model": self.cfg.deployment,
-            "max_completion_tokens": self.cfg.max_completion_tokens,
-            "messages": [
-                { "role": "system", "content": REPAIR_SYSTEM },
-                {
-                    "role": "user",
-                    "content": format!(
-                        "File: {}\n\n# Current file\n\n{}\n\n# Edits to apply\n\n{}",
-                        input.path, input.original, input.edits
-                    ),
-                },
+        let body = self.task_body(
+            &[
+                ChatMessage::system(REPAIR_SYSTEM),
+                ChatMessage::user(format!(
+                    "File: {}\n\n# Current file\n\n{}\n\n# Edits to apply\n\n{}",
+                    input.path, input.original, input.edits
+                )),
             ],
-        });
+            self.cfg.max_completion_tokens,
+        )?;
         let res = self.chat_json(&body, cancel).await?;
         let mut content = message_content(&res);
         // Strip a code fence if the model added one anyway.

@@ -16,6 +16,67 @@ pub const PICTURE_TOKENS: u64 = 765;
 /// Context limit when the deployment's isn't known.
 pub const FALLBACK_CONTEXT_LIMIT: u64 = 128_000;
 
+/// Admission budget for an actual request, separate from the context bar's input estimate.
+///
+/// Until the catalog distinguishes input-only limits from combined context windows, reserve
+/// the requested output conservatively in both cases. Ten percent of the limit is also left
+/// unused for estimation uncertainty. This is a heuristic guard, not a provider token count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestBudget {
+    limit: u64,
+    output_reserve: u64,
+}
+
+impl RequestBudget {
+    pub fn new(limit: u64, output_reserve: u64) -> Self {
+        Self {
+            limit,
+            output_reserve,
+        }
+    }
+
+    pub fn safety_margin(self) -> u64 {
+        self.limit.div_ceil(10)
+    }
+
+    /// Maximum estimated input, including instructions, history and message framing.
+    pub fn input_capacity(self) -> u64 {
+        self.limit
+            .saturating_sub(self.safety_margin())
+            .saturating_sub(self.output_reserve)
+    }
+
+    /// Rejects locally without truncating input or changing any conversation state.
+    pub fn check(self, input_tokens: u64) -> Result<(), BudgetExceeded> {
+        let fits = self
+            .output_reserve
+            .checked_add(self.safety_margin())
+            .and_then(|reserved| reserved.checked_add(input_tokens))
+            .is_some_and(|total| self.limit > 0 && total <= self.limit);
+        if fits {
+            Ok(())
+        } else {
+            Err(BudgetExceeded {
+                input_tokens,
+                input_capacity: self.input_capacity(),
+            })
+        }
+    }
+}
+
+/// A locally refused request, not an HTTP or network failure.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Not sent: estimated input ({input_tokens} tokens) does not fit the usable input budget \
+     ({input_capacity} tokens), after reserving output and an estimation margin. \
+     Reduce the request or use a larger-context model. Earlier conversation still counts \
+     even when files are deselected."
+)]
+pub struct BudgetExceeded {
+    pub input_tokens: u64,
+    pub input_capacity: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
@@ -274,6 +335,43 @@ mod tests {
                     + content_images(content) as u64 * PICTURE_TOKENS
             );
         }
+    }
+
+    #[test]
+    fn request_budget_reserves_output_and_estimation_margin() {
+        let budget = RequestBudget::new(128_000, 16_384);
+        assert_eq!(budget.input_capacity(), 98_816);
+    }
+
+    #[test]
+    fn request_budget_accepts_the_exact_boundary() {
+        assert_eq!(RequestBudget::new(10_000, 2_000).check(7_000), Ok(()));
+    }
+
+    #[test]
+    fn request_budget_rejects_one_token_over_without_rounding() {
+        assert_eq!(
+            RequestBudget::new(10_000, 2_000).check(7_001),
+            Err(BudgetExceeded {
+                input_tokens: 7_001,
+                input_capacity: 7_000,
+            })
+        );
+    }
+
+    #[test]
+    fn request_budget_rejects_output_that_exhausts_the_window() {
+        assert!(RequestBudget::new(1_000, 901).check(0).is_err());
+    }
+
+    #[test]
+    fn request_budget_rejects_a_zero_limit() {
+        assert!(RequestBudget::new(0, 0).check(0).is_err());
+    }
+
+    #[test]
+    fn request_budget_rejects_arithmetic_overflow() {
+        assert!(RequestBudget::new(u64::MAX, u64::MAX).check(1).is_err());
     }
 
     #[test]

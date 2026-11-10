@@ -12,6 +12,8 @@
 
 use super::config::FoundryConfig;
 use crate::error::{Error, ErrorCode};
+use crate::logic::context::{BudgetExceeded, FALLBACK_CONTEXT_LIMIT, RequestBudget};
+use crate::models;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -34,6 +36,8 @@ pub enum FoundryError {
     Timeout,
     /// Error without a status: in-stream errors, malformed responses, cut-off output.
     Failed(String),
+    /// Refused locally before any HTTP request, retry or API fallback.
+    ContextBudget(BudgetExceeded),
     /// Cancelled by the caller.
     Cancelled,
 }
@@ -52,6 +56,7 @@ impl FoundryError {
             Self::Status { message, .. } => message.clone(),
             Self::Connection(m) | Self::Failed(m) => m.clone(),
             Self::Timeout => "Request timed out.".into(),
+            Self::ContextBudget(e) => e.to_string(),
             Self::Cancelled => "Request was aborted.".into(),
         }
     }
@@ -64,6 +69,7 @@ pub fn describe_error(err: &FoundryError) -> (u16, String) {
         FoundryError::Status { status, message } => {
             (*status, format!("Foundry returned {status}: {message}"))
         }
+        FoundryError::ContextBudget(e) => (400, e.to_string()),
         other => (
             502,
             format!("Could not reach Foundry: {}", other.raw_message()),
@@ -73,10 +79,10 @@ pub fn describe_error(err: &FoundryError) -> (u16, String) {
 
 impl From<FoundryError> for Error {
     fn from(e: FoundryError) -> Self {
-        let code = if e == FoundryError::Cancelled {
-            ErrorCode::Cancelled
-        } else {
-            ErrorCode::Upstream
+        let code = match &e {
+            FoundryError::Cancelled => ErrorCode::Cancelled,
+            FoundryError::ContextBudget(_) => ErrorCode::InvalidInput,
+            _ => ErrorCode::Upstream,
         };
         Error::new(code, describe_error(&e).1)
     }
@@ -165,6 +171,31 @@ impl FoundryClient {
 
     pub fn config(&self) -> &FoundryConfig {
         &self.cfg
+    }
+
+    /// Budget for a request's actual output allowance (drafts and connection tests use less).
+    /// The app supplies its resolved limit, including custom catalog entries. Standalone
+    /// clients fall back to the built-in catalog, then the default context limit.
+    pub fn request_budget(&self, output_tokens: u32) -> RequestBudget {
+        let limit = self
+            .cfg
+            .context_limit
+            .or_else(|| {
+                models::find(&[], &[&self.cfg.model_name, &self.cfg.deployment])
+                    .map(|model| model.context_limit)
+            })
+            .unwrap_or(FALLBACK_CONTEXT_LIMIT);
+        RequestBudget::new(limit, u64::from(output_tokens))
+    }
+
+    pub(crate) fn check_input_budget(
+        &self,
+        input_tokens: u64,
+        output_tokens: u32,
+    ) -> Result<(), FoundryError> {
+        self.request_budget(output_tokens)
+            .check(input_tokens)
+            .map_err(FoundryError::ContextBudget)
     }
 
     fn support_key(&self) -> String {

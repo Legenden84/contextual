@@ -523,6 +523,91 @@ Known deviations from the TS are listed in the commit messages of the port; the 
 `DiffOp` word ranges are UTF-8 byte offsets; `localeCompare` is emulated (exact for ASCII);
 saves are atomic and refuse adding a file where a folder exists; the old 32 MB git output cap is gone.
 
+## 16. Managed large tasks and design references
+
+### Goal and user contract
+
+A user provides a large HTML mockup and asks Contextual to implement it in an opened project.
+Contextual manages reference retrieval, implementation stages and context renewal behind the
+scenes. The promise is **large tasks without manual context management**, not unlimited model
+context.
+
+One visible task can span several bounded model contexts. Progress describes observable work
+(preparing references, implementing a stage, checking integration), not private model reasoning.
+The user can pause, cancel, inspect requests and review cumulative proposals. Saving project
+changes remains explicit, checked and undoable.
+
+### Architecture and invariants
+
+- **Reference library:** original HTML/CSS/assets remain authoritative, read-only sources.
+  Preparation first parses and divides locally; it must not require the whole reference to fit
+  in a model request. Derived outlines and summaries retain source locations and content hashes.
+- **Bounded retrieval:** expose a paged outline and independently readable sections. Preserve
+  access to global CSS, cascade order, variables, media queries, assets and interactions.
+  Do not discard minified design CSS as irrelevant. Oversized individual sections must also be
+  navigable without silently truncating them.
+- **Reference authorization:** project references go through `WorkspaceHost`. External mockups
+  require explicit user selection and a separate read-only authorization; model-provided paths
+  must not broaden it. Do not automatically fetch linked URLs or follow filesystem references
+  outside the authorized source. HTML is untrusted reference data, not project instructions.
+- **Task state:** persist goal, acceptance criteria, shared design rules, component contracts,
+  decisions, source references, stage status, unresolved questions and resource budgets.
+  Start with sequential stages, not parallel agents.
+- **Exact proposal state:** retain all pending contents and original disk baselines separately
+  from the model's active working set. Summaries never become the source of editable code or
+  save preconditions. Current `prepare_turn` includes all usable pending paths; staged tasks
+  will need an explicit working-set policy without dropping retained proposals.
+- **Context renewal:** preserve the full audit transcript for chat history and Inspect, but
+  start a fresh provider chain with a bounded checkpoint and the next stage's working set.
+  Reset active file/tree version bookkeeping: files remembered in archived history are not
+  automatically available in the renewed context. Existing editable files must be supplied in
+  full again, using pending versions where appropriate.
+- **Transactional checkpoints:** cancellation, provider errors and restart must leave the last
+  valid plan, exact proposals and source baselines intact. Never mark an unfinished stage done.
+  Resume must verify reference/source versions and must not automatically save project files.
+- **Verification:** integration passes are also bounded. Distinguish model review from actual
+  builds or visual checks. Browser execution and screenshots are deferred until isolated
+  rendering, restricted file/network access and user authorization have been designed.
+
+### Delivery slices
+
+| Slice | Scope | Status |
+| --- | --- | --- |
+| 1 — Request admission | Shared core budget; count full logical history even with `previous_response_id`; guard conversation rounds, repair, drafts and connection tests before HTTP; use the app's resolved model limit. | Initial implementation and tests added; execution/validation pending. |
+| 2 — Reference ingestion | User-selected read-only HTML reference, local structural indexing, bounded outlines/sections, source hashes and dependency-aware CSS access. | Planned. |
+| 3 — Task state and working sets | Persistent plan/stages; separate retained proposals from active context; stage-specific full-file loading. | Planned. |
+| 4 — Automatic renewal | Bounded checkpoints, new provider chains, archived audit history, safe resume/cancel and resource limits. | Planned. |
+| 5 — Guided execution | Sequential orchestration, progress/pause controls, missing-information prompts and integration review. | Planned. |
+
+Slice 1 is deliberately a refusal guard, not automatic recovery. Approving reads above the
+per-message allowance cannot bypass it: the assembled follow-up is checked at the conversation
+boundary. No input is silently truncated, history discarded or project file saved.
+
+The initial guard uses the existing text/image estimates, message-framing allowances, the
+actual requested completion limit, and a 10% context-limit margin. It conservatively reserves
+output even for catalog entries described as input-only limits. The context bar still displays
+estimated input, not this smaller usable input capacity. Neither the margin nor the current
+fixed picture estimate guarantees provider acceptance.
+
+Before automatic orchestration ships, distinguish input-only and combined context limits in
+model metadata, improve model-specific text/vision accounting, and reconcile estimates with
+reported usage. Reference/read planning should use actual per-item sizes and remaining capacity,
+rather than the existing evenly distributed read estimate. Handle provider context-limit errors
+without repeating the same oversized request; checkpoints must be prepared before the active
+context is exhausted.
+
+### Acceptance tests for the full workflow
+
+- A mockup larger than the model window can be ingested and browsed without one oversized call.
+- Every stage, read follow-up, checkpoint and integration pass fits its admission budget.
+- Global CSS and cross-section dependencies remain retrievable with source provenance.
+- Multiple renewals preserve exact pending changes, including new files and deletions.
+- Save after renewal still checks original disk baselines; undo remains valid.
+- Cancellation/restart during any stage does not lose proposals or claim completion.
+- Full history remains inspectable while only the active working set is sent.
+- Missing assets, ambiguous requirements and unperformed verification are reported honestly.
+- Malicious reference paths, linked resources and embedded scripts cannot escape authorization.
+
 ## Appendix A — Fallback: Tauri v2 + React
 
 If GPUI fails the Phase 1 gate, keep the React UI and host it in Tauri v2:

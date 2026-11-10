@@ -345,6 +345,181 @@ async fn conversation_requests_use_the_configured_completion_limit() {
 }
 
 #[tokio::test]
+async fn oversized_initial_input_is_rejected_before_any_http_request() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(10_000);
+    config.max_completion_tokens = 1_000;
+    let client = FoundryClient::new(config).unwrap();
+    let events = chat(&client, req(vec![], "x".repeat(40_000), None)).await;
+
+    assert!(
+        matches!(events.as_slice(), [event] if event["type"] == "error"
+            && event["message"].as_str().is_some_and(|m| m.starts_with("Not sent:"))),
+        "{events:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn chained_read_followup_counts_history_before_retry_or_fallback() {
+    for deployment in ["gpt-resp", "gpt-chat"] {
+        let server = azure_like().await;
+        let mut config = cfg(&server.uri(), deployment);
+        config.context_limit = Some(10_000);
+        config.max_completion_tokens = 1_000;
+        let client = FoundryClient::new(config).unwrap();
+        let events = chat(
+            &client,
+            req(
+                vec![ChatMessage::user("earlier source ".repeat(4_000))],
+                "# Requested context\nContinue with the original request.",
+                Some("resp_gone"),
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(events.as_slice(), [event] if event["type"] == "error"
+                && event["message"].as_str().is_some_and(|m| m.starts_with("Not sent:"))),
+            "{deployment}: {events:?}"
+        );
+        assert!(
+            server.received_requests().await.unwrap().is_empty(),
+            "{deployment}: admission must run before API discovery or chain reset"
+        );
+    }
+}
+
+#[tokio::test]
+async fn oversized_system_prompt_is_rejected_locally() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(10_000);
+    let client = FoundryClient::new(config).unwrap();
+    let mut request = req(vec![], "Small user message", None);
+    request.system = "rules ".repeat(10_000);
+
+    let events = chat(&client, request).await;
+    assert!(matches!(events.as_slice(), [event] if event["type"] == "error"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn completion_reserve_can_block_even_a_small_conversation() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(1_000);
+    config.max_completion_tokens = 1_024;
+    let client = FoundryClient::new(config).unwrap();
+
+    let events = chat(&client, req(vec![], "Hello", None)).await;
+    assert!(matches!(events.as_slice(), [event] if event["type"] == "error"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn connection_test_reserves_its_own_output_not_the_chat_allowance() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(1_000);
+    config.max_completion_tokens = 32_768;
+    let client = FoundryClient::new(config).unwrap();
+
+    let result = client.test_connection(&CancellationToken::new()).await;
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn oversized_repair_keeps_the_failure_local() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(10_000);
+    let client = FoundryClient::new(config).unwrap();
+    let input = RepairInput {
+        path: "src/App.tsx".into(),
+        original: "x".repeat(40_000),
+        edits: "Replace the heading".into(),
+    };
+
+    let error = client
+        .repair_file(&input, &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(error.message.starts_with("Not sent:"));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn oversized_commit_draft_is_rejected_locally() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(10_000);
+    let client = FoundryClient::new(config).unwrap();
+
+    let error = client
+        .draft_commit_message(&"x".repeat(40_000), &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn oversized_pr_draft_is_rejected_locally() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-resp");
+    config.context_limit = Some(10_000);
+    let client = FoundryClient::new(config).unwrap();
+    let input = PrDraftInput {
+        diff: "x".repeat(40_000),
+        ..PrDraftInput::default()
+    };
+
+    let error = client
+        .draft_pull_request(&input, &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn budget_uses_explicit_limits_before_the_builtin_catalog() {
+    let server = azure_like().await;
+    let mut config = cfg(&server.uri(), "gpt-6-astra");
+    config.context_limit = Some(20_000);
+    let client = FoundryClient::new(config).unwrap();
+    assert_eq!(client.request_budget(2_000).input_capacity(), 16_000);
+}
+
+#[tokio::test]
+async fn budget_uses_the_builtin_catalog_when_no_limit_is_supplied() {
+    let server = azure_like().await;
+    let client = client(&server.uri(), "gpt-6-astra");
+    let model = contextual_core::models::find(&[], &["gpt-6-astra"]).unwrap();
+    assert_eq!(
+        client.request_budget(2_000),
+        contextual_core::logic::context::RequestBudget::new(model.context_limit, 2_000)
+    );
+}
+
+#[tokio::test]
+async fn budget_uses_the_fallback_for_an_unknown_model() {
+    let server = azure_like().await;
+    let client = client(&server.uri(), "unknown-model");
+    assert_eq!(
+        client.request_budget(2_000),
+        contextual_core::logic::context::RequestBudget::new(
+            contextual_core::logic::context::FALLBACK_CONTEXT_LIMIT,
+            2_000,
+        )
+    );
+}
+
+#[tokio::test]
 async fn streams_deltas_usage_and_done_over_a_channel() {
     let server = azure_like().await;
     let c = client(&server.uri(), "gpt-resp");

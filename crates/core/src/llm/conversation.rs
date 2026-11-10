@@ -359,6 +359,15 @@ impl FoundryClient {
         tx: &mpsc::Sender<ChatEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), FoundryError> {
+        if cancel.is_cancelled() {
+            return Err(FoundryError::Cancelled);
+        }
+        // Count the whole logical conversation before choosing either transport. A stored
+        // response ID, expired-chain retry or fallback does not make history free.
+        self.check_input_budget(
+            req.estimated_input_tokens(),
+            self.cfg.max_completion_tokens,
+        )?;
         if self.responses_supported() != Some(false) {
             let previous = req.previous_response_id.as_deref();
             let started = match self.start_responses(req, previous, cancel).await {
