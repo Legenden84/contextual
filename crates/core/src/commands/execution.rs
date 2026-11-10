@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
-use super::{CallId, CommandRequest, LaunchPermit, Outcome, ReviewPlan};
+use super::{CallId, CommandRequest, InvocationId, LaunchPermit, Outcome, ReviewPlan};
 use crate::host::WorkspaceHost;
 use crate::location::{Location, ProjectRoot};
 use crate::process::Cmd;
@@ -109,21 +109,34 @@ impl ExecutionResult {
 
 /// Persistable execution intent. No approval token or complete inherited environment.
 /// Scripts and arguments are part of the reviewed invocation and may themselves be private.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionIntent {
+    pub invocation: InvocationId,
     pub call: CallId,
     pub project: ProjectRoot,
+    pub platform: CommandPlatform,
+    pub environment_policy: String,
     pub request: CommandRequest,
     pub cwd: String,
     pub program: String,
     pub args: Vec<String>,
 }
 
+impl std::fmt::Debug for ExecutionIntent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutionIntent")
+            .field("invocation", &self.invocation)
+            .field("platform", &self.platform)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Persistable terminal observation, intentionally excluding output contents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionCompletion {
+    pub invocation: InvocationId,
     pub call: CallId,
     pub status: ExecutionStatus,
     pub exit_code: Option<i32>,
@@ -139,6 +152,8 @@ pub struct ExecutionCompletion {
 ///
 /// `record_intent` must return success only after durable, atomic storage. A restored intent
 /// without a completion is unknown, never permission to replay the invocation.
+/// Duplicate invocation IDs must be refused, including after reopening the journal.
+/// A completion must match an existing intent and must not overwrite an earlier observation.
 #[async_trait]
 pub trait ExecutionJournal: Send + Sync {
     async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()>;
@@ -230,10 +245,12 @@ impl ExecutionEngine {
         let host = self.host.clone();
         let runner = self.runner.clone();
         let journal = self.journal.clone();
+        let invocation = permit.invocation().clone();
         let task = runtime.spawn(async move {
             supervise(permit, host, runner, journal, worker_cancel, progress_tx).await
         });
         Ok(ExecutionHandle {
+            invocation,
             task,
             cancel,
             progress,
@@ -244,6 +261,7 @@ impl ExecutionEngine {
 
 /// An owned running operation. Dropping it requests Stop, not Undo.
 pub struct ExecutionHandle {
+    invocation: InvocationId,
     task: JoinHandle<ExecutionResult>,
     cancel: CancellationToken,
     progress: watch::Receiver<ExecutionProgress>,
@@ -251,6 +269,10 @@ pub struct ExecutionHandle {
 }
 
 impl ExecutionHandle {
+    pub fn invocation(&self) -> &InvocationId {
+        &self.invocation
+    }
+
     pub fn stop(&self) {
         self.cancel.cancel();
     }
@@ -261,6 +283,7 @@ impl ExecutionHandle {
 
     pub async fn wait(self) -> ExecutionResult {
         let Self {
+            invocation: _,
             task,
             guard,
             progress,
@@ -318,8 +341,11 @@ fn command_and_intent(permit: &LaunchPermit) -> Result<(Cmd, ExecutionIntent)> {
         })
         .collect::<Result<_>>()?;
     let intent = ExecutionIntent {
+        invocation: permit.invocation().clone(),
         call: permit.call().clone(),
         project: plan.binding.project.clone(),
+        platform: plan.platform,
+        environment_policy: plan.environment_policy.clone(),
         request: plan.request.clone(),
         cwd: text(plan.directory.cwd().as_os_str())?,
         program: program.clone(),
@@ -369,6 +395,7 @@ async fn supervise(
 
     let mut result = run_checked(&permit, host, runner, command, &cancel, &progress).await;
     let completion = ExecutionCompletion {
+        invocation: intent.invocation,
         call: intent.call,
         status: result.status,
         exit_code: result.exit_code,
@@ -666,6 +693,7 @@ mod tests {
     #[derive(Default)]
     struct Journal {
         fail_intent: bool,
+        fail_completion: bool,
         intents: AtomicUsize,
         completions: AtomicUsize,
     }
@@ -681,6 +709,9 @@ mod tests {
         }
 
         async fn record_completion(&self, _: &ExecutionCompletion) -> Result<()> {
+            if self.fail_completion {
+                return Err(Error::internal("test completion failure"));
+            }
             self.completions.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -890,6 +921,109 @@ mod tests {
         assert_eq!(result.status, ExecutionStatus::FailedToStart);
         assert!(result.history_error.is_some());
         assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn supervisor_records_a_real_journal_without_persisting_output() {
+        use crate::commands::journal::FileExecutionJournal;
+
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let storage = tempfile::tempdir().unwrap();
+        let journal = Arc::new(
+            FileExecutionJournal::open(storage.path().join("journal"))
+                .await
+                .unwrap(),
+        );
+        let backend = Arc::new(runner(&plan));
+        let engine = ExecutionEngine::new(host, backend.clone(), journal.clone());
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let invocation = permit.invocation().clone();
+        let handle = engine.start(permit, CancellationToken::new()).unwrap();
+        assert_eq!(handle.invocation(), &invocation);
+        let result = handle.wait().await;
+
+        let restored = journal.load(&invocation).await.unwrap();
+        assert_eq!(restored.status(), ExecutionStatus::Success);
+        assert_eq!(restored.intent.call, call);
+        assert_eq!(restored.intent.request, plan.request);
+        assert!(!restored.blocks_execution());
+        assert!(result.history_error.is_none());
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+        let completion = std::fs::read_to_string(
+            journal
+                .dir()
+                .join(format!("{}.completion.json", invocation.as_str())),
+        )
+        .unwrap();
+        assert!(!completion.contains("stderr\\u"));
+        assert!(!completion.contains("\"stdout\":"));
+        assert!(!completion.contains("\"stderr\":"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_existing_durable_intent_refuses_dispatch_without_retry() {
+        use crate::commands::journal::FileExecutionJournal;
+
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let storage = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(storage.path().join("journal"))
+            .await
+            .unwrap();
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let (_, intent) = command_and_intent(&permit).unwrap();
+        journal.record_intent(&intent).await.unwrap();
+
+        let reopened = Arc::new(
+            FileExecutionJournal::open(storage.path().join("journal"))
+                .await
+                .unwrap(),
+        );
+        let backend = Arc::new(runner(&plan));
+        let engine = ExecutionEngine::new(host, backend.clone(), reopened.clone());
+        let result = engine
+            .start(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::FailedToStart);
+        assert!(!result.spawned);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+        assert!(
+            reopened
+                .load(&intent.invocation)
+                .await
+                .unwrap()
+                .blocks_execution()
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_write_failure_does_not_fabricate_a_process_failure() {
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let backend = Arc::new(runner(&plan));
+        let journal = Arc::new(Journal {
+            fail_completion: true,
+            ..Journal::default()
+        });
+        let engine = ExecutionEngine::new(host, backend.clone(), journal.clone());
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = engine
+            .start(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::Success);
+        assert!(result.history_error.is_some());
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.completions.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

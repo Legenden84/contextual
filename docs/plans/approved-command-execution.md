@@ -8,11 +8,15 @@ the `commandPrepare` capability. Preparation validates native project containmen
 programs and supported interpreters, constructs the restricted environment, and reports a
 host-instance identity. It never launches a subprocess.
 
-Command execution is still unavailable in the app. Stage 2b now includes the backend-independent
-execution supervisor and fake managed-process tests. It requires an explicitly supplied
-process-tree backend and durable execution journal; neither has a production implementation
-yet. Native runners, execution/progress/cancellation transport, native tools, chat persistence,
-Inspect and action cards remain to be implemented.
+Command execution is still unavailable in the app. Stage 2b includes the backend-independent
+execution supervisor, fake managed-process tests, and an append-only file journal with
+app-generated invocation IDs. The journal implements durable no-clobber publication on Unix
+filesystems supporting hard links and directory synchronization. Windows journal initialization
+fails closed until its durable-publication adapter is implemented and inspected.
+
+No native process-tree backend is implemented or selected. Host recovery/admission integration,
+execution/progress/cancellation transport, native tools, chat persistence, Inspect and action
+cards remain to be implemented. The journal does not itself enable execution in the app.
 
 The supplied tests have not been run in the read/edit-block workflow. The agent contract
 tests exercise an agent on the test machine, not an actual Windows-to-WSL deployment.
@@ -128,12 +132,48 @@ Remaining work inside 2b:
   through root exit and cleanup without signalling a recycled process ID.
 - Backends must clear the environment, preserve exact parameters, use null stdin, refuse
   unsupported ownership before spawn, and initiate cleanup on Drop.
-- Implement the durable journal and connect it to saved execution history.
+- Implement Windows durable journal publication and connect recovery observations to host
+  admission, saved execution history and Inspect.
 - Add actual-process tests. The supervisor tests use fake managed trees and do not verify
   OS process creation, environment inheritance, descendant termination or shutdown cleanup.
 
 No native backend is selected by default. This is an intentional fail-closed integration
 boundary, not a claim that stage 2b is complete.
+
+#### 2b journal increment
+
+`commands::journal::FileExecutionJournal` implements the write-ahead seam:
+- Each consumed approval receives a fresh app invocation ID, separate from the provider call
+  identity. The ID is correlation data, not authorization, and uses validated filename syntax.
+- The journal lives outside the project and separately from automatically pruned saved chats.
+- Intent records retain the exact reviewed request, resolved invocation, project location,
+  platform and environment-policy name. They exclude approval and the complete environment.
+  Arguments and scripts can themselves contain private data; Debug omits them.
+- Completion records correlate both invocation and call IDs, retain observed status and output
+  metadata, and never contain stdout/stderr contents.
+- Versioned timestamped intent/completion files are immutable. Publication uses a synced private
+  temporary file, an atomic no-clobber hard link, and a directory sync. Opening a new store also
+  synchronizes ancestor directories. Unsupported filesystem operations refuse success.
+- Directory/file creation uses private Unix permissions. Journal files are not followed through
+  symlinks during ordinary recovery checks. This is app-owned storage, not a tamper-proof
+  boundary against processes running with the same credentials or filesystem replacement races.
+- A timed-out blocking journal write can still finish later. It cannot launch a process; a
+  resulting intent without completion restores as unknown. Duplicate publication never retries
+  execution or overwrites the first observation.
+- Missing, malformed, mismatched and unreadable completions preserve an unknown intent.
+  Corrupt/missing intents and orphan completions fail recovery, rather than becoming an empty
+  successful history. Records are read with a 256 KiB limit; recovery listings are capped at
+  1,024 intents and fail instead of silently truncating.
+- No automatic pruning or deletion API removes replay protection. Explicit archival/retention
+  policy remains future lifecycle work.
+- Unix filesystem tests and fake-runner/real-journal supervisor tests are supplied. They do not
+  simulate power loss or verify native process behavior. Windows refuses journal initialization
+  before creating storage; its durability adapter remains pending.
+
+Before exposing execution, host integration must load recovery successfully and block projects
+with unknown observations until termination is established. Restoring records must never create
+a permit or enqueue work. The journal only protects repeated publication of the same invocation;
+one-command-per-project admission across instances belongs to the upcoming host lifecycle.
 
 ### 2. Runner and local/remote host lifecycle
 

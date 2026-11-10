@@ -10,6 +10,7 @@
 //! process-tree backend. No native backend or executable host endpoint is enabled yet.
 
 pub mod execution;
+pub mod journal;
 pub mod prepare;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -304,6 +305,48 @@ pub struct CallId {
     pub call: String,
 }
 
+/// App-generated execution-attempt identity. This is correlation data, not authorization.
+/// Its canonical representation is safe to use as a journal filename component.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct InvocationId(String);
+
+impl InvocationId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().simple().to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        if value.len() != 32
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(Error::invalid("Invalid command invocation identity."));
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl Default for InvocationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'de> Deserialize<'de> for InvocationId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A terminal execution observation, not an assertion that side effects were undone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -345,11 +388,16 @@ pub struct Approval {
 /// A permit is not a completed execution. Once issued, the gate remains busy until a terminal
 /// observation is recorded, even if a caller loses or drops this value.
 pub struct LaunchPermit {
+    invocation: InvocationId,
     call: CallId,
     plan: ReviewPlan,
 }
 
 impl LaunchPermit {
+    pub fn invocation(&self) -> &InvocationId {
+        &self.invocation
+    }
+
     pub fn call(&self) -> &CallId {
         &self.call
     }
@@ -528,6 +576,7 @@ impl ApprovalGate {
         }
         entry.state = CommandState::Running;
         Ok(LaunchPermit {
+            invocation: InvocationId::new(),
             call: approval.call,
             plan: entry.plan.clone(),
         })
@@ -605,6 +654,35 @@ mod tests {
         let id = call("turn-1", "call-1");
         gate.propose(id.clone(), plan.clone()).unwrap();
         (gate, id, plan)
+    }
+
+    #[test]
+    fn invocation_ids_roundtrip_without_accepting_path_components() {
+        let id = InvocationId::new();
+        let restored: InvocationId =
+            serde_json::from_str(&serde_json::to_string(&id).unwrap()).unwrap();
+        assert_eq!(restored, id);
+        for value in ["", "../intent", "A".repeat(32).as_str(), "a/b"] {
+            assert!(InvocationId::parse(value).is_err());
+        }
+        assert!(
+            serde_json::from_str::<InvocationId>(&serde_json::to_string("../intent").unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn separate_approved_attempts_have_different_invocation_ids() {
+        let (mut gate, id, plan) = proposed();
+        let approval = gate.approve(&id, &plan).unwrap();
+        let first = gate.begin(approval, &plan).unwrap();
+        gate.finish(&id, Outcome::Success).unwrap();
+
+        let followup = call("turn-2", "call-2");
+        gate.propose(followup.clone(), plan.clone()).unwrap();
+        let approval = gate.approve(&followup, &plan).unwrap();
+        let second = gate.begin(approval, &plan).unwrap();
+        assert_ne!(first.invocation(), second.invocation());
     }
 
     #[test]
