@@ -115,6 +115,10 @@ pub struct ExecutionIntent {
     pub invocation: InvocationId,
     pub call: CallId,
     pub project: ProjectRoot,
+    /// Canonical project root on the execution host, independent of a requested path alias.
+    /// None is accepted when reading older history; new intents must provide it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_root: Option<String>,
     pub platform: CommandPlatform,
     pub environment_policy: String,
     pub request: CommandRequest,
@@ -156,6 +160,21 @@ pub struct ExecutionCompletion {
 /// A completion must match an existing intent and must not overwrite an earlier observation.
 #[async_trait]
 pub trait ExecutionJournal: Send + Sync {
+    /// Refuses admission when recovery is unavailable or an earlier execution for this project
+    /// remains unresolved. The execution service holds its host reservation during this check
+    /// and through intent publication, execution, and completion recording.
+    ///
+    /// Default refusal prevents older journal implementations from silently skipping recovery.
+    async fn check_recovery(
+        &self,
+        _project: &ProjectRoot,
+        _canonical_root: &std::path::Path,
+    ) -> Result<()> {
+        Err(Error::tool(
+            "This execution journal does not support recovery admission.",
+        ))
+    }
+
     async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()>;
     async fn record_completion(&self, completion: &ExecutionCompletion) -> Result<()>;
 }
@@ -235,9 +254,22 @@ impl ExecutionEngine {
     /// `scope` must be cancelled when the project/chat execution scope is closed or replaced.
     /// Dropping the returned handle also requests cancellation; cleanup stays owned by the
     /// worker while its runtime remains alive. Orderly shutdown must cancel and await workers.
+    ///
+    /// Admission is reserved synchronously; a busy project returns an error instead of queuing.
+    /// On a start error no worker was launched; the caller must finish its approval-gate attempt
+    /// as FailedToStart. A new attempt still requires fresh approval.
     pub fn start(&self, permit: LaunchPermit, scope: CancellationToken) -> Result<ExecutionHandle> {
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| Error::internal("Command execution requires a Tokio runtime."))?;
+        if permit.plan().binding.project.location != Location::Local {
+            return Err(Error::forbidden(
+                "Remote projects must execute through their selected agent, never locally.",
+            ));
+        }
+        let admission = self.host.local_command_admission().ok_or_else(|| {
+            Error::forbidden("This workspace host cannot execute through an in-process runner.")
+        })?;
+        let lease = admission.reserve(permit.plan().directory.root(), permit.invocation())?;
         let cancel = scope.child_token();
         let guard = cancel.clone().drop_guard();
         let worker_cancel = cancel.clone();
@@ -247,7 +279,9 @@ impl ExecutionEngine {
         let journal = self.journal.clone();
         let invocation = permit.invocation().clone();
         let task = runtime.spawn(async move {
-            supervise(permit, host, runner, journal, worker_cancel, progress_tx).await
+            let result = supervise(permit, host, runner, journal, worker_cancel, progress_tx).await;
+            lease.finish(&result);
+            result
         });
         Ok(ExecutionHandle {
             invocation,
@@ -344,6 +378,7 @@ fn command_and_intent(permit: &LaunchPermit) -> Result<(Cmd, ExecutionIntent)> {
         invocation: permit.invocation().clone(),
         call: permit.call().clone(),
         project: plan.binding.project.clone(),
+        canonical_root: Some(text(plan.directory.root().as_os_str())?),
         platform: plan.platform,
         environment_policy: plan.environment_policy.clone(),
         request: plan.request.clone(),
@@ -379,6 +414,29 @@ async fn supervise(
             ExecutionStatus::Cancelled,
             "Cancelled before launch.",
         );
+    }
+
+    let recovery = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            return ExecutionResult::not_started(
+                ExecutionStatus::Cancelled,
+                "Cancelled before launch.",
+            );
+        }
+        recovery = tokio::time::timeout(
+            PREPARATION_TIMEOUT,
+            journal.check_recovery(&intent.project, permit.plan().directory.root()),
+        ) => recovery,
+    };
+    if !matches!(recovery, Ok(Ok(()))) {
+        let mut result = ExecutionResult::not_started(
+            ExecutionStatus::FailedToStart,
+            "Execution history could not be cleared for this project. \
+             An earlier command may be unresolved; nothing was launched.",
+        );
+        result.history_error = Some("Recovery admission was not confirmed.".into());
+        return result;
     }
 
     match tokio::time::timeout(PREPARATION_TIMEOUT, journal.record_intent(&intent)).await {
@@ -694,12 +752,21 @@ mod tests {
     struct Journal {
         fail_intent: bool,
         fail_completion: bool,
+        fail_recovery: bool,
         intents: AtomicUsize,
         completions: AtomicUsize,
     }
 
     #[async_trait]
     impl ExecutionJournal for Journal {
+        async fn check_recovery(&self, _: &ProjectRoot, _: &std::path::Path) -> Result<()> {
+            if self.fail_recovery {
+                Err(Error::internal("test recovery failure"))
+            } else {
+                Ok(())
+            }
+        }
+
         async fn record_intent(&self, _: &ExecutionIntent) -> Result<()> {
             if self.fail_intent {
                 return Err(Error::internal("test journal failure"));
@@ -1024,6 +1091,188 @@ mod tests {
         assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
         assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
         assert_eq!(journal.completions.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn failed_recovery_refuses_intent_and_launch() {
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let backend = Arc::new(runner(&plan));
+        let journal = Arc::new(Journal {
+            fail_recovery: true,
+            ..Journal::default()
+        });
+        let engine = ExecutionEngine::new(host, backend.clone(), journal.clone());
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = engine
+            .start(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::FailedToStart);
+        assert!(result.history_error.is_some());
+        assert!(!result.spawned);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn journal_without_recovery_support_fails_closed() {
+        struct LegacyJournal {
+            intents: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ExecutionJournal for LegacyJournal {
+            async fn record_intent(&self, _: &ExecutionIntent) -> Result<()> {
+                self.intents.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn record_completion(&self, _: &ExecutionCompletion) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let backend = Arc::new(runner(&plan));
+        let journal = Arc::new(LegacyJournal {
+            intents: AtomicUsize::new(0),
+        });
+        let engine = ExecutionEngine::new(host, backend.clone(), journal.clone());
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = engine
+            .start(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::FailedToStart);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fresh_approval_cannot_bypass_an_unknown_recovered_invocation() {
+        use crate::commands::journal::FileExecutionJournal;
+
+        let (_root, host, mut old_gate, old_call, plan) = proposal().await;
+        let storage = tempfile::tempdir().unwrap();
+        let journal = Arc::new(
+            FileExecutionJournal::open(storage.path().join("journal"))
+                .await
+                .unwrap(),
+        );
+        let approval = old_gate.approve(&old_call, &plan).unwrap();
+        let old_permit = old_gate.begin(approval, &plan).unwrap();
+        let (_, old_intent) = command_and_intent(&old_permit).unwrap();
+        journal.record_intent(&old_intent).await.unwrap();
+
+        let mut fresh_gate = ApprovalGate::new(plan.binding.clone());
+        let call = CallId {
+            turn: "new-turn".into(),
+            call: "new-call".into(),
+        };
+        fresh_gate.propose(call.clone(), plan.clone()).unwrap();
+        let approval = fresh_gate.approve(&call, &plan).unwrap();
+        let permit = fresh_gate.begin(approval, &plan).unwrap();
+        assert_ne!(permit.invocation(), old_permit.invocation());
+
+        let backend = Arc::new(runner(&plan));
+        let engine = ExecutionEngine::new(host, backend.clone(), journal.clone());
+        let result = engine
+            .start(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::FailedToStart);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+        assert_eq!(journal.records().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn separate_engines_cannot_queue_work_behind_an_active_reservation() {
+        struct HeldJournal {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+
+        #[async_trait]
+        impl ExecutionJournal for HeldJournal {
+            async fn check_recovery(&self, _: &ProjectRoot, _: &std::path::Path) -> Result<()> {
+                Ok(())
+            }
+
+            async fn record_intent(&self, _: &ExecutionIntent) -> Result<()> {
+                self.entered.notify_one();
+                self.release.notified().await;
+                Ok(())
+            }
+
+            async fn record_completion(&self, _: &ExecutionCompletion) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let (_root, host, mut first_gate, first_call, plan) = proposal().await;
+        let journal = Arc::new(HeldJournal {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        let backend = Arc::new(runner(&plan));
+        let first_engine = ExecutionEngine::new(host.clone(), backend.clone(), journal.clone());
+        let second_engine =
+            ExecutionEngine::new(host, backend.clone(), Arc::new(Journal::default()));
+        let approval = first_gate.approve(&first_call, &plan).unwrap();
+        let permit = first_gate.begin(approval, &plan).unwrap();
+        let first = first_engine
+            .start(permit, CancellationToken::new())
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), journal.entered.notified())
+            .await
+            .unwrap();
+
+        let mut second_gate = ApprovalGate::new(plan.binding.clone());
+        let second_call = CallId {
+            turn: "other-turn".into(),
+            call: "other-call".into(),
+        };
+        second_gate
+            .propose(second_call.clone(), plan.clone())
+            .unwrap();
+        let approval = second_gate.approve(&second_call, &plan).unwrap();
+        let permit = second_gate.begin(approval, &plan).unwrap();
+        assert!(
+            second_engine
+                .start(permit, CancellationToken::new())
+                .is_err()
+        );
+        second_gate
+            .finish(&second_call, Outcome::FailedToStart)
+            .unwrap();
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+
+        journal.release.notify_one();
+        assert_eq!(first.wait().await.status, ExecutionStatus::Success);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            second_gate.state(&second_call),
+            Some(crate::commands::CommandState::Finished(
+                Outcome::FailedToStart
+            ))
+        );
+    }
+
+    #[test]
+    fn separate_local_hosts_share_native_admission() {
+        let first = LocalHost::new().local_command_admission().unwrap();
+        let second = LocalHost::new().local_command_admission().unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
     }
 
     #[tokio::test]

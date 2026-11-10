@@ -9,6 +9,7 @@
 //! The execution supervisor consumes [`LaunchPermit`] through an explicitly supplied managed
 //! process-tree backend. No native backend or executable host endpoint is enabled yet.
 
+pub mod admission;
 pub mod execution;
 pub mod journal;
 pub mod prepare;

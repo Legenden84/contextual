@@ -9,9 +9,10 @@
 //! Windows initialization fails closed pending an inspected durable-publication adapter.
 //! This is app-owned storage, not a tamper-proof log against processes with the same credentials.
 //!
-//! Recovery only returns observations. The future host lifecycle must consult recovery before
-//! admitting work, block projects with unresolved executions, and never construct authorization
-//! from these records. This journal does not replace the project-wide approval/admission gate.
+//! Recovery returns observations, never authorization. The execution engine checks these
+//! observations under its process-wide host reservation before publishing a new intent.
+//! Unknown records block their canonical project root. Older unknown records lacking that root
+//! conservatively block their execution location. Cross-process ownership remains separate.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -193,8 +194,37 @@ impl FileExecutionJournal {
 
 #[async_trait]
 impl ExecutionJournal for FileExecutionJournal {
+    async fn check_recovery(
+        &self,
+        project: &crate::location::ProjectRoot,
+        canonical_root: &Path,
+    ) -> Result<()> {
+        let records = self.records().await?;
+        let unresolved = records.iter().any(|record| {
+            record.blocks_execution()
+                && record.intent.project.location == project.location
+                && record
+                    .intent
+                    .canonical_root
+                    .as_deref()
+                    .is_none_or(|root| Path::new(root) == canonical_root)
+        });
+        if unresolved {
+            return Err(Error::conflict(
+                "An earlier command has an unknown outcome. \
+                 Termination must be established before another command can run.",
+            ));
+        }
+        Ok(())
+    }
+
     async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()> {
         validate_intent(intent)?;
+        if intent.canonical_root.is_none() {
+            return Err(Error::invalid(
+                "New execution intent requires the canonical project root.",
+            ));
+        }
         let stored = StoredIntent {
             version: VERSION,
             recorded_at: crate::threads::now_iso(),
@@ -407,6 +437,10 @@ fn validate_intent(intent: &ExecutionIntent) -> Result<()> {
     validate_call(&intent.call)?;
     intent.request.validate()?;
     if !bounded_text(&intent.project.path, 32 * 1024)
+        || intent
+            .canonical_root
+            .as_deref()
+            .is_some_and(|root| !bounded_text(root, 32 * 1024))
         || !bounded_text(&intent.cwd, 32 * 1024)
         || !bounded_text(&intent.program, 32 * 1024)
         || !bounded_text(&intent.environment_policy, 256)
@@ -536,6 +570,7 @@ mod tests {
                 location: Location::Local,
                 path: "/project".into(),
             },
+            canonical_root: Some("/project".into()),
             platform: CommandPlatform::Linux,
             environment_policy: super::super::prepare::ENVIRONMENT_POLICY.into(),
             request: CommandRequest {
@@ -869,6 +904,124 @@ mod tests {
             0o755
         );
         assert_eq!(fs::read_dir(&path).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn recovery_uses_canonical_root_instead_of_the_requested_alias() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let mut pending = intent();
+        pending.project.path = "/old-alias".into();
+        journal.record_intent(&pending).await.unwrap();
+
+        let current = ProjectRoot {
+            location: Location::Local,
+            path: "/new-alias".into(),
+        };
+        assert!(
+            journal
+                .check_recovery(&current, Path::new("/project"))
+                .await
+                .is_err()
+        );
+        assert!(
+            journal
+                .check_recovery(&current, Path::new("/different-project"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_does_not_confuse_a_wsl_location_with_the_local_host() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let mut pending = intent();
+        pending.project.location = Location::Wsl {
+            distro: "Ubuntu".into(),
+        };
+        journal.record_intent(&pending).await.unwrap();
+
+        let local = intent().project;
+        assert!(
+            journal
+                .check_recovery(&local, Path::new("/project"))
+                .await
+                .is_ok()
+        );
+        assert!(
+            journal
+                .check_recovery(&pending.project, Path::new("/project"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmed_completion_allows_recovery_admission_without_replaying_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let finished = intent();
+        journal.record_intent(&finished).await.unwrap();
+        journal
+            .record_completion(&completion(&finished))
+            .await
+            .unwrap();
+
+        assert!(
+            journal
+                .check_recovery(&finished.project, Path::new("/project"))
+                .await
+                .is_ok()
+        );
+        assert_eq!(journal.records().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn older_unknown_history_without_a_canonical_root_blocks_conservatively() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let pending = intent();
+        journal.record_intent(&pending).await.unwrap();
+
+        let path = intent_path(journal.dir(), &pending.invocation);
+        let mut stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        stored["intent"]
+            .as_object_mut()
+            .unwrap()
+            .remove("canonicalRoot");
+        fs::write(path, serde_json::to_vec(&stored).unwrap()).unwrap();
+
+        let record = journal.load(&pending.invocation).await.unwrap();
+        assert!(record.intent.canonical_root.is_none());
+        assert!(record.blocks_execution());
+        assert!(
+            journal
+                .check_recovery(&pending.project, Path::new("/another-root"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn new_intents_cannot_omit_the_canonical_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let mut pending = intent();
+        pending.canonical_root = None;
+        assert!(journal.record_intent(&pending).await.is_err());
+        assert!(journal.records().await.unwrap().is_empty());
     }
 
     #[test]

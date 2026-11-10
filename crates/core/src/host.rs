@@ -32,6 +32,14 @@ pub trait WorkspaceHost: Send + Sync {
     async fn read(&self, req: ReadFiles) -> Result<ReadFilesResult>;
     async fn apply(&self, req: Apply) -> Result<ApplyResult>;
     async fn undo(&self, req: Undo) -> Result<UndoResult>;
+    /// In-process execution admission, offered only by native local hosts.
+    /// Remote hosts deliberately return None: supplying a local project label must not enable
+    /// a local execution fallback for a project served by an agent.
+    fn local_command_admission(
+        &self,
+    ) -> Option<Arc<crate::commands::admission::ExecutionAdmission>> {
+        None
+    }
     /// Inspects an invocation on this host without executing it or granting approval.
     /// Hosts without command preparation fail closed rather than falling back to the app.
     async fn prepare_command(&self, _req: PrepareCommand) -> Result<PreparedCommand> {
@@ -267,6 +275,12 @@ impl WorkspaceHost for LocalHost {
         self.allowlist.check(&req.root)?;
         let dir = self.undo_dir();
         blocking(move || files::undo_apply_in(&dir, &req.root, &req.backup_id)).await
+    }
+
+    fn local_command_admission(
+        &self,
+    ) -> Option<Arc<crate::commands::admission::ExecutionAdmission>> {
+        Some(crate::commands::admission::local_registry())
     }
 
     async fn prepare_command(&self, req: PrepareCommand) -> Result<PreparedCommand> {

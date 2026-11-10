@@ -14,9 +14,11 @@ app-generated invocation IDs. The journal implements durable no-clobber publicat
 filesystems supporting hard links and directory synchronization. Windows journal initialization
 fails closed until its durable-publication adapter is implemented and inspected.
 
-No native process-tree backend is implemented or selected. Host recovery/admission integration,
-execution/progress/cancellation transport, native tools, chat persistence, Inspect and action
-cards remain to be implemented. The journal does not itself enable execution in the app.
+No native process-tree backend is implemented or selected. The in-process engine now reserves
+process-wide local-host admission synchronously and checks journal recovery before writing a
+new intent. Cross-process ownership, remote execution/progress/cancellation transport, native
+tools, chat persistence, Inspect and action cards remain to be implemented. These foundations
+do not enable execution in the app.
 
 The supplied tests have not been run in the read/edit-block workflow. The agent contract
 tests exercise an agent on the test machine, not an actual Windows-to-WSL deployment.
@@ -132,8 +134,8 @@ Remaining work inside 2b:
   through root exit and cleanup without signalling a recycled process ID.
 - Backends must clear the environment, preserve exact parameters, use null stdin, refuse
   unsupported ownership before spawn, and initiate cleanup on Drop.
-- Implement Windows durable journal publication and connect recovery observations to host
-  admission, saved execution history and Inspect.
+- Implement Windows durable journal publication, cross-process ownership and reconciliation.
+  Connect recovery observations to saved execution history and Inspect.
 - Add actual-process tests. The supervisor tests use fake managed trees and do not verify
   OS process creation, environment inheritance, descendant termination or shutdown cleanup.
 
@@ -170,10 +172,34 @@ boundary, not a claim that stage 2b is complete.
   simulate power loss or verify native process behavior. Windows refuses journal initialization
   before creating storage; its durability adapter remains pending.
 
-Before exposing execution, host integration must load recovery successfully and block projects
-with unknown observations until termination is established. Restoring records must never create
-a permit or enqueue work. The journal only protects repeated publication of the same invocation;
-one-command-per-project admission across instances belongs to the upcoming host lifecycle.
+#### 2b recovery and in-process admission increment
+
+The execution engine now checks recovery under a synchronous host reservation:
+- LocalHost instances and clones share one process-wide admission registry. Canonical project
+  roots, not chat identities or project-open epochs, identify slots.
+- `ExecutionEngine::start` refuses an occupied slot immediately. It never queues an invocation
+  to run after another finishes. Start errors mean no worker was launched; callers must finish
+  their approval-gate attempt as failed to start, not reuse its consumed approval.
+- RemoteHost and SupervisedHost do not offer in-process admission. Even a mistakenly local
+  project label cannot make an agent host execute with a local runner.
+- Recovery runs before new intent publication. Missing recovery support, errors and timeouts
+  refuse launch. A restored unknown invocation blocks a newly approved invocation as well as
+  duplicate attempts.
+- New intent records include the canonical project root. Older records without it remain
+  readable, but unknown ones conservatively block their location rather than guessing at aliases.
+- Confirmed completion releases the in-process reservation only when history is also confirmed.
+  Unknown outcomes, unconfirmed history and dropped/panicked workers retain a blocked slot.
+  Process status and history failure remain distinct observations.
+- Reservation release does not approve or launch pending proposals. There is no generic reset
+  or "assume stopped" operation.
+- Tests cover independent gates/engines, missing or failed recovery support before intent or
+  spawn, canonical-root aliases, local/WSL location separation, old unknown records, and
+  dropped-worker reservations.
+
+This is not cross-process ownership: separate app/agent processes still require an inspected
+ownership mechanism before native execution is enabled. Remote dispatch, lifecycle reconciliation,
+project closure/shutdown integration and saved-history/Inspect presentation also remain pending.
+Recovery records never create permits or enqueue work.
 
 ### 2. Runner and local/remote host lifecycle
 
