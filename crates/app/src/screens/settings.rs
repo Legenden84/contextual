@@ -1,5 +1,5 @@
-//! Settings (design spec: ScreenSettings): the Azure AI Foundry connection (API key in the OS
-//! keychain), Test connection, exclusions, the output-format prompt and the theme.
+//! Settings (design spec: ScreenSettings): persistent group navigation beside the Foundry
+//! connection, exclusions, output-format prompt and appearance form.
 
 use contextual_core::settings::{FoundrySettings, Settings, ThemePreference};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
@@ -12,13 +12,42 @@ use gpui_kit::{
 };
 
 use crate::state::{AppModel, ConnectionTest};
-use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
+use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, Switch};
 use crate::views::env_file_dialog::{EnvFileDialog, EnvFileEvent};
 use crate::views::presets_editor::PresetsEditor;
 
 const LABEL_W: f32 = 200.0;
 const FIELD_W: f32 = 420.0;
+const SETTINGS_MAX_W: f32 = contextual_theme::layout::EXPLORER_WIDTH
+    + contextual_theme::layout::CONTENT_MAX_WIDTH
+    + 2.0 * contextual_theme::space::S8;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsGroup {
+    Foundry,
+    Exclusions,
+    OutputFormat,
+    Appearance,
+}
+
+impl SettingsGroup {
+    const ALL: [Self; 4] = [
+        Self::Foundry,
+        Self::Exclusions,
+        Self::OutputFormat,
+        Self::Appearance,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Foundry => "Azure AI Foundry",
+            Self::Exclusions => "Exclusions",
+            Self::OutputFormat => "Output format",
+            Self::Appearance => "Appearance",
+        }
+    }
+}
 
 struct Field {
     label: &'static str,
@@ -28,6 +57,8 @@ struct Field {
 
 pub struct SettingsScreen {
     app: Entity<AppModel>,
+    active_group: SettingsGroup,
+    group_focus: [FocusHandle; 4],
     endpoint: Field,
     api_key: Field,
     api_version: Field,
@@ -174,6 +205,8 @@ impl SettingsScreen {
             });
         }
         Self {
+            active_group: SettingsGroup::Foundry,
+            group_focus: SettingsGroup::ALL.map(|_| cx.focus_handle()),
             endpoint,
             api_key,
             api_version,
@@ -363,6 +396,96 @@ impl SettingsScreen {
             a.save_settings(s, None, cx);
         });
         cx.notify();
+    }
+
+    fn select_group(
+        &mut self,
+        group: SettingsGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.active_group = group;
+        // Move focus off any input that is about to be unmounted.
+        self.group_focus[group as usize].focus(window, cx);
+        cx.notify();
+    }
+
+    fn navigation(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let c = &cx.tokens().colors;
+        div()
+            .id("settings-navigation")
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(contextual_theme::layout::EXPLORER_WIDTH))
+            .min_h_0()
+            .overflow_y_scroll()
+            .px(sp(4))
+            .py(sp(6))
+            .gap(sp(1))
+            .border_r_1()
+            .border_color(hsla(c.border))
+            .bg(hsla(c.surface_000))
+            .type_style(contextual_theme::type_style::UI_BODY)
+            .children(SettingsGroup::ALL.iter().copied().map(|group| {
+                let active = self.active_group == group;
+                div()
+                    .id(("settings-group", group as usize))
+                    .track_focus(&self.group_focus[group as usize])
+                    .tab_index(0)
+                    .relative()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .h(control_height())
+                    .px(sp(3))
+                    .rounded(px(contextual_theme::radius::SM))
+                    .border_1()
+                    .border_color(hsla(contextual_theme::Rgba {
+                        a: 0.0,
+                        ..c.focus_ring
+                    }))
+                    .bg(hsla(if active {
+                        c.surface_100
+                    } else {
+                        c.surface_000
+                    }))
+                    .text_color(hsla(if active { c.ink_strong } else { c.ink_muted }))
+                    .cursor_pointer()
+                    .when(!active, |d| {
+                        d.hover(|s| s.bg(hsla(c.surface_hover)).text_color(hsla(c.ink)))
+                    })
+                    .focus(|s| s.border_color(hsla(c.focus_ring)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_group(group, window, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        let index = group as usize;
+                        let count = SettingsGroup::ALL.len();
+                        let next = match event.keystroke.key.as_str() {
+                            "enter" | "space" => group,
+                            "up" => SettingsGroup::ALL[(index + count - 1) % count],
+                            "down" => SettingsGroup::ALL[(index + 1) % count],
+                            "home" => SettingsGroup::Foundry,
+                            "end" => SettingsGroup::Appearance,
+                            _ => return,
+                        };
+                        cx.stop_propagation();
+                        this.select_group(next, window, cx);
+                    }))
+                    .child(group.label())
+                    .when(active, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top(sp(1))
+                                .bottom(sp(1))
+                                .border_l_2()
+                                .border_color(hsla(c.accent)),
+                        )
+                    })
+            }))
     }
 
     fn field_row(&self, f: &Field, cx: &Context<Self>) -> impl IntoElement + use<> {
@@ -569,7 +692,7 @@ impl Render for SettingsScreen {
                     .items_center()
                     .gap(sp(3))
                     .w_full()
-                    .max_w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
+                    .max_w(px(SETTINGS_MAX_W))
                     .child(
                         IconButton::new("back", IconName::ArrowLeft, "Back").on_click(cx.listener(
                             |t, _, _, cx| t.app.update(cx, |a, cx| a.close_settings(cx)),
@@ -587,12 +710,15 @@ impl Render for SettingsScreen {
                             .on_click(cx.listener(|t, _, w, cx| t.save(w, cx))),
                     ),
             );
+        let navigation = self.navigation(cx);
+        let active_group = self.active_group;
         let page = div()
-            .id("settings")
+            .id(("settings", active_group as usize))
             .flex()
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .items_center()
             .overflow_y_scroll()
             .overflow_x_scroll()
@@ -602,13 +728,13 @@ impl Render for SettingsScreen {
             .child(
                 div()
                     .w_full()
+                    .min_w(px(LABEL_W + FIELD_W) + sp(4))
                     .max_w(px(contextual_theme::layout::CONTENT_MAX_WIDTH))
+                    .flex_none()
                     .pb(sp(8))
-                    .when_some(self.status.clone(), |d, s| {
-                        d.child(div().mt(sp(2)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child(SharedString::from(s)))
-                    })
-                    .child(section("Azure AI Foundry", cx))
-                    .child(
+                    .child(section(active_group.label(), cx))
+                    .when(active_group == SettingsGroup::Foundry, |d| {
+                        d.child(
                         div()
                             .flex()
                             .items_center()
@@ -705,8 +831,9 @@ impl Render for SettingsScreen {
                             .text_color(hsla(c.ink_muted))
                             .child("Test uses the saved settings: save first."),
                     )
-                    .child(section("Exclusions", cx))
-                    .child(subsection("All projects", "Left out of every project.", cx))
+                    })
+                    .when(active_group == SettingsGroup::Exclusions, |d| {
+                        d.child(subsection("All projects", "Left out of every project.", cx))
                     .child(div().flex().flex_wrap().gap(sp(1)).py(sp(2)).children(chips))
                     .child(
                         div()
@@ -739,8 +866,9 @@ impl Render for SettingsScreen {
                     .child(self.switch_row("respect", "Respect .gitignore", self.respect_gitignore, |t| t.respect_gitignore = !t.respect_gitignore, cx))
                     .child(self.switch_row("binary", "Skip binary files", self.skip_binary, |t| t.skip_binary = !t.skip_binary, cx))
                     .child(self.switch_row("hidden", "Include hidden files", self.include_hidden, |t| t.include_hidden = !t.include_hidden, cx))
-                    .child(section("Output format", cx))
-                    .child(
+                    })
+                    .when(active_group == SettingsGroup::OutputFormat, |d| {
+                        d.child(
                         div()
                             .mb(sp(2))
                             .type_style(contextual_theme::type_style::UI_SMALL)
@@ -748,8 +876,9 @@ impl Render for SettingsScreen {
                             .child("System prompt that tells the model how to return changes. The edit format is appended automatically."),
                     )
                     .child(div().type_style(contextual_theme::type_style::CODE_SMALL).child(Textarea::new(&self.output_prompt)))
-                    .child(section("Appearance", cx))
-                    .child(div().flex().gap(sp(1)).children(theme_buttons))
+                    })
+                    .when(active_group == SettingsGroup::Appearance, |d| {
+                        d.child(div().flex().gap(sp(1)).children(theme_buttons))
                     .child(
                         div()
                             .id("reduce-motion-focus")
@@ -783,7 +912,8 @@ impl Render for SettingsScreen {
                                         "Use static activity indicators. Takes effect when you save settings.",
                                     ),
                             ),
-                    ),
+                    )
+                    }),
             );
         div()
             .relative()
@@ -791,8 +921,41 @@ impl Render for SettingsScreen {
             .flex_col()
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .child(header)
-            .child(page)
+            .when_some(self.status.clone(), |d, status| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .px(sp(8))
+                        .py(sp(2))
+                        .border_b_1()
+                        .border_color(hsla(c.border))
+                        .bg(hsla(c.surface_100))
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(c.ink))
+                        .child(SharedString::from(status)),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .justify_center()
+                    .bg(hsla(c.surface_100))
+                    .child(
+                        div()
+                            .flex()
+                            .w_full()
+                            .max_w(px(SETTINGS_MAX_W))
+                            .min_h_0()
+                            .min_w_0()
+                            .child(navigation)
+                            .child(page),
+                    ),
+            )
             .when_some(env_dialog, |d, dialog| d.child(dialog))
     }
 }
