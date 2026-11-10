@@ -2636,7 +2636,6 @@ mod tests {
         assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn supervisor_records_a_real_journal_without_persisting_output() {
         use crate::commands::journal::FileExecutionJournal;
@@ -2675,7 +2674,6 @@ mod tests {
         assert!(!completion.contains("\"stderr\":"));
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn an_existing_durable_intent_refuses_dispatch_without_retry() {
         use crate::commands::journal::FileExecutionJournal;
@@ -2800,7 +2798,6 @@ mod tests {
         assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn fresh_approval_cannot_bypass_an_unknown_recovered_invocation() {
         use crate::commands::journal::FileExecutionJournal;

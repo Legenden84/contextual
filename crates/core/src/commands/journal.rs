@@ -5,9 +5,18 @@
 //! Errors or interrupted intent writes never permit launch; a late blocking write can leave
 //! an unknown observation, but cannot launch anything.
 //!
-//! The Unix implementation relies on filesystem support for hard links and directory fsync.
-//! Windows initialization fails closed pending an inspected durable-publication adapter.
-//! This is app-owned storage, not a tamper-proof log against processes with the same credentials.
+//! Both implementations rely on filesystem support for hard links and for flushing a
+//! directory; a filesystem lacking either fails closed. On Unix the directory is opened
+//! read-only and fsynced. On Windows a directory can only be flushed through a handle with
+//! write access, the new record is flushed again under its published name, and ancestors
+//! the user cannot write to are not flushed. Windows documents no directory-flush
+//! durability contract, so power-loss durability there rests on NTFS behaviour, not on a
+//! guarantee. Other platforms fail closed at initialization.
+//!
+//! Privacy on Unix is enforced through directory and file modes. On Windows it is
+//! inherited from the directory's ACL, which this code cannot inspect: the default location
+//! is inside the user's profile. Either way this is app-owned storage, not a tamper-proof
+//! log against processes with the same credentials.
 //!
 //! Recovery returns observations, never authorization. The execution engine checks these
 //! observations under its process-wide host reservation before publishing a new intent.
@@ -106,10 +115,7 @@ impl FileExecutionJournal {
             check_directory(&dir)?;
             let dir = dunce::canonicalize(dir)?;
 
-            // Persist newly created ancestor directory entries as well as the journal itself.
-            for ancestor in dir.ancestors() {
-                sync_directory(ancestor)?;
-            }
+            sync_created_directories(&dir)?;
             Ok(Self { dir })
         })
         .await
@@ -287,7 +293,7 @@ async fn blocking<T: Send + 'static>(
 }
 
 fn ensure_supported() -> Result<()> {
-    if cfg!(unix) {
+    if cfg!(any(unix, windows)) {
         Ok(())
     } else {
         Err(Error::tool(
@@ -323,11 +329,54 @@ fn sync_directory(dir: &Path) -> Result<()> {
         File::open(dir)?.sync_all()?;
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // Required to open a directory at all.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        // FlushFileBuffers is refused on a handle without write access.
+        OpenOptions::new()
+            .write(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir)?
+            .sync_all()?;
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = dir;
         ensure_supported()
     }
+}
+
+/// Persists newly created ancestor directory entries as well as the journal itself.
+fn sync_created_directories(dir: &Path) -> Result<()> {
+    sync_directory(dir)?;
+    for ancestor in dir.ancestors().skip(1) {
+        match sync_directory(ancestor) {
+            Ok(()) => {}
+            // An ancestor this user cannot open for writing was not created by this user
+            // just now. The journal directory itself was flushed above.
+            Err(_) if cfg!(windows) => break,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// Flushes a record through its published name after linking.
+///
+/// On Unix the link is a directory entry and the directory sync covers it. On Windows the
+/// file's own metadata changed too, and it can only be flushed through a writable handle.
+fn sync_published(destination: &Path) -> Result<()> {
+    #[cfg(windows)]
+    OpenOptions::new()
+        .write(true)
+        .open(destination)?
+        .sync_all()?;
+    #[cfg(not(windows))]
+    let _ = destination;
+    Ok(())
 }
 
 fn intent_path(dir: &Path, id: &InvocationId) -> PathBuf {
@@ -364,8 +413,9 @@ fn publish_new(dir: &Path, destination: &Path, bytes: &[u8]) -> Result<()> {
         file.sync_all()?;
         drop(file);
 
-        // Unlike rename on Unix, hard_link refuses to overwrite an existing destination.
-        // Both names are on the same filesystem. Filesystems lacking this operation fail closed.
+        // Unlike rename, hard_link refuses to overwrite an existing destination on Unix and
+        // on Windows. Both names are on the same filesystem. Filesystems lacking this
+        // operation fail closed.
         fs::hard_link(&temporary, destination).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 Error::conflict("Execution journal record already exists; it was not replaced.")
@@ -373,6 +423,7 @@ fn publish_new(dir: &Path, destination: &Path, bytes: &[u8]) -> Result<()> {
                 error.into()
             }
         })?;
+        sync_published(destination)?;
         sync_directory(dir)
     })();
     // A crash may leave this harmless extra link. Recovery never interprets .tmp files.
@@ -552,7 +603,7 @@ fn load_record(dir: &Path, id: &InvocationId) -> Result<ExecutionRecord> {
     Ok(record)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::{CallId, Command, CommandRequest};
@@ -803,6 +854,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn symlinked_completion_is_not_followed() {
         let directory = tempfile::tempdir().unwrap();
@@ -826,6 +878,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn private_permissions_are_applied_at_creation() {
         use std::os::unix::fs::PermissionsExt as _;
@@ -887,6 +940,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn existing_permissive_directory_is_rejected_without_changing_permissions() {
         use std::os::unix::fs::PermissionsExt as _;
@@ -1030,17 +1084,173 @@ mod tests {
         completed.cancelled = true;
         assert!(validate_completion(&completed).is_err());
     }
-}
-
-#[cfg(all(test, not(unix)))]
-mod unsupported_tests {
-    use super::*;
 
     #[tokio::test]
-    async fn unsupported_durability_refuses_initialization_before_creating_storage() {
+    async fn publication_leaves_one_durable_record_and_no_temporary_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("a").join("journal"))
+            .await
+            .unwrap();
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        journal
+            .record_completion(&completion(&intent))
+            .await
+            .unwrap();
+
+        let mut names: Vec<String> = fs::read_dir(journal.dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        let id = intent.invocation.as_str();
+        assert_eq!(
+            names,
+            [format!("{id}.completion.json"), format!("{id}.intent.json")]
+        );
+        assert_eq!(journal.records().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_publication_leaves_nothing_that_recovery_reads_as_intent() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let intent = intent();
+        // Something that is not a record already occupies the published name.
+        fs::create_dir(intent_path(journal.dir(), &intent.invocation)).unwrap();
+
+        assert_eq!(
+            journal.record_intent(&intent).await.unwrap_err().code,
+            ErrorCode::Conflict
+        );
+        assert!(journal.load(&intent.invocation).await.is_err());
+        // Recovery fails rather than reporting an empty history.
+        assert!(journal.records().await.is_err());
+        let project = intent.project.clone();
+        assert!(
+            journal
+                .check_recovery(&project, Path::new("/project"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_journal_path_that_is_a_file_is_refused() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("journal");
-        assert!(FileExecutionJournal::open(path.clone()).await.is_err());
-        assert!(!path.exists());
+        fs::write(&path, b"").unwrap();
+        assert!(FileExecutionJournal::open(path).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_removed_journal_directory_refuses_intent() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        fs::remove_dir(journal.dir()).unwrap();
+
+        assert!(journal.record_intent(&intent()).await.is_err());
+        assert!(journal.records().await.is_err());
+    }
+
+    /// Another process holding a record without sharing must never make it disappear from
+    /// recovery or become replaceable.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn records_locked_by_another_handle_fail_closed() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        journal
+            .record_completion(&completion(&intent))
+            .await
+            .unwrap();
+        let exclusive = |path: PathBuf| {
+            OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(path)
+                .unwrap()
+        };
+
+        // An unreadable completion is an unknown outcome that blocks the project.
+        let held = exclusive(completion_path(journal.dir(), &intent.invocation));
+        let record = journal.load(&intent.invocation).await.unwrap();
+        assert_eq!(record.status(), ExecutionStatus::Unknown);
+        assert!(record.recovery_warning.is_some());
+        assert!(
+            journal
+                .check_recovery(&intent.project, Path::new("/project"))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            journal
+                .record_completion(&completion(&intent))
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Conflict
+        );
+        drop(held);
+
+        // An unreadable intent fails recovery; it is not skipped.
+        let held = exclusive(intent_path(journal.dir(), &intent.invocation));
+        assert!(journal.load(&intent.invocation).await.is_err());
+        assert!(journal.records().await.is_err());
+        assert!(
+            journal
+                .check_recovery(&intent.project, Path::new("/project"))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            journal.record_intent(&intent).await.unwrap_err().code,
+            ErrorCode::Conflict
+        );
+        drop(held);
+
+        assert_eq!(
+            journal.load(&intent.invocation).await.unwrap().status(),
+            ExecutionStatus::Success
+        );
+    }
+
+    /// Creating a symbolic link on Windows needs a privilege or developer mode; without
+    /// it this test reports that it could not check anything.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn symlinked_records_and_directories_are_not_followed() {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+
+        let directory = tempfile::tempdir().unwrap();
+        let journal = FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap();
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        let outside = directory.path().join("outside.json");
+        fs::write(&outside, b"{}").unwrap();
+        if symlink_file(&outside, completion_path(journal.dir(), &intent.invocation)).is_err() {
+            eprintln!("skipped: this account cannot create symbolic links");
+            return;
+        }
+
+        let record = journal.load(&intent.invocation).await.unwrap();
+        assert_eq!(record.status(), ExecutionStatus::Unknown);
+        assert_eq!(fs::read(&outside).unwrap(), b"{}");
+
+        let alias = directory.path().join("alias");
+        symlink_dir(journal.dir(), &alias).unwrap();
+        assert!(FileExecutionJournal::open(alias).await.is_err());
     }
 }

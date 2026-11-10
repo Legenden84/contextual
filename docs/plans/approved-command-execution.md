@@ -2,36 +2,40 @@
 
 ## Current status and next task
 
-**Where we are (2026-11-10): M2.1. Linux is implemented and verified on Linux/WSL2. macOS is
-implemented and type-checked for Darwin, but has never been compiled natively or run.
-Next task: run the macOS tests on a Mac.**
+**Where we are (2026-11-10): M2.2 implemented and verified on Windows 11 (NTFS). M2.1 is
+implemented; its macOS half still has no recorded run. Next task: M2.3, the Windows backend.**
 
-Done in M2.1 (`crates/core/src/commands/execution.rs`):
-- `unix_launch` — the exact-launch code and group checks shared by both Unix backends.
-- `linux::LinuxProcessTree` and `linux::LinuxCommandRunner` — verified with actual processes.
-- `macos::MacosProcessTree` and `macos::MacosCommandRunner` — written, unverified.
-- `native_launch_tests` — one actual-process suite for the launch adapter of whichever Unix
-  platform is being built, plus an end-to-end test through preparation, approval,
-  revalidation, launch and the journal.
+| Step | State |
+| --- | --- |
+| M2.1 Linux backend | Implemented; verified on Linux/WSL2 |
+| M2.1 macOS backend | Implemented; type-checked for Darwin; **no recorded run on a Mac** |
+| M2.2 Windows journal | Implemented; verified on Windows 11 / NTFS through WSL interop |
+| M2.3 Windows backend | **Not started — next** |
+
+Code (`crates/core/src/commands/`):
+- `execution.rs`: `unix_launch`, `linux::{LinuxProcessTree, LinuxCommandRunner}`,
+  `macos::{MacosProcessTree, MacosCommandRunner}`, `native_launch_tests`.
+- `journal.rs`: `FileExecutionJournal` now initializes on Windows as well as Unix.
 
 No runner is selected at startup; a host gets one only through
 `LocalHost::with_command_backend`.
 
-M1's contributor and cross-target checks pass on the Linux development host. M1 is recorded as
-passed for that host; native Windows and macOS runs of the same checks are still missing.
-
 **Next concrete steps, in order:**
-1. On a Mac, run the commands under "macOS verification" below and record the results. Fix
-   whatever fails; the macOS design assumptions listed there are the likely places.
-2. Close M2.1.
-3. M2.2 (Windows journal), M2.3 (Windows backend), then M3.
+1. M2.3: Windows job-object ownership established before target code runs, and the Windows
+   launch adapter. The workspace forbids unsafe code, so the first decision is which
+   inspected dependency supplies suspended creation and job assignment.
+2. Record a macOS run of the commands under "macOS verification" (M2.1). The user reported on
+   2026-11-10 that the code works and the tests complete, without naming the platform; that
+   is not recorded as macOS evidence.
+3. Close M2, then M3.
 
-Command execution is unavailable in the normal app. Core approval policy, non-executing host
-preparation, backend-independent supervision, Unix journaling, in-process admission, opt-in
-local/remote execution transport and the two Unix native backends have implementations. Windows
-durable journal publication, the Windows backend, cross-process ownership/reconciliation, Foundry
-tools and the command-specific app workflow remain unfinished. Ordinary LocalHost and agent
-startup do not enable execution.
+Windows tests can be run from the Linux development host: build with
+`cargo test -p contextual-core --no-default-features --target x86_64-pc-windows-gnu --lib --no-run`
+and start the printed `.exe` directly; WSL interop runs it on Windows.
+
+Command execution is unavailable in the normal app. Windows process execution, cross-process
+ownership/reconciliation, Foundry tools and the command-specific app workflow remain unfinished.
+Ordinary LocalHost and agent startup do not enable execution.
 
 Fake-process tests are not evidence of native execution. Linux actual-process tests are not
 evidence for macOS, Windows or the Windows-to-WSL connection. A Darwin type-check is not
@@ -48,7 +52,7 @@ requirements and implementation history; they are not a second scheduling system
 | Milestone | Status | Successor |
 | --- | --- | --- |
 | M1 — Validate existing implementation | Passed on the Linux development host (ledger); native Windows/macOS runs not available | Required for M2 acceptance |
-| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux implemented and tested; macOS implemented, **awaiting a run on a Mac**; M2.2/M2.3 not started | M3 |
+| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux verified, macOS awaiting a recorded run; M2.2 verified on Windows; **M2.3 is next** | M3 |
 | M3 — Cross-process ownership and reconciliation | Not implemented | M4 |
 | M4 — Complete host-path verification | Blocked on M2 and M3 | M5; Phase 2 is closed |
 | M5 — Native Foundry proposals | Not implemented; original Stage 3 | M6 |
@@ -232,7 +236,7 @@ Remaining work, in order:
    library launches through `execvp` (glibc older than 2.29 with a working directory set),
    glibc also falls back to `/bin/sh`. It was left out because it would refuse `binfmt_misc`
    programs, including Windows executables under WSL. The test host does not fall back.
-4. Close M2.1. Then start M2.2, not M3.
+4. Close M2.1 once the macOS run is recorded. M2.2 is done; M2.3 is the current task.
 
 Linux component/supervisor test command:
 `cargo test -p contextual-core --no-default-features commands::execution -- --nocapture`
@@ -243,12 +247,50 @@ Probe command, to run on each applicable native host:
 A Linux run does not execute the macOS tests. A Linux/WSL run does not verify the complete
 Windows-to-WSL connection; that host-path verification remains M4.
 
-#### M2.2 / M2.3 handoff
+#### M2.2 Windows journal
 
-- **M2.2 Windows journal: not started.** Windows journal initialization still refuses execution.
-  Durable no-clobber publication and recovery-failure tests remain required.
-- **M2.3 Windows backend: not started.** Safe job ownership before target code runs remains required.
-  No spawn-then-assign race is accepted.
+**Status: implemented; verified on Windows 11 (NTFS). Power-loss durability is not testable
+here and rests on the reasoning below.**
+
+Findings from a probe run on Windows 11 build 26300, NTFS, standard user:
+- `std::fs::hard_link` onto an existing name fails with `AlreadyExists` (OS error 183). It is
+  the same atomic no-clobber publication as on Unix.
+- A directory cannot be opened with a plain `File::open`. With `FILE_FLAG_BACKUP_SEMANTICS` it
+  opens; flushing it is refused on a read handle and succeeds on a write handle.
+- Flushing a file is likewise refused on a read-only handle.
+- `C:\` and `C:\Users` cannot be opened for writing by a standard user.
+- Creating symbolic links is refused (OS error 1314) without developer mode or the privilege.
+- Reading a file that another handle holds without sharing fails with OS error 32.
+
+Implementation (`journal.rs`), using only safe standard-library calls:
+- Publication is unchanged in shape: private temporary file, write, flush, no-clobber hard
+  link, flush, remove the temporary name.
+- On Windows the published record is reopened for writing and flushed, then the journal
+  directory is flushed through a write handle with backup semantics. Either failing is an
+  error; an intent that was linked but not confirmed flushed blocks as Unknown on recovery.
+- On initialization the journal directory is flushed strictly. Ancestors are flushed until
+  the first one the user cannot open for writing.
+- Unix modes do not exist; privacy is inherited from the directory's ACL, which cannot be
+  inspected without unsafe code. The default location is inside the user's profile.
+- A filesystem without hard links or without directory flush fails closed.
+
+What is and is not established:
+- Established by tests on Windows: no-clobber publication, immutability, concurrent writers,
+  corrupt/oversized/missing/locked records, temporary files ignored, failed publication,
+  a removed or non-directory journal path, and the supervisor's journal integration.
+- Not established: that a flushed link survives power loss. Windows documents no
+  directory-flush contract. The design relies on NTFS logging metadata sequentially, so that
+  a later flush on the volume commits the earlier link. Treat this as a stated assumption.
+- Not exercised: symbolic-link rejection (the test account cannot create links; the test
+  reports that it skipped), junctions, ReFS, FAT/exFAT and network shares.
+
+#### M2.3 handoff
+
+- **M2.3 Windows backend: not started — next task.** Safe job ownership before target code
+  runs remains required. No spawn-then-assign race is accepted.
+- The standard library can create a process suspended (`CommandExt::creation_flags`) but
+  offers no safe way to assign it to a job object or resume it. Inspect candidate
+  dependencies' sources before selecting one; the workspace forbids unsafe code.
 - Do not mark M2 passed until all substeps have their required platform-specific evidence.
 
 ### M3 — Finish cross-process ownership and reconciliation
@@ -354,6 +396,10 @@ WSL2 kernel 6.18.33.2, rustc 1.99.1.
 | M2.1 Linux end-to-end local path | 2026-11-10, Linux/WSL2 | `approved_command_runs_once_through_the_native_runner` | Pass |
 | M2.1 macOS type-check | 2026-11-10, cross-check from Linux | `cargo clippy -p contextual-core --no-default-features --lib --tests --target aarch64-apple-darwin -- -D warnings` | Pass. Library and test code compile for Darwin; nothing was linked or run |
 | M2.1 macOS execution | — | `macos::tests`, `native_launch_tests`, ownership probes, end-to-end test | Blocked: no macOS host has run them. Design assumptions are listed under M2.1 |
+| M2.2 Windows probe | 2026-11-10, Windows 11 build 26300, NTFS, standard user | Standalone probe of hard-link, flush, sharing and symlink behaviour | Findings listed under M2.2 |
+| M2.2 Windows journal | 2026-11-10, same host; `x86_64-pc-windows-gnu` test binary started through WSL interop | `commands::journal::tests` (22 on Windows) and the three supervisor journal tests in `commands::execution::tests` | Pass; all 104 `commands` tests pass; 15 consecutive runs without a failure. The symbolic-link test skipped itself |
+| M2.2 cross-checks | 2026-11-10, Linux/WSL2 | Workspace format, Clippy and tests; Clippy for `x86_64-pc-windows-msvc`, `x86_64-pc-windows-gnu` (with tests) and `aarch64-apple-darwin` (with tests); musl agent build | Pass: 519 tests, 0 failed |
+| Windows core suite outside this feature | 2026-11-10, same Windows host | Whole `contextual-core` unit-test binary | 251 passed, 5 failed, all in `process::tests` (the Git runner's tests). Not part of this delivery and not investigated |
 | M4 Windows-to-WSL | — | Agent execution over the real connection | Not started; the Linux rows above ran natively inside WSL, not through the Windows app |
 
 Replace pending check entries or append results only after running the checks. Include the saved
