@@ -242,8 +242,9 @@ impl LocalHost {
     /// Creates a fresh host with an explicitly supplied managed backend and durable journal.
     ///
     /// This is a host-service integration seam, not an app setting or a native backend
-    /// selector. The runner must meet ManagedCommandRunner's ownership contract. No native
-    /// implementation is supplied yet; fake processes exercise this path in tests.
+    /// selector. The runner must meet ManagedCommandRunner's ownership contract. Linux and
+    /// macOS have native runners in `commands::execution`; Windows does not yet, and
+    /// nothing constructs one at ordinary startup.
     /// Construction gives the host a fresh preparation epoch, invalidating earlier snapshots.
     pub fn with_command_backend(
         runner: Arc<dyn ManagedCommandRunner>,

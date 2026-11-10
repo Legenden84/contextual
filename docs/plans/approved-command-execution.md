@@ -2,46 +2,53 @@
 
 ## Current status and next task
 
-**Current implementation task: M2.1 — the Unix native process backend.**
-The user has explicitly directed implementation to continue here. M1 verification evidence
-is still missing; do not mark it passed or describe the existing interfaces as verified/frozen.
-Do not redirect this task into another policy, supervisor or transport increment.
+**Where we are (2026-11-10): M2.1. Linux is implemented and verified on Linux/WSL2. macOS is
+implemented and type-checked for Darwin, but has never been compiled natively or run.
+Next task: run the macOS tests on a Mac.**
 
-**Next concrete steps:** integrate the Linux process-tree component with an inspected exact-launch
-adapter, then implement the macOS counterpart. The user reports running the ownership probes;
-do not keep restarting that prerequisite. Record the platform, revision and results when available.
+Done in M2.1 (`crates/core/src/commands/execution.rs`):
+- `unix_launch` — the exact-launch code and group checks shared by both Unix backends.
+- `linux::LinuxProcessTree` and `linux::LinuxCommandRunner` — verified with actual processes.
+- `macos::MacosProcessTree` and `macos::MacosCommandRunner` — written, unverified.
+- `native_launch_tests` — one actual-process suite for the launch adapter of whichever Unix
+  platform is being built, plus an end-to-end test through preparation, approval,
+  revalidation, launch and the journal.
 
-The current increment adds the Linux `ManagedProcessTree` implementation and actual-process
-supervisor tests. It does not yet supply a production `ManagedCommandRunner`. Missing hardware
-or API support is a named blocker, not passing evidence.
+No runner is selected at startup; a host gets one only through
+`LocalHost::with_command_backend`.
+
+M1's contributor and cross-target checks pass on the Linux development host. M1 is recorded as
+passed for that host; native Windows and macOS runs of the same checks are still missing.
+
+**Next concrete steps, in order:**
+1. On a Mac, run the commands under "macOS verification" below and record the results. Fix
+   whatever fails; the macOS design assumptions listed there are the likely places.
+2. Close M2.1.
+3. M2.2 (Windows journal), M2.3 (Windows backend), then M3.
 
 Command execution is unavailable in the normal app. Core approval policy, non-executing host
-preparation, backend-independent supervision, Unix journaling, in-process admission and opt-in
-local/remote execution transport have implementations and tests. They are not yet a verified
-native execution feature.
+preparation, backend-independent supervision, Unix journaling, in-process admission, opt-in
+local/remote execution transport and the two Unix native backends have implementations. Windows
+durable journal publication, the Windows backend, cross-process ownership/reconciliation, Foundry
+tools and the command-specific app workflow remain unfinished. Ordinary LocalHost and agent
+startup do not enable execution.
 
-A Linux process-tree component is now proposed in `commands::execution::linux`. No production
-native launch adapter is implemented or selected. The macOS process-tree implementation,
-Windows durable journal publication, cross-process ownership/reconciliation, Foundry tools and
-the command-specific app workflow remain unfinished. Ordinary LocalHost and agent startup
-do not enable execution.
-
-The latest patches have not been compiled, formatted or tested in the read/edit-block workflow.
-Fake-process tests are not evidence of native Windows, macOS or Windows-to-WSL execution.
+Fake-process tests are not evidence of native execution. Linux actual-process tests are not
+evidence for macOS, Windows or the Windows-to-WSL connection. A Darwin type-check is not
+evidence that the macOS backend works.
 
 ## Authoritative delivery sequence
 
 This checklist is the source of truth for remaining work and completion. Current authorized
-implementation work is M2.1 while M1's validation remains outstanding. This does not waive M1:
-its checks and defect corrections are required before accepting the native implementation.
+implementation work is M2.1.
 Complete M2's substeps in order, then M3 through M7. The numbered stages below retain
 requirements and implementation history; they are not a second scheduling system. Historical
 "still pending" and "next work" statements do not override this checklist.
 
 | Milestone | Status | Successor |
 | --- | --- | --- |
-| M1 — Validate existing implementation | Blocked: no recorded build/test/cross-target results | Required for M2 acceptance |
-| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux process-tree component and native supervisor tests proposed; production launch and macOS still pending | M3 |
+| M1 — Validate existing implementation | Passed on the Linux development host (ledger); native Windows/macOS runs not available | Required for M2 acceptance |
+| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux implemented and tested; macOS implemented, **awaiting a run on a Mac**; M2.2/M2.3 not started | M3 |
 | M3 — Cross-process ownership and reconciliation | Not implemented | M4 |
 | M4 — Complete host-path verification | Blocked on M2 and M3 | M5; Phase 2 is closed |
 | M5 — Native Foundry proposals | Not implemented; original Stage 3 | M6 |
@@ -65,10 +72,12 @@ After passing, freeze these interfaces except for defects tied to a specific req
 failing test. M2.1 implementation is the current user-directed work; missing validation must
 not be interpreted as a reason to expand the existing foundations.
 
-Pending policy corrections from this editing session:
+Policy corrections, committed with passing regression tests:
 - Editing a proposal checks same-turn duplicate invocation policy while invalidating old approval.
 - Beginning an invocation invalidates unused sibling approvals so they cannot form a queue.
-- Regression tests are proposed. These changes are in memory and have not been verified here.
+
+Status: the checks above pass on the Linux development host (ledger). The one defect found was
+a formatting difference in `execution.rs`, now corrected.
 
 ### M2 — Implement native execution and Windows journal durability
 
@@ -91,31 +100,54 @@ supervisor increment.
 
 #### M2.1 implementation checklist and handoff
 
-**Status: in progress. Linux process-tree component proposed; production launch adapter and
-macOS counterpart still pending. No normal-startup backend selected.**
-
-The user reports running the ownership probes. The transcript does not supply their platform,
-saved revision, exit status or output, so the ledger records the run as reported rather than
-inventing platform-specific passing evidence. Implementation proceeds; the next task is not
-another ownership-probe increment.
+**Status: in progress. Linux process tree and launch adapter implemented and passing on
+Linux/WSL2. macOS process tree and launch adapter implemented and type-checked only; running
+them on a Mac is the next task. No normal-startup backend selected.**
 
 | Deliverable | Implementation state | Verification state |
 | --- | --- | --- |
-| Inspect concrete Unix dependency APIs | Inspected supplied Nix 0.29.0/0.31.3 and shared_child 1.1.2 sources | Static source review only |
-| Linux/WSL non-reaping root observation | Proposed actual-process probes using Nix `waitid` with `WEXITED | WNOWAIT | WNOHANG` | Not run |
-| macOS non-reaping root observation | Proposed actual-process probes using Nix kqueue `EVFILT_PROC` / `NOTE_EXIT`, with `NOTE_EXITSTATUS` for root status | Not run on macOS |
-| Group cleanup after early root exit | Probes retain an unreaped root and separately observe one known descendant's termination | Not a general descendant-discovery or cleanup implementation |
-| Cancellation while root is running | Proposed native probes for root plus one known descendant | Not run |
-| Linux `ManagedProcessTree` | Proposed in `commands::execution::linux::LinuxProcessTree` | New actual-process tests not run here |
-| Production `ManagedCommandRunner` and macOS `ManagedProcessTree` | Not implemented | No native service integration |
-| Exact launch: environment, argv, cwd, null stdin, no implicit shell | Production adapter pending; fixed test fixtures are not that adapter | Native launch acceptance tests pending |
-| Linux group-cleanup confirmation | Proposed conservative group-disappearance check after the last destructive signal and root reaping | Unreaped orphan zombies can retain Unknown; platform acceptance pending |
-| Linux Drop cleanup and interrupted-cleanup ownership | Proposed owned-root signalling followed by an OS-thread reaper; no destructive signals after reaping | Drop test added; broader lifecycle verification pending |
-| Bounded output, continued draining, cancellation and timeout | New tests exercise the Linux tree through the actual supervisor | Not run here; failed-launch coverage awaits the launch adapter |
+| Inspect concrete Unix dependency APIs | Nix 0.29.0/0.31.3, shared_child 1.1.2, Tokio 1.54.1 `net::unix::pipe` | Static source review |
+| Linux/WSL non-reaping root observation | Probes using Nix `waitid` with `WEXITED | WNOWAIT | WNOHANG` | Pass on Linux/WSL2 |
+| macOS non-reaping root observation | Probes using Nix kqueue `EVFILT_PROC` / `NOTE_EXIT` | Type-checked for `aarch64-apple-darwin`; not run: needs macOS |
+| Linux `ManagedProcessTree` | `linux::LinuxProcessTree` | Pass on Linux/WSL2 (glibc and musl) |
+| Linux production `ManagedCommandRunner` | `linux::LinuxCommandRunner` | Pass on Linux/WSL2 (glibc and musl) |
+| Exact launch: environment, argv, cwd, null stdin, no implicit shell | Done for Linux | Argument boundaries, exact environment, `/dev/null` stdin, cwd, own process group, no shell fallback for interpreter-less scripts |
+| Failed start means nothing ran | Done for Linux: every fallible step precedes the launch | Missing program, non-executable file, exec-format error, missing cwd, inexact requests, no runtime |
+| Bounded output, continued draining, timeout, cancellation | Done for Linux | Pass through the actual supervisor with the launch adapter |
+| Descendant cleanup on Stop, timeout and Drop | Done for Linux | Pass with a descendant that holds both pipes |
+| Linux group-cleanup confirmation | Conservative group-disappearance check | Early-root-exit test accepts Failure or honest Unknown; which one this host takes is not recorded |
+| End-to-end local path with the native runner | Explicitly configured `LocalHost` in a test | Preparation, approval, revalidation, launch, journal: pass |
+| macOS `ManagedProcessTree` | `macos::MacosProcessTree` | Type-checked for `aarch64-apple-darwin` only; **run on a Mac next** |
+| macOS production `ManagedCommandRunner` | `macos::MacosCommandRunner` | Type-checked only; the shared `native_launch_tests` and the end-to-end test are built for macOS but have not run |
 | Normal app/agent enablement | Disabled intentionally | Remains gated by M7 |
 
+Linux launch adapter (`LinuxCommandRunner`) decisions:
+- Starts the resolved absolute program directly with `std::process::Command`: `env_clear` then
+  exactly `Cmd::env`, unchanged argv, the given cwd, `Stdio::null()` stdin, `process_group(0)`.
+  A relative program, relative or missing cwd, NUL bytes, or an empty, `=`-containing or
+  duplicate environment name is refused rather than reinterpreted. There is no `PATH` search.
+- Output pipes come from `tokio::net::unix::pipe::pipe()` (Tokio `net`, enabled for the Linux
+  target only). Both ends exist and the read ends are registered with the runtime before the
+  launch; the write ends are switched to blocking mode for the child. After a successful
+  launch only infallible steps remain, so there is no post-launch setup failure to report.
+- The `Command` is dropped right after the launch. It holds the parent's copies of the write
+  ends; keeping it would prevent end-of-file on both pipes.
+- An ignored `SIGCHLD` (kernel auto-reaping) is detected through `SigIgn` in
+  `/proc/self/status` and refused before launch. An unreadable `/proc` also refuses.
+- `Cmd::timeout` and `Cmd::cancel` are left to the supervisor.
+
+Known limits of the Linux adapter, to carry into M4/M7 acceptance:
+- `SA_NOCLDWAIT` and wait-for-any-child reapers cannot be detected without unsafe code; they
+  remain integration preconditions. Tokio's own child handling waits on specific children.
+- Without `pre_exec` (unsafe) the child cannot be given a new session or have stray descriptors
+  closed. It inherits a controlling terminal if the app has one, and any descriptor some other
+  library opened without close-on-exec.
+- `spawn` must run in a Tokio runtime with the I/O driver. A missing runtime is refused; a
+  runtime without I/O would panic before launch.
+- Process-group containment is not a sandbox; a descendant that leaves the group escapes it.
+
 Dependency findings and decisions:
-- Pin Nix `=0.31.3`. The Linux process-tree component now uses it as a target-specific normal
+- Pin Nix `=0.31.3`. The Linux backend uses it as a target-specific normal
   dependency with `process` and `signal`; macOS retains a dev dependency for kqueue probes.
   This does not select a runner at startup. Its inspected safe wait, signal and kqueue
   interfaces require no unsafe code in this workspace.
@@ -134,8 +166,8 @@ Dependency findings and decisions:
   automatic child reaping before enabling launch.
 
 Linux implementation in this increment:
-- `LinuxProcessTree` adopts a never-reaped, exclusively owned group leader. The future launch
-  adapter must establish `process_group(0)` before target code runs and transfer ownership
+- `LinuxProcessTree` adopts a never-reaped, exclusively owned group leader. The launch
+  adapter establishes `process_group(0)` before target code runs and transfers ownership
   without calling `wait` or `try_wait`.
 - `wait_root` polls `waitid` with WNOWAIT and never reaps. Cancellation of that future does not
   consume exit status or release the root identity.
@@ -152,26 +184,58 @@ Linux implementation in this increment:
 - Observation errors that invalidate ownership prevent further destructive signals. Integration
   still must exclude automatic child reaping and competing waiters; a pre-signal ownership check
   alone cannot make an incompatible process-wide reaper safe.
-- New tests exercise repeated non-reaping observation, idempotent cleanup, actual bounded
+- Tests exercise repeated non-reaping observation, idempotent cleanup, actual bounded
   stdout/stderr draining through the supervisor, timeout, cancellation, early root exit and Drop.
   The early-root test accepts honest Unknown when group disappearance cannot be confirmed; that
   branch is not passing evidence of complete native descendant cleanup.
 
+macOS implementation (unverified):
+- Launch is the shared `unix_launch` code, identical to Linux. The kqueue is created before
+  the launch, so nothing fallible follows it.
+- `MacosProcessTree` registers a one-shot `EVFILT_PROC` event with
+  `NOTE_EXIT | NOTE_EXITSTATUS` immediately after the launch and polls it without blocking.
+  The event leaves the root unreaped; its data is decoded as a wait status.
+- A root that exits before registration is recognised by the registration receipt (or the
+  call) reporting ESRCH. Its status then needs a reap. In that one case the group is sent
+  SIGKILL when the exit is observed, then the root is reaped with `try_wait`; this differs from
+  Linux only in that the group kill precedes, rather than follows, `wait_root` returning.
+- Cleanup sends SIGKILL while the root is unreaped, reaps with non-blocking `try_wait`, then
+  uses only signal-zero checks. ESRCH alone confirms that the group is gone.
+- EPERM from `killpg` is not fatal on macOS: it is neither a delivered request nor a
+  confirmation. A group that keeps answering EPERM stays unconfirmed and ends as Unknown.
+- The program must start with a Mach-O/universal magic number or `#!`, checked before launch,
+  so that `posix_spawnp` cannot hand a non-executable-format file to `/bin/sh`.
+- No SIGCHLD-disposition check exists on macOS (no `/proc`, and `sigaction` is unsafe).
+
+macOS design assumptions to confirm on a Mac — each has a test that would expose it:
+1. Registering `EVFILT_PROC` for an own, unreaped, already exited child reports ESRCH
+   (`a_root_that_exited_before_the_watch_still_reports_its_status`).
+2. `NOTE_EXITSTATUS` data is the wait status, and the event does not reap
+   (`root_exit_is_observed_without_reaping`).
+3. `killpg` on a group holding only the zombie root returns success, ESRCH or EPERM, and after
+   the reap signal zero returns ESRCH promptly (every test that asserts a confirmed outcome).
+4. Apple's `posix_spawnp` falls back to `/bin/sh` on ENOEXEC. If it does not, the header check
+   is merely redundant (`failed_start_reports_that_nothing_ran` passes either way).
+5. `[ /dev/stdin -ef /dev/null ]` and `ps -o pgid= -p $$` behave in macOS `/bin/sh` as they do
+   on Linux (`launch_uses_null_stdin_the_given_cwd_and_its_own_group`; a test-only concern).
+
+macOS verification, to run on a Mac:
+- `cargo test -p contextual-core --no-default-features commands::execution -- --nocapture`
+  (the `macos::tests`, `native_launch_tests`, `unix_ownership_tests` and end-to-end tests).
+- `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`.
+
 Remaining work, in order:
-1. Implement the Linux production launch adapter using inspected exact-launch and pipe APIs:
-   clear/set the environment, preserve argv/cwd, null stdin, no implicit shell, pre-launch support
-   checks, and honest handling of any post-launch setup failure. Do not substitute the Git runner.
-2. Implement the macOS process-tree/launch counterpart, including observation setup for a root
-   that can exit immediately. Do not substitute the test fixture's stdin handshake for production.
-3. Validate the new Linux implementation and complete native adapter tests for exact arguments,
-   environment, null stdin, cwd, failed start, output limits, timeout, cancellation, descendants
-   and interrupted cleanup. Resolve concrete failures, including conservative Unknown outcomes
-   that prevent platform acceptance.
-4. Record Linux, macOS and Linux/WSL results separately, including the already reported probe run.
-   Complete outstanding M1 checks before accepting M2.1. Then start M2.2, not M3.
+1. **Next:** run the macOS verification above, fix failures, and record results in the ledger.
+2. Decide whether the Linux early-root-exit Unknown branch occurs on supported hosts and, if
+   so, whether it blocks platform acceptance.
+3. Decide whether Linux needs the same executable-header check: on a host where the standard
+   library launches through `execvp` (glibc older than 2.29 with a working directory set),
+   glibc also falls back to `/bin/sh`. It was left out because it would refuse `binfmt_misc`
+   programs, including Windows executables under WSL. The test host does not fall back.
+4. Close M2.1. Then start M2.2, not M3.
 
 Linux component/supervisor test command:
-`cargo test -p contextual-core --no-default-features commands::execution::linux::tests -- --nocapture`
+`cargo test -p contextual-core --no-default-features commands::execution -- --nocapture`
 
 Probe command, to run on each applicable native host:
 `cargo test -p contextual-core --no-default-features unix_ownership_tests -- --nocapture`
@@ -275,14 +339,22 @@ verification requirements below. Only then enable normal app/agent execution.
 Append results here as milestones advance. Include revision, platform/target, command or manual
 scenario, result and any blocker. This ledger records verification, not implementation claims.
 
-No milestone has recorded passing verification evidence yet.
+Revision for the 2026-11-10 rows: `b6c182e` plus the uncommitted Unix native backends
+(`crates/core/src/commands/execution.rs`, `crates/core/Cargo.toml`, `crates/core/src/host.rs`). Platform: x86_64 Linux,
+WSL2 kernel 6.18.33.2, rustc 1.99.1.
 
 | Scope | Revision / platform | Work or check | Result / blocker |
 | --- | --- | --- | --- |
-| M2.1 API inspection | Supplied dependency source snapshots; no project commit supplied | Reviewed Nix wait/signal/kqueue APIs and shared_child public/private waiting behavior | Static review completed; findings recorded above, not native execution evidence |
-| M2.1 native ownership probes | User reports running the tests; revision/platform not supplied | Root exit without reaping, group cleanup of a known descendant, cancellation while root runs | Run reported; exit status/output and per-platform evidence not supplied |
-| M2.1 Linux process-tree component | Current proposed patch; Linux excluding uClibc | Concrete managed tree plus actual-process supervisor/cancellation/Drop tests | Implementation proposed; new tests not compiled or run here; production launch adapter still pending |
-| M1 contributor / cross-target checks | Revision and execution environment not supplied | Format, workspace Clippy/tests, core cross-checks, static agent | No results available; still blocked on execution and recorded evidence |
+| M2.1 API inspection | Supplied dependency source snapshots | Reviewed Nix wait/signal/kqueue APIs and shared_child public/private waiting behavior | Static review completed; not native execution evidence |
+| M2.1 native ownership probes | User-reported earlier run; revision/platform not supplied | Root exit without reaping, group cleanup of a known descendant, cancellation while root runs | Superseded for Linux by the row below; macOS still unrecorded |
+| M1 contributor checks | 2026-11-10, Linux/WSL2 | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets -- -D warnings`; `cargo test --workspace` | Pass: 515 tests, 0 failed. At bare `b6c182e` the same checks passed except one formatting difference |
+| M1 cross-target checks | 2026-11-10, Linux/WSL2 host | Core `--no-default-features` Clippy for `x86_64-pc-windows-msvc` and `aarch64-apple-darwin`; musl release build of the agent | Pass. Type-checks only |
+| M2.1 Linux ownership probes | 2026-11-10, Linux/WSL2 | `unix_ownership_tests` (2 Linux tests) | Pass |
+| M2.1 Linux tree and launch adapter | 2026-11-10, Linux/WSL2, glibc and musl targets | `linux::tests` (6) and `native_launch_tests` (10): exact argv, exact environment, null stdin, cwd, own group, failed start, refusals, bounded output, timeout, cancellation, descendants, Drop | Pass; 20 consecutive runs of `commands::execution` without a failure after the shared-code restructuring |
+| M2.1 Linux end-to-end local path | 2026-11-10, Linux/WSL2 | `approved_command_runs_once_through_the_native_runner` | Pass |
+| M2.1 macOS type-check | 2026-11-10, cross-check from Linux | `cargo clippy -p contextual-core --no-default-features --lib --tests --target aarch64-apple-darwin -- -D warnings` | Pass. Library and test code compile for Darwin; nothing was linked or run |
+| M2.1 macOS execution | — | `macos::tests`, `native_launch_tests`, ownership probes, end-to-end test | Blocked: no macOS host has run them. Design assumptions are listed under M2.1 |
+| M4 Windows-to-WSL | — | Agent execution over the real connection | Not started; the Linux rows above ran natively inside WSL, not through the Windows app |
 
 Replace pending check entries or append results only after running the checks. Include the saved
 revision and any local modifications; an unsaved proposal is not the revision tested by Cargo.

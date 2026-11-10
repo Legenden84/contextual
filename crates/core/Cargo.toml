@@ -50,10 +50,13 @@ workspace = true
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
-# M2.1 Linux process-tree implementation; normal startup still selects no backend.
+# M2.1 native Unix backends; normal startup still selects none.
+# `net` supplies Tokio's anonymous pipes, created and registered before the launch.
 [target.'cfg(all(target_os = "linux", not(target_env = "uclibc")))'.dependencies]
 nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
+tokio = { workspace = true, features = ["net"] }
 
-# Darwin currently has ownership probes, not a production backend.
-[target.'cfg(target_os = "macos")'.dev-dependencies]
+# `event` supplies kqueue, the non-reaping root observation on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
 nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "event"] }
+tokio = { workspace = true, features = ["net"] }

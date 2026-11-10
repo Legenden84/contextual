@@ -768,23 +768,176 @@ async fn run_child(
     }
 }
 
-/// Linux process-group ownership for the native execution adapter.
+/// Launch and group checks shared by the native Unix backends.
 ///
-/// This component does not authorize or launch commands. The production launch adapter is
-/// still required; ordinary app and agent startup do not construct this type.
+/// Nothing here authorizes a command, and ordinary app and agent startup construct no native
+/// runner. A host must be given one explicitly through its execution backend seam.
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "uclibc")),
+    target_os = "macos"
+))]
+mod unix_launch {
+    use std::collections::HashSet;
+    use std::os::unix::process::CommandExt as _;
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
+
+    use nix::errno::Errno;
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+    use tokio::net::unix::pipe;
+
+    use crate::process::Cmd;
+    use crate::{Error, Result};
+
+    pub(super) fn refused(reason: &str) -> Error {
+        Error::tool(format!("The command was not started: {reason}"))
+    }
+
+    pub(super) fn ownership_error() -> Error {
+        Error::tool("Native command process ownership could not be verified.")
+    }
+
+    /// Refuses a launch request that an adapter would otherwise have to reinterpret.
+    /// Returns the working directory.
+    pub(super) fn checked_launch(command: &Cmd) -> Result<&Path> {
+        if command.program.contains('\0') || !Path::new(&command.program).is_absolute() {
+            return Err(refused("the program is not a resolved absolute path."));
+        }
+        let cwd = command
+            .cwd
+            .as_deref()
+            .filter(|cwd| cwd.is_absolute() && !cwd.as_os_str().as_encoded_bytes().contains(&0))
+            .ok_or_else(|| refused("the working directory is not a resolved absolute path."))?;
+        if command.args.iter().any(|arg| arg.contains('\0')) {
+            return Err(refused("an argument contains a NUL byte."));
+        }
+        let mut names = HashSet::new();
+        for (name, value) in &command.env {
+            if name.is_empty()
+                || name.contains(['=', '\0'])
+                || value.contains('\0')
+                || !names.insert(name.as_str())
+            {
+                return Err(refused("the environment is not an exact variable list."));
+            }
+        }
+        Ok(cwd)
+    }
+
+    /// Both ends exist, and the read end is registered with the runtime, before the launch.
+    /// The write end is returned in blocking mode for the child; the two ends are separate
+    /// open file descriptions, so the read end stays non-blocking.
+    fn output_pipe() -> Result<(Stdio, pipe::Receiver)> {
+        let failed = |_| refused("an output pipe could not be created.");
+        let (writer, reader) = pipe::pipe().map_err(failed)?;
+        let writer = writer.into_blocking_fd().map_err(failed)?;
+        Ok((Stdio::from(writer), reader))
+    }
+
+    /// A never-waited group leader with the read ends of its two output pipes.
+    pub(super) struct Launched {
+        pub child: Child,
+        pub stdout: pipe::Receiver,
+        pub stderr: pipe::Receiver,
+    }
+
+    /// Starts the checked request directly: no shell, no `PATH` search, no retry.
+    ///
+    /// The child receives exactly `Cmd::env`, the argument vector unchanged, `cwd`,
+    /// `/dev/null` as stdin and two pipes, and leads a new process group before its code
+    /// runs. Every fallible step precedes the launch, so an error means that the requested
+    /// program did not run. The caller must take ownership of the returned child at once.
+    pub(super) fn launch(command: &Cmd, cwd: &Path) -> Result<Launched> {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(refused("no async runtime is available to read its output."));
+        }
+        let (stdout_writer, stdout) = output_pipe()?;
+        let (stderr_writer, stderr) = output_pipe()?;
+
+        let mut launch = Command::new(&command.program);
+        launch
+            .args(&command.args)
+            .env_clear()
+            .envs(command.env.iter().map(|(name, value)| (name, value)))
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(stdout_writer)
+            .stderr(stderr_writer)
+            .process_group(0);
+
+        // The standard library reports a failed chdir, setpgid or exec as this error and
+        // leaves no child behind: the requested program did not run.
+        let child = launch
+            .spawn()
+            .map_err(|error| refused(&format!("{error}.")))?;
+        // Closes this process's copies of the write ends; otherwise neither pipe could
+        // reach end-of-file while the runner is alive.
+        drop(launch);
+        Ok(Launched {
+            child,
+            stdout,
+            stderr,
+        })
+    }
+
+    /// Requests termination of a group whose unreaped leader the caller still owns.
+    ///
+    /// ESRCH means that nothing is left to signal. macOS reports EPERM for a group that
+    /// holds only members that cannot be signalled, which includes one that holds only
+    /// zombies; that is not treated as a delivered request or as proof of anything, and
+    /// the caller's separate disappearance check decides the outcome.
+    pub(super) fn kill_owned_group(group: Pid) -> Result<()> {
+        match killpg(group, Signal::SIGKILL) {
+            Ok(()) | Err(Errno::ESRCH) => Ok(()),
+            Err(Errno::EPERM) if cfg!(target_os = "macos") => Ok(()),
+            Err(_) => Err(Error::tool(
+                "Native command process-group termination could not be requested.",
+            )),
+        }
+    }
+
+    /// Signal zero checks existence/permissions without delivering a signal.
+    ///
+    /// This remains safe after root reaping: a reused numeric group cannot receive SIGKILL
+    /// from this path. Only ESRCH establishes that the original group no longer exists.
+    /// On Linux any other error refuses confirmation outright. On macOS EPERM is also the
+    /// answer for a group of unreaped zombies, so it means "not yet" and never "absent".
+    pub(super) fn group_is_absent(group: Pid) -> Result<bool> {
+        if group.as_raw() <= 1 {
+            return Err(ownership_error());
+        }
+        match killpg(group, None::<Signal>) {
+            Err(Errno::ESRCH) => Ok(true),
+            Ok(()) | Err(Errno::EINTR) => Ok(false),
+            Err(Errno::EPERM) if cfg!(target_os = "macos") => Ok(false),
+            Err(_) => Err(Error::tool(
+                "Native command process-group disappearance could not be verified.",
+            )),
+        }
+    }
+}
+
+/// Linux native execution: process-group ownership and the exact-launch adapter.
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 pub mod linux {
     use std::process::Child;
     use std::time::Duration;
 
     use async_trait::async_trait;
+    use contextual_protocol::commands::CommandPlatform;
     use nix::errno::Errno;
-    use nix::sys::signal::{Signal, killpg};
+    use nix::sys::signal::Signal;
     use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
     use nix::unistd::Pid;
 
-    use super::{ManagedProcessTree, ProcessExit};
-    use crate::{Error, Result};
+    use super::unix_launch::{
+        Launched, checked_launch, group_is_absent, kill_owned_group, launch, ownership_error,
+        refused,
+    };
+    use super::{ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit};
+    use crate::Result;
+    use crate::process::Cmd;
 
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -830,18 +983,14 @@ pub mod linux {
             }
         }
 
-        fn ownership_error() -> Error {
-            Error::tool("Native command process ownership could not be verified.")
-        }
-
         /// Always queries the kernel while the Child is retained, even if exit was observed
         /// earlier. In particular, ECHILD must invalidate further destructive signalling.
         fn poll_root(&mut self) -> Result<Option<ProcessExit>> {
             if self.ownership_lost || self.group.as_raw() <= 1 {
-                return Err(Self::ownership_error());
+                return Err(ownership_error());
             }
             if self.child.is_none() {
-                return self.exit.map(Some).ok_or_else(Self::ownership_error);
+                return self.exit.map(Some).ok_or_else(ownership_error);
             }
 
             let status = waitid(
@@ -860,7 +1009,7 @@ pub mod linux {
                 },
                 _ => {
                     self.ownership_lost = true;
-                    return Err(Self::ownership_error());
+                    return Err(ownership_error());
                 }
             };
             self.exit = Some(exit);
@@ -869,24 +1018,18 @@ pub mod linux {
 
         fn signal_owned_group(&mut self) -> Result<()> {
             if self.child.is_none() {
-                return Err(Self::ownership_error());
+                return Err(ownership_error());
             }
             self.poll_root()?;
-            match killpg(self.group, Signal::SIGKILL) {
-                Ok(()) | Err(Errno::ESRCH) => {
-                    self.kill_requested = true;
-                    Ok(())
-                }
-                Err(_) => Err(Error::tool(
-                    "Native command process-group termination could not be requested.",
-                )),
-            }
+            kill_owned_group(self.group)?;
+            self.kill_requested = true;
+            Ok(())
         }
 
         fn reap_observed_root(&mut self) -> Result<ProcessExit> {
             // Remove signalling authority BEFORE calling wait. Even an error must not leave
             // a Drop path that could signal a numeric group whose root may have been reaped.
-            let mut child = self.child.take().ok_or_else(Self::ownership_error)?;
+            let mut child = self.child.take().ok_or_else(ownership_error)?;
             match child.wait() {
                 Ok(status) => {
                     let exit = ProcessExit {
@@ -898,27 +1041,9 @@ pub mod linux {
                 }
                 Err(_) => {
                     self.ownership_lost = true;
-                    Err(Self::ownership_error())
+                    Err(ownership_error())
                 }
             }
-        }
-    }
-
-    /// Signal zero checks existence/permissions without delivering a signal.
-    ///
-    /// This remains safe after root reaping: a reused numeric group cannot receive SIGKILL
-    /// from this path. ESRCH establishes that the original group no longer exists; any other
-    /// error refuses confirmation.
-    fn group_is_absent(group: Pid) -> Result<bool> {
-        if group.as_raw() <= 1 {
-            return Err(LinuxProcessTree::ownership_error());
-        }
-        match killpg(group, None::<Signal>) {
-            Err(Errno::ESRCH) => Ok(true),
-            Ok(()) | Err(Errno::EINTR) => Ok(false),
-            Err(_) => Err(Error::tool(
-                "Native command process-group disappearance could not be verified.",
-            )),
         }
     }
 
@@ -935,10 +1060,10 @@ pub mod linux {
 
         async fn terminate_and_wait(&mut self) -> Result<ProcessExit> {
             if self.ownership_lost {
-                return Err(Self::ownership_error());
+                return Err(ownership_error());
             }
             if self.cleanup_confirmed {
-                return self.exit.ok_or_else(Self::ownership_error);
+                return self.exit.ok_or_else(ownership_error);
             }
             if !self.kill_requested {
                 self.signal_owned_group()?;
@@ -958,7 +1083,7 @@ pub mod linux {
             loop {
                 if group_is_absent(self.group)? {
                     self.cleanup_confirmed = true;
-                    return self.exit.ok_or_else(Self::ownership_error);
+                    return self.exit.ok_or_else(ownership_error);
                 }
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
@@ -992,6 +1117,76 @@ pub mod linux {
                 .spawn(move || {
                     let _ = child.wait();
                 });
+        }
+    }
+
+    /// Exact launch of one already approved, already revalidated invocation on Linux/WSL.
+    ///
+    /// The requested program is started directly: no shell, no `PATH` search, no interpreter
+    /// substitution, no retry. The child receives exactly `Cmd::env` (the parent environment
+    /// is cleared), the argument vector unchanged, the given working directory, `/dev/null`
+    /// as stdin, and two pipes. It leads a new process group before its code runs, and that
+    /// group is owned by a `LinuxProcessTree` from the moment `spawn` returns.
+    ///
+    /// Every fallible step happens before the program is started. After a successful start
+    /// only infallible ownership transfer remains, so an error always means that the
+    /// requested program did not run. `Cmd::timeout` and `Cmd::cancel` are the supervisor's
+    /// responsibility and are not interpreted here.
+    ///
+    /// Integration preconditions that this type cannot establish without unsafe code:
+    /// - `spawn` runs inside a Tokio runtime whose I/O driver is enabled;
+    /// - the process does not set `SA_NOCLDWAIT` and has no wait-for-any-child reaper
+    ///   (an ignored `SIGCHLD` is detected and refused);
+    /// - descriptors opened without close-on-exec elsewhere in the process are inherited by
+    ///   the child, as is a controlling terminal. The standard library and Tokio open theirs
+    ///   close-on-exec. This is containment by process group, not a sandbox.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct LinuxCommandRunner {
+        _explicit: (),
+    }
+
+    impl LinuxCommandRunner {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    /// A process that ignores SIGCHLD has its children reaped by the kernel, which would
+    /// release the root's identity while the tree still intends to signal it.
+    fn refuse_automatic_reaping() -> Result<()> {
+        let unverified = || refused("child-process ownership could not be verified.");
+        let status = std::fs::read_to_string("/proc/self/status").map_err(|_| unverified())?;
+        let ignored = status
+            .lines()
+            .find_map(|line| line.strip_prefix("SigIgn:"))
+            .and_then(|mask| u64::from_str_radix(mask.trim(), 16).ok())
+            .ok_or_else(unverified)?;
+        if ignored & (1u64 << (Signal::SIGCHLD as i32 - 1)) != 0 {
+            return Err(refused(
+                "this process reaps children automatically, so the command could not be owned.",
+            ));
+        }
+        Ok(())
+    }
+
+    impl ManagedCommandRunner for LinuxCommandRunner {
+        fn platform(&self) -> CommandPlatform {
+            CommandPlatform::Linux
+        }
+
+        fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
+            let cwd = checked_launch(&command)?;
+            refuse_automatic_reaping()?;
+            let Launched {
+                child,
+                stdout,
+                stderr,
+            } = launch(&command, cwd)?;
+            Ok(ManagedChild {
+                tree: Box::new(LinuxProcessTree::from_unreaped_group(child)),
+                stdout: Box::new(stdout),
+                stderr: Box::new(stderr),
+            })
         }
     }
 
@@ -1124,8 +1319,7 @@ pub mod linux {
                 let cancel = CancellationToken::new();
                 cancel.cancel();
                 let (progress, _) = watch::channel(ExecutionProgress::default());
-                let result =
-                    run_child(child, Duration::from_secs(30), &cancel, &progress).await;
+                let result = run_child(child, Duration::from_secs(30), &cancel, &progress).await;
 
                 assert_eq!(result.status, ExecutionStatus::Cancelled);
                 assert!(result.spawned && result.cancelled);
@@ -1174,6 +1368,803 @@ pub mod linux {
             .await
             .unwrap();
         }
+    }
+}
+
+/// macOS native execution: process-group ownership and the exact-launch adapter.
+///
+/// Written against the Nix 0.31.3 kqueue wrappers and type-checked for Darwin from Linux.
+/// Until its tests have run on a Mac, treat every statement below about kernel behaviour as
+/// a design assumption rather than verified fact.
+#[cfg(target_os = "macos")]
+pub mod macos {
+    use std::io::Read as _;
+    use std::os::unix::process::ExitStatusExt as _;
+    use std::path::Path;
+    use std::process::{Child, ExitStatus};
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use contextual_protocol::commands::CommandPlatform;
+    use nix::errno::Errno;
+    use nix::sys::event::{EvFlags, EventFilter, FilterFlag, KEvent, Kqueue};
+    use nix::unistd::Pid;
+
+    use super::unix_launch::{
+        Launched, checked_launch, group_is_absent, kill_owned_group, launch, ownership_error,
+        refused,
+    };
+    use super::{ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit};
+    use crate::Result;
+    use crate::process::Cmd;
+
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+    const NO_WAIT: nix::libc::timespec = nix::libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    /// How the root's exit can still be learned while it stays unreaped.
+    enum Watch {
+        /// A one-shot `EVFILT_PROC` exit event is registered.
+        Armed,
+        /// Registration found no live process: the owned, unreaped root had already exited.
+        /// Its status is only available by reaping it.
+        AlreadyExited,
+        /// The event was consumed, or observation could not be set up.
+        Spent,
+    }
+
+    /// Exclusively owned, unreaped process-group leader.
+    ///
+    /// macOS has no safe non-reaping `waitid` in Nix, so root exit is observed with a kqueue
+    /// `EVFILT_PROC` event (`NOTE_EXIT | NOTE_EXITSTATUS`), which leaves the zombie in place
+    /// and keeps the numeric group reserved. The group is sent SIGKILL only while this type
+    /// still holds the unreaped root. After reaping, only signal-zero existence checks are
+    /// made, and only ESRCH confirms cleanup.
+    ///
+    /// The kqueue is created before the launch and the event is registered immediately
+    /// after it. A root that exits in between is recognised by the registration failing
+    /// with ESRCH. Its exit status then needs a reap, so in that one case the group is
+    /// terminated when the exit is observed rather than by the cleanup that the supervisor
+    /// runs directly afterwards; no signal is ever sent after the reap.
+    ///
+    /// The host must not ignore SIGCHLD, set `SA_NOCLDWAIT`, or run a wait-for-any-child
+    /// reaper. This is process-group containment, not a sandbox: descendants that leave
+    /// the group are outside its guarantee.
+    pub struct MacosProcessTree {
+        child: Option<Child>,
+        group: Pid,
+        queue: Kqueue,
+        watch: Watch,
+        exit: Option<ProcessExit>,
+        kill_requested: bool,
+        ownership_lost: bool,
+        cleanup_confirmed: bool,
+    }
+
+    fn exit_event(group: Pid, flags: EvFlags) -> KEvent {
+        KEvent::new(
+            // A spawned child's ID is a positive pid_t.
+            group.as_raw() as usize,
+            EventFilter::EVFILT_PROC,
+            flags,
+            FilterFlag::NOTE_EXIT | FilterFlag::NOTE_EXITSTATUS,
+            0,
+            0,
+        )
+    }
+
+    fn process_exit(status: ExitStatus) -> ProcessExit {
+        ProcessExit {
+            success: status.success(),
+            code: status.code(),
+        }
+    }
+
+    impl MacosProcessTree {
+        /// Takes exclusive ownership immediately, including cleanup responsibility on Drop.
+        ///
+        /// `child` must be a never-reaped group leader created with `process_group(0)`.
+        /// Never fails: when observation cannot be registered the tree still owns cleanup,
+        /// and `wait_root` reports that the outcome cannot be observed.
+        fn from_unreaped_group(child: Child, queue: Kqueue) -> Self {
+            let group = Pid::from_raw(child.id() as i32);
+            let change = exit_event(
+                group,
+                EvFlags::EV_ADD | EvFlags::EV_ONESHOT | EvFlags::EV_RECEIPT,
+            );
+            let mut receipt = [change];
+            // With EV_RECEIPT the registration result is returned as an EV_ERROR entry
+            // whose data is an errno, zero meaning success.
+            let watch = match queue.kevent(&[change], &mut receipt, Some(NO_WAIT)) {
+                Ok(1) if receipt[0].flags().contains(EvFlags::EV_ERROR) => {
+                    match receipt[0].data() {
+                        0 => Watch::Armed,
+                        error if error == Errno::ESRCH as isize => Watch::AlreadyExited,
+                        _ => Watch::Spent,
+                    }
+                }
+                Err(Errno::ESRCH) => Watch::AlreadyExited,
+                _ => Watch::Spent,
+            };
+            Self {
+                child: Some(child),
+                group,
+                queue,
+                watch,
+                exit: None,
+                kill_requested: false,
+                ownership_lost: false,
+                cleanup_confirmed: false,
+            }
+        }
+
+        fn signal_owned_group(&mut self) -> Result<()> {
+            if self.child.is_none() || self.ownership_lost || self.group.as_raw() <= 1 {
+                return Err(ownership_error());
+            }
+            kill_owned_group(self.group)?;
+            self.kill_requested = true;
+            Ok(())
+        }
+
+        /// Reaps the root if it has exited, without blocking. Only called once the group
+        /// has been sent its last signal; signalling authority is removed with the reap.
+        fn reap_if_exited(&mut self) -> Result<Option<ProcessExit>> {
+            debug_assert!(self.kill_requested);
+            let Some(child) = self.child.as_mut() else {
+                return self.exit.map(Some).ok_or_else(ownership_error);
+            };
+            match child.try_wait() {
+                Ok(None) => Ok(None),
+                Ok(Some(status)) => {
+                    self.child = None;
+                    let exit = process_exit(status);
+                    self.exit = Some(exit);
+                    Ok(Some(exit))
+                }
+                Err(_) => {
+                    // The root may or may not have been reaped: never signal by number.
+                    self.child = None;
+                    self.ownership_lost = true;
+                    Err(ownership_error())
+                }
+            }
+        }
+
+        fn poll_root(&mut self) -> Result<Option<ProcessExit>> {
+            if self.ownership_lost {
+                return Err(ownership_error());
+            }
+            if let Some(exit) = self.exit {
+                return Ok(Some(exit));
+            }
+            match self.watch {
+                Watch::Armed => {
+                    let mut events = [exit_event(self.group, EvFlags::empty())];
+                    match self.queue.kevent(&[], &mut events, Some(NO_WAIT)) {
+                        Ok(0) | Err(Errno::EINTR) => Ok(None),
+                        Ok(_) => {
+                            self.watch = Watch::Spent;
+                            let event = events[0];
+                            let expected = event.ident() == self.group.as_raw() as usize
+                                && event.filter() == Ok(EventFilter::EVFILT_PROC)
+                                && !event.flags().contains(EvFlags::EV_ERROR)
+                                && event
+                                    .fflags()
+                                    .contains(FilterFlag::NOTE_EXIT | FilterFlag::NOTE_EXITSTATUS);
+                            if !expected {
+                                return Err(ownership_error());
+                            }
+                            // The event data is the wait(2) status of the unreaped root.
+                            let exit = process_exit(ExitStatus::from_raw(event.data() as i32));
+                            self.exit = Some(exit);
+                            Ok(Some(exit))
+                        }
+                        Err(_) => {
+                            self.watch = Watch::Spent;
+                            Err(ownership_error())
+                        }
+                    }
+                }
+                Watch::AlreadyExited => {
+                    if !self.kill_requested {
+                        self.signal_owned_group()?;
+                    }
+                    self.reap_if_exited()
+                }
+                // Exit can no longer be observed without reaping; cleanup still works.
+                Watch::Spent => Err(ownership_error()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ManagedProcessTree for MacosProcessTree {
+        async fn wait_root(&mut self) -> Result<ProcessExit> {
+            loop {
+                if let Some(exit) = self.poll_root()? {
+                    return Ok(exit);
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+
+        async fn terminate_and_wait(&mut self) -> Result<ProcessExit> {
+            if self.ownership_lost {
+                return Err(ownership_error());
+            }
+            if self.cleanup_confirmed {
+                return self.exit.ok_or_else(ownership_error);
+            }
+            if !self.kill_requested {
+                self.signal_owned_group()?;
+            }
+            // The last signal has been sent, so the root's real status can now be taken.
+            // For a root that had exited on its own this equals the observed status.
+            while self.child.is_some() {
+                if self.reap_if_exited()?.is_none() {
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+            }
+
+            // No destructive signal is permitted below this point, including on Drop.
+            loop {
+                if group_is_absent(self.group)? {
+                    self.cleanup_confirmed = true;
+                    return self.exit.ok_or_else(ownership_error);
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+    }
+
+    impl Drop for MacosProcessTree {
+        fn drop(&mut self) {
+            if self.child.is_none() {
+                return;
+            }
+            // The root is still retained, so another cleanup request is safe under
+            // exclusive reaping ownership.
+            let _ = self.signal_owned_group();
+            let Some(mut child) = self.child.take() else {
+                return;
+            };
+            if self.ownership_lost {
+                return;
+            }
+            // An OS thread lets reaping continue after runtime shutdown. It sends no signal.
+            // Drop initiates cleanup; it is not a terminal observation.
+            let _ = std::thread::Builder::new()
+                .name("contextual-command-reaper".into())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
+        }
+    }
+
+    /// Exact launch of one already approved, already revalidated invocation on macOS.
+    ///
+    /// Same contract as the Linux adapter: the program is started directly with exactly
+    /// `Cmd::env`, the argument vector unchanged, the given working directory, `/dev/null`
+    /// as stdin and two pipes, leading a new process group owned by a `MacosProcessTree`.
+    /// Every fallible step, including creating the kqueue, precedes the launch, so an error
+    /// means that the requested program did not run.
+    ///
+    /// The standard library launches through `posix_spawnp`, and Apple's implementation
+    /// hands a file that the kernel rejects as not executable to `/bin/sh`. To keep the
+    /// no-implicit-shell rule the program must therefore begin with a Mach-O or universal
+    /// binary magic number, or with an interpreter line. The file can change between this
+    /// check and the launch; the check prevents an accidental shell, not a hostile race.
+    ///
+    /// Not detectable here without unsafe code: an ignored SIGCHLD, `SA_NOCLDWAIT`, or a
+    /// wait-for-any-child reaper in this process. Descriptors opened without close-on-exec
+    /// elsewhere in the process, and a controlling terminal, are inherited by the child.
+    /// `spawn` must run inside a Tokio runtime whose I/O driver is enabled.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct MacosCommandRunner {
+        _explicit: (),
+    }
+
+    impl MacosCommandRunner {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    /// Thin Mach-O (32/64-bit, either byte order) and universal binaries.
+    const NATIVE_MAGIC: [[u8; 4]; 8] = [
+        [0xfe, 0xed, 0xfa, 0xce],
+        [0xce, 0xfa, 0xed, 0xfe],
+        [0xfe, 0xed, 0xfa, 0xcf],
+        [0xcf, 0xfa, 0xed, 0xfe],
+        [0xca, 0xfe, 0xba, 0xbe],
+        [0xbe, 0xba, 0xfe, 0xca],
+        [0xca, 0xfe, 0xba, 0xbf],
+        [0xbf, 0xba, 0xfe, 0xca],
+    ];
+
+    fn refuse_shell_fallback(program: &Path) -> Result<()> {
+        let mut start = [0u8; 4];
+        let read = std::fs::File::open(program)
+            .and_then(|file| file.take(4).read(&mut start))
+            .map_err(|error| refused(&format!("{error}.")))?;
+        let start = &start[..read];
+        if start.starts_with(b"#!") || NATIVE_MAGIC.iter().any(|magic| start == magic) {
+            Ok(())
+        } else {
+            Err(refused(
+                "the program is neither a native executable nor a script with an \
+                 interpreter line, and no shell is substituted.",
+            ))
+        }
+    }
+
+    impl ManagedCommandRunner for MacosCommandRunner {
+        fn platform(&self) -> CommandPlatform {
+            CommandPlatform::Macos
+        }
+
+        fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
+            let cwd = checked_launch(&command)?;
+            refuse_shell_fallback(Path::new(&command.program))?;
+            let queue =
+                Kqueue::new().map_err(|_| refused("process observation could not be set up."))?;
+            let Launched {
+                child,
+                stdout,
+                stderr,
+            } = launch(&command, cwd)?;
+            Ok(ManagedChild {
+                tree: Box::new(MacosProcessTree::from_unreaped_group(child, queue)),
+                stdout: Box::new(stdout),
+                stderr: Box::new(stderr),
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::unix::process::CommandExt as _;
+        use std::process::{Command, Stdio};
+
+        use super::*;
+
+        fn tree(script: &str) -> MacosProcessTree {
+            let queue = Kqueue::new().unwrap();
+            let child = Command::new("/bin/sh")
+                .args(["-c", script])
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            MacosProcessTree::from_unreaped_group(child, queue)
+        }
+
+        #[tokio::test]
+        async fn root_exit_is_observed_without_reaping() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut tree = tree("sleep 0.3; exit 23");
+                assert!(matches!(tree.watch, Watch::Armed));
+                let expected = ProcessExit {
+                    success: false,
+                    code: Some(23),
+                };
+
+                assert_eq!(tree.wait_root().await.unwrap(), expected);
+                assert_eq!(tree.wait_root().await.unwrap(), expected);
+                // Still unreaped: the group identity is reserved and nothing was signalled.
+                assert!(tree.child.is_some() && !tree.kill_requested);
+
+                assert_eq!(tree.terminate_and_wait().await.unwrap(), expected);
+                assert_eq!(tree.terminate_and_wait().await.unwrap(), expected);
+                assert!(group_is_absent(tree.group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_root_that_exited_before_the_watch_still_reports_its_status() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let queue = Kqueue::new().unwrap();
+                let child = Command::new("/bin/sh")
+                    .args(["-c", "exit 7"])
+                    .env_clear()
+                    .stdin(Stdio::null())
+                    .process_group(0)
+                    .spawn()
+                    .unwrap();
+                // Long enough for the root to become a zombie before registration.
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let mut tree = MacosProcessTree::from_unreaped_group(child, queue);
+                assert!(matches!(tree.watch, Watch::AlreadyExited));
+
+                let expected = ProcessExit {
+                    success: false,
+                    code: Some(7),
+                };
+                assert_eq!(tree.wait_root().await.unwrap(), expected);
+                assert_eq!(tree.terminate_and_wait().await.unwrap(), expected);
+                assert!(group_is_absent(tree.group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn termination_reports_the_signalled_root_and_clears_the_group() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let mut tree = tree("sleep 30 & wait");
+                let exit = tree.terminate_and_wait().await.unwrap();
+                assert_eq!(
+                    exit,
+                    ProcessExit {
+                        success: false,
+                        code: None
+                    }
+                );
+                assert!(group_is_absent(tree.group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn dropping_owned_tree_initiates_cleanup() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let tree = tree("sleep 30 & wait");
+                let group = tree.group;
+                drop(tree);
+                while !group_is_absent(group).unwrap() {
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        #[test]
+        fn only_native_binaries_and_interpreter_scripts_pass_the_shell_check() {
+            let dir = tempfile::tempdir().unwrap();
+            let file = |name: &str, bytes: &[u8]| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, bytes).unwrap();
+                path
+            };
+            assert!(refuse_shell_fallback(Path::new("/bin/sh")).is_ok());
+            assert!(refuse_shell_fallback(&file("script", b"#!/bin/sh\necho\n")).is_ok());
+            assert!(refuse_shell_fallback(&file("text", b"echo hi\n")).is_err());
+            assert!(refuse_shell_fallback(&file("empty", b"")).is_err());
+            assert!(refuse_shell_fallback(&dir.path().join("missing")).is_err());
+        }
+    }
+}
+
+/// Actual-process tests of the production launch adapter for this platform.
+#[cfg(all(
+    test,
+    any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    )
+))]
+mod native_launch_tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use nix::unistd::Pid;
+    use tokio::sync::watch;
+    use tokio_util::sync::CancellationToken;
+
+    #[cfg(target_os = "linux")]
+    use super::linux::LinuxCommandRunner as NativeRunner;
+    #[cfg(target_os = "macos")]
+    use super::macos::MacosCommandRunner as NativeRunner;
+    use super::unix_launch::group_is_absent;
+    use super::{
+        ExecutionProgress, ExecutionResult, ExecutionStatus, ManagedCommandRunner, OUTPUT_LIMIT,
+        run_child,
+    };
+    use crate::process::Cmd;
+
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+    const SH: &str = "/bin/sh";
+    const SEARCH_PATH: (&str, &str) = ("PATH", "/usr/bin:/bin");
+
+    fn command(program: &str, args: &[&str], env: &[(&str, &str)], cwd: &Path) -> Cmd {
+        let mut command = Cmd::new(program, args.iter().copied()).cwd(cwd);
+        command.env = env
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        command
+    }
+
+    async fn run(command: Cmd, timeout: Duration) -> ExecutionResult {
+        let child = NativeRunner::new().spawn(command).unwrap();
+        let (progress, _) = watch::channel(ExecutionProgress::default());
+        run_child(child, timeout, &CancellationToken::new(), &progress).await
+    }
+
+    fn refusal(command: Cmd) -> String {
+        match NativeRunner::new().spawn(command) {
+            Ok(_) => panic!("the launch adapter started a command it had to refuse"),
+            Err(error) => error.message,
+        }
+    }
+
+    #[tokio::test]
+    async fn launch_preserves_every_argument_boundary_without_a_shell() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let cwd = tempfile::tempdir().unwrap();
+            let arguments = [
+                "a b",
+                "",
+                "*",
+                "$HOME",
+                "'q' \"d\"",
+                "line\nbreak",
+                "-n",
+                ";id",
+            ];
+            let mut args = vec![
+                "-c",
+                "for a in \"$@\"; do printf '[%s]' \"$a\"; done",
+                "arg0",
+            ];
+            args.extend(arguments);
+            let result = run(
+                command(SH, &args, &[SEARCH_PATH], cwd.path()),
+                Duration::from_secs(5),
+            )
+            .await;
+
+            assert_eq!(result.status, ExecutionStatus::Success);
+            assert_eq!(
+                result.output.stdout.text,
+                "[a b][][*][$HOME]['q' \"d\"][line\nbreak][-n][;id]"
+            );
+            assert!(result.output.stdout.complete && result.output.stderr.complete);
+            assert!(result.output.stderr.text.is_empty());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn launch_supplies_exactly_the_given_environment() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            // The parent's variables include at least PATH and the Cargo test variables.
+            assert!(std::env::vars_os().count() > 2);
+            let cwd = tempfile::tempdir().unwrap();
+            let result = run(
+                command(
+                    "/usr/bin/env",
+                    &[],
+                    &[("ONLY", "this one"), ("EMPTY", "")],
+                    cwd.path(),
+                ),
+                Duration::from_secs(5),
+            )
+            .await;
+
+            assert_eq!(result.status, ExecutionStatus::Success);
+            let mut seen: Vec<&str> = result.output.stdout.text.lines().collect();
+            seen.sort_unstable();
+            assert_eq!(seen, ["EMPTY=", "ONLY=this one"]);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn launch_uses_null_stdin_the_given_cwd_and_its_own_group() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let cwd = tempfile::tempdir().unwrap();
+            let expected = cwd.path().canonicalize().unwrap();
+            // `cat` returns at once only because stdin is at end-of-file.
+            let script = "[ /dev/stdin -ef /dev/null ] && echo null; pwd -P; cat; \\
+                          printf '%s ' \"$$\"; ps -o pgid= -p $$";
+            let result = run(
+                command(SH, &["-c", script], &[SEARCH_PATH], &expected),
+                Duration::from_secs(5),
+            )
+            .await;
+
+            assert_eq!(result.status, ExecutionStatus::Success);
+            let lines: Vec<&str> = result.output.stdout.text.lines().collect();
+            assert_eq!(lines.len(), 3, "{:?}", result.output);
+            assert_eq!(lines[0], "null");
+            assert_eq!(Path::new(lines[1]), expected);
+            let (pid, group) = lines[2].split_once(' ').unwrap();
+            let group = group.trim();
+            assert_eq!(pid, group);
+            assert!(group_is_absent(Pid::from_raw(group.parse().unwrap())).unwrap());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_start_reports_that_nothing_ran() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let cwd = tempfile::tempdir().unwrap();
+        let marker = cwd.path().join("ran");
+        let path = |name: &str| cwd.path().join(name).to_str().unwrap().to_owned();
+
+        assert!(refusal(command(&path("missing"), &[], &[], cwd.path())).contains("not started"));
+
+        // Not executable.
+        std::fs::write(path("data"), "#!/bin/sh\ntouch ran\n").unwrap();
+        refusal(command(&path("data"), &[], &[SEARCH_PATH], cwd.path()));
+
+        // Executable text without an interpreter line must not be handed to a shell.
+        std::fs::write(path("script"), "touch ran\n").unwrap();
+        std::fs::set_permissions(path("script"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        refusal(command(&path("script"), &[], &[SEARCH_PATH], cwd.path()));
+
+        // A missing working directory fails in the child, before the program.
+        let touch = ["-c", "touch \"$0\"", marker.to_str().unwrap()];
+        refusal(command(
+            SH,
+            &touch,
+            &[SEARCH_PATH],
+            &cwd.path().join("gone"),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn inexact_launch_requests_are_refused_before_launch() {
+        let cwd = tempfile::tempdir().unwrap();
+        let marker = cwd.path().join("ran");
+        let touch = ["-c", "touch \"$0\"", marker.to_str().unwrap()];
+
+        // No PATH search, even with a PATH that would find the program.
+        refusal(command("sh", &touch, &[SEARCH_PATH], cwd.path()));
+        refusal(command("./sh", &touch, &[SEARCH_PATH], Path::new("/bin")));
+        refusal(command(SH, &touch, &[SEARCH_PATH], Path::new(".")));
+        let mut no_cwd = command(SH, &touch, &[SEARCH_PATH], cwd.path());
+        no_cwd.cwd = None;
+        refusal(no_cwd);
+        for env in [
+            [("", "x"), SEARCH_PATH],
+            [("A=B", "x"), SEARCH_PATH],
+            [("A", "x\0y"), SEARCH_PATH],
+            [SEARCH_PATH, SEARCH_PATH],
+        ] {
+            refusal(command(SH, &touch, &env, cwd.path()));
+        }
+        refusal(command(
+            SH,
+            &["-c", "touch ran\0"],
+            &[SEARCH_PATH],
+            cwd.path(),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!marker.exists());
+        assert!(!cwd.path().join("ran\0").exists());
+    }
+
+    #[test]
+    fn launch_outside_a_runtime_is_refused() {
+        let cwd = tempfile::tempdir().unwrap();
+        let marker = cwd.path().join("ran");
+        let touch = ["-c", "touch \"$0\"", marker.to_str().unwrap()];
+        refusal(command(SH, &touch, &[SEARCH_PATH], cwd.path()));
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn launched_output_is_bounded_and_still_drained() {
+        tokio::time::timeout(Duration::from_secs(20), async {
+            let cwd = tempfile::tempdir().unwrap();
+            let script = "i=0; while [ \"$i\" -lt 8192 ]; do \
+                          printf '0123456789abcdef'; \
+                          printf 'fedcba9876543210' >&2; \
+                          i=$((i + 1)); done; exit 7";
+            let result = run(
+                command(SH, &["-c", script], &[SEARCH_PATH], cwd.path()),
+                Duration::from_secs(10),
+            )
+            .await;
+
+            assert_eq!(result.status, ExecutionStatus::Failure);
+            assert_eq!(result.exit_code, Some(7));
+            for output in [&result.output.stdout, &result.output.stderr] {
+                assert_eq!(output.bytes_seen, 8192 * 16);
+                assert_eq!(output.bytes_retained, OUTPUT_LIMIT);
+                assert!(output.truncated && output.complete && !output.read_failed);
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Starts a root that reports its group, starts a descendant holding both pipes,
+    /// and waits. Returns once the group is known.
+    async fn launch_with_descendant(
+        cancel: &CancellationToken,
+        timeout: Duration,
+    ) -> (tokio::task::JoinHandle<ExecutionResult>, Pid) {
+        let cwd = tempfile::tempdir().unwrap();
+        let script = "sleep 30 & echo $$; wait";
+        let child = NativeRunner::new()
+            .spawn(command(SH, &["-c", script], &[SEARCH_PATH], cwd.path()))
+            .unwrap();
+        let (progress, mut seen) = watch::channel(ExecutionProgress::default());
+        let cancel = cancel.clone();
+        let task = tokio::spawn(async move { run_child(child, timeout, &cancel, &progress).await });
+        let group = loop {
+            let text = seen.borrow_and_update().stdout.text.clone();
+            if let Some(line) = text.strip_suffix('\n') {
+                break Pid::from_raw(line.parse().unwrap());
+            }
+            seen.changed().await.unwrap();
+        };
+        assert!(!group_is_absent(group).unwrap());
+        (task, group)
+    }
+
+    #[tokio::test]
+    async fn stopping_a_launched_command_terminates_its_descendants() {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let cancel = CancellationToken::new();
+            let (task, group) = launch_with_descendant(&cancel, Duration::from_secs(30)).await;
+            cancel.cancel();
+            let result = task.await.unwrap();
+
+            assert_eq!(result.status, ExecutionStatus::Cancelled);
+            assert!(result.spawned && result.cancelled && result.detail.is_none());
+            assert!(result.output.stdout.complete && result.output.stderr.complete);
+            assert!(group_is_absent(group).unwrap());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_launched_command_that_times_out_loses_its_descendants() {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let (task, group) =
+                launch_with_descendant(&CancellationToken::new(), Duration::from_millis(400)).await;
+            let result = task.await.unwrap();
+
+            assert_eq!(result.status, ExecutionStatus::TimedOut);
+            assert!(result.spawned && result.timed_out && result.detail.is_none());
+            assert!(group_is_absent(group).unwrap());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_a_launched_command_initiates_group_cleanup() {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let cancel = CancellationToken::new();
+            let (task, group) = launch_with_descendant(&cancel, Duration::from_secs(30)).await;
+            // Interrupts supervision mid-flight: only Drop is left to clean up.
+            task.abort();
+            let _ = task.await;
+
+            while !group_is_absent(group).unwrap() {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }
 
@@ -1330,6 +2321,21 @@ mod tests {
         CallId,
         ReviewPlan,
     ) {
+        let program = std::env::current_exe().unwrap();
+        proposal_for(host, program.to_str().unwrap(), &[]).await
+    }
+
+    async fn proposal_for(
+        host: Arc<LocalHost>,
+        program: &str,
+        args: &[&str],
+    ) -> (
+        tempfile::TempDir,
+        Arc<LocalHost>,
+        ApprovalGate,
+        CallId,
+        ReviewPlan,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().to_str().unwrap().to_owned();
         host.allow_root(&path).await.unwrap();
@@ -1342,8 +2348,8 @@ mod tests {
                     "purpose": "Exercise the fake execution backend.",
                     "command": {
                         "kind": "exec",
-                        "program": std::env::current_exe().unwrap().to_str().unwrap(),
-                        "args": []
+                        "program": program,
+                        "args": args
                     },
                     "cwd": ".",
                     "timeoutSeconds": 1,
@@ -1421,6 +2427,50 @@ mod tests {
 
         assert_eq!(result.status, ExecutionStatus::Success);
         assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
+        gate.finish(&call, result.outcome()).unwrap();
+        assert!(gate.approve(&call, &plan).is_err());
+    }
+
+    /// The complete local path with this platform's native adapter: host preparation,
+    /// approval, revalidation, a real process and the journal. Still an explicitly
+    /// configured host.
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    ))]
+    #[tokio::test]
+    async fn approved_command_runs_once_through_the_native_runner() {
+        #[cfg(target_os = "linux")]
+        let native = linux::LinuxCommandRunner::new();
+        #[cfg(target_os = "macos")]
+        let native = macos::MacosCommandRunner::new();
+        let journal = Arc::new(Journal::default());
+        let configured = Arc::new(LocalHost::with_command_backend(
+            Arc::new(native),
+            journal.clone(),
+        ));
+        let script = "printf 'out:%s' \"$1\"; printf err >&2; : > ran; exit 3";
+        let (root, host, mut gate, call, plan) =
+            proposal_for(configured, "/bin/sh", &["-c", script, "sh", "a b"]).await;
+        let host: Arc<dyn WorkspaceHost> = host;
+        let marker = root.path().join("ran");
+
+        let approval = gate.approve(&call, &plan).unwrap();
+        assert!(!marker.exists());
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = host
+            .start_command(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::Failure, "{result:?}");
+        assert_eq!(result.exit_code, Some(3));
+        assert_eq!(result.output.stdout.text, "out:a b");
+        assert_eq!(result.output.stderr.text, "err");
+        assert!(marker.exists());
         assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
         assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
         gate.finish(&call, result.outcome()).unwrap();
