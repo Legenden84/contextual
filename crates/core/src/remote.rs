@@ -425,6 +425,12 @@ impl WorkspaceHost for RemoteHost {
     ) -> Result<crate::commands::execution::ExecutionHandle> {
         commands::start(self, permit, scope)
     }
+    async fn reconcile_commands(
+        &self,
+        root: &str,
+    ) -> Result<crate::commands::execution::ReconciliationReport> {
+        commands::reconcile(self, root).await
+    }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         self.request(method::GIT, call).await
     }
@@ -443,14 +449,24 @@ pub struct LocalAgentLauncher {
     pub binary: std::path::PathBuf,
     pub app_version: String,
     pub env: Vec<(String, String)>,
+    /// Arguments for the agent, for example its explicit command-execution mode.
+    pub args: Vec<String>,
+    /// The location this connection's commands belong to, when the agent was started in
+    /// command-execution mode for it.
+    pub command_location: Option<crate::location::Location>,
 }
 
 #[async_trait]
 impl AgentLauncher for LocalAgentLauncher {
     async fn launch(&self) -> Result<RemoteHost> {
         let mut cmd = Command::new(&self.binary);
+        cmd.args(&self.args);
         cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
-        RemoteHost::spawn(cmd, &self.app_version, Vec::new()).await
+        let host = RemoteHost::spawn(cmd, &self.app_version, Vec::new()).await?;
+        match &self.command_location {
+            Some(location) => host.with_command_location(location.clone()),
+            None => Ok(host),
+        }
     }
     fn describe(&self) -> String {
         format!("local agent {}", self.binary.display())
@@ -620,6 +636,18 @@ impl WorkspaceHost for SupervisedHost {
             .filter(|host| host.is_alive())
             .ok_or_else(|| Error::tool("The reviewed agent connection is unavailable."))?;
         host.start_command(permit, scope)
+    }
+    async fn reconcile_commands(
+        &self,
+        root: &str,
+    ) -> Result<crate::commands::execution::ReconciliationReport> {
+        // One explicit request on the current (or a newly established) connection. It is
+        // never repeated automatically: a failed attempt leaves everything blocked.
+        self.call(false, |h| {
+            let root = root.to_owned();
+            async move { h.reconcile_commands(&root).await }
+        })
+        .await
     }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         let read_only = matches!(

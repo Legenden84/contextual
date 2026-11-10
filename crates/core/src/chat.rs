@@ -8,7 +8,11 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::commands::history::{CommandHistory, CommandRecord, RecordStatus, SharedResult};
+use crate::commands::{CallId, InvocationId};
+use crate::llm::tools::{ToolCall, ToolResult, command_request};
 use crate::llm::types::{ApiKind, ChatMessage as LlmMessage, ChatRole, MessageContent};
+use crate::location::Location;
 use crate::logic::changes::{ChangeContext, parse_changes};
 use crate::logic::format::fmt_k;
 use crate::logic::hash::hash_text;
@@ -32,6 +36,21 @@ pub struct ApiMessage {
     /// Assistant turns: the tokens the reply used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    /// Assistant turns: the command calls the model issued, exactly as received. History
+    /// data: reading or resending them starts nothing.
+    #[serde(rename = "toolCalls")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// Assistant turns with calls: the app's identity for this model turn, which scopes the
+    /// calls' records in [`ThreadState::commands`].
+    #[serde(rename = "commandTurn")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_turn: Option<String>,
+    /// `Tool` turns: the call this message answers. Its content is exactly what the model
+    /// was told, including any output the user chose to share.
+    #[serde(rename = "toolCallId")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ApiMessage {
@@ -42,8 +61,20 @@ impl ApiMessage {
             system: None,
             followup: false,
             usage: None,
+            tool_calls: Vec::new(),
+            command_turn: None,
+            tool_call_id: None,
         }
     }
+}
+
+/// What will be returned to the model for one call when the conversation continues.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedAnswer {
+    pub call: CallId,
+    pub result: SharedResult,
+    /// The attempt the result describes, when the command ran.
+    pub invocation: Option<InvocationId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +114,10 @@ pub struct ThreadState {
     /// An explicit empty list must survive saving so historical changes don't reappear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_changes: Option<Vec<Change>>,
+    /// Proposed commands and what was observed for them. Observations only: no approval,
+    /// preparation, environment or unshared output is ever saved.
+    #[serde(default, skip_serializing_if = "CommandHistory::is_empty")]
+    pub commands: CommandHistory,
 }
 
 impl ThreadState {
@@ -99,6 +134,7 @@ impl ThreadState {
             tree_version: None,
             loaded: Vec::new(),
             pending_changes: Some(Vec::new()),
+            commands: CommandHistory::default(),
         }
     }
 
@@ -131,6 +167,291 @@ impl ThreadState {
             ..ApiMessage::new(ChatRole::Assistant, ApiContent::Text(reply))
         });
     }
+
+    /// The last assistant message's calls that have no answer in the transcript yet, with
+    /// that message's turn identity. The next request to the model must answer all of them.
+    pub fn unanswered_calls(&self) -> (Option<&str>, Vec<&ToolCall>) {
+        let Some(index) = self
+            .transcript
+            .iter()
+            .rposition(|message| message.role == ChatRole::Assistant)
+        else {
+            return (None, Vec::new());
+        };
+        let asked = &self.transcript[index];
+        let answered: Vec<&str> = self.transcript[index + 1..]
+            .iter()
+            .filter_map(|message| message.tool_call_id.as_deref())
+            .collect();
+        (
+            asked.command_turn.as_deref(),
+            asked
+                .tool_calls
+                .iter()
+                .filter(|call| !answered.contains(&call.call_id.as_str()))
+                .collect(),
+        )
+    }
+
+    /// The record of one call.
+    pub fn command(&self, call: &CallId) -> Option<&CommandRecord> {
+        self.commands.get(call)
+    }
+
+    /// Decides, without changing anything, what every unanswered call will be told when
+    /// the conversation continues. `shared` holds the results the user explicitly chose to
+    /// share, by provider call identity.
+    ///
+    /// A rejected proposal is reported as rejected. A call that could never be a command,
+    /// or that the user has not decided on, is reported as not run, which closes it. A
+    /// command that ran and was not shared is reported as withheld: the model learns that it
+    /// ran and nothing else. Nothing is invented, and nothing can continue while a command
+    /// is still running.
+    pub fn plan_answers(
+        &self,
+        shared: &BTreeMap<String, SharedResult>,
+    ) -> crate::Result<Vec<PlannedAnswer>> {
+        let (turn, calls) = self.unanswered_calls();
+        let turn = turn.unwrap_or_default();
+        let mut planned = Vec::new();
+        for asked in calls {
+            let call = CallId {
+                turn: turn.to_owned(),
+                call: asked.call_id.clone(),
+            };
+            let record = self.commands.get(&call).ok_or_else(|| {
+                crate::Error::conflict("A command call has no record. Start a new chat.")
+            })?;
+            let last = record.attempts.last().map(|attempt| &attempt.invocation);
+            let (result, invocation) = match record.status() {
+                RecordStatus::Running => {
+                    return Err(crate::Error::conflict(
+                        "A command is still running. Wait for it or stop it first.",
+                    ));
+                }
+                RecordStatus::Rejected => (SharedResult::rejected(&call), None),
+                RecordStatus::Unusable => (
+                    SharedResult::not_run(&call, "The call could not be read as a command."),
+                    None,
+                ),
+                RecordStatus::NeedsReview | RecordStatus::NotRun => (
+                    SharedResult::not_run(
+                        &call,
+                        "The user had not decided on it when the conversation continued.",
+                    ),
+                    None,
+                ),
+                RecordStatus::Finished(_) => match shared.get(&asked.call_id) {
+                    Some(result) if result.call_id == asked.call_id => {
+                        (result.clone(), last.cloned())
+                    }
+                    Some(_) => {
+                        return Err(crate::Error::conflict(
+                            "A shared result belongs to a different call.",
+                        ));
+                    }
+                    None => (SharedResult::withheld(&call), last.cloned()),
+                },
+            };
+            planned.push(PlannedAnswer {
+                call,
+                result,
+                invocation,
+            });
+        }
+        Ok(planned)
+    }
+
+    /// Adds a completed round that answered command calls and may have produced new ones.
+    ///
+    /// `answers` come from [`Self::plan_answers`] and were sent with this request; they are
+    /// recorded in the transcript exactly as sent, and in the command history. `input` is
+    /// what the user typed, if anything. `calls` are the calls of the completed reply; each
+    /// becomes a record awaiting review, or an unusable one. Recording them prepares,
+    /// approves and starts nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_command_round(
+        &mut self,
+        answers: Vec<PlannedAnswer>,
+        input: Option<ApiContent>,
+        system: &str,
+        followup: bool,
+        reply: String,
+        calls: Vec<ToolCall>,
+        usage: Option<Usage>,
+        location: &Location,
+        now: &str,
+    ) -> crate::Result<()> {
+        let mut system = (self.last_system() != Some(system)).then(|| system.to_string());
+        // Validate everything against a copy of the history before anything is appended.
+        let mut commands = self.commands.clone();
+        for planned in &answers {
+            commands.answer(
+                &planned.call,
+                planned.result.answer(planned.invocation.as_ref()),
+                now,
+            )?;
+        }
+        let turn = format!("turn-{}", uuid::Uuid::new_v4().simple());
+        for call in &calls {
+            commands.propose(
+                CallId {
+                    turn: turn.clone(),
+                    call: call.call_id.clone(),
+                },
+                &call.name,
+                command_request(call).map_err(|error| error.message),
+                location.clone(),
+                now,
+            )?;
+        }
+
+        for planned in &answers {
+            self.transcript.push(ApiMessage {
+                system: system.take(),
+                tool_call_id: Some(planned.call.call.clone()),
+                ..ApiMessage::new(ChatRole::Tool, ApiContent::Text(planned.result.to_output()))
+            });
+        }
+        if let Some(input) = input {
+            self.transcript.push(ApiMessage {
+                system: system.take(),
+                followup,
+                ..ApiMessage::new(ChatRole::User, input)
+            });
+        }
+        self.transcript.push(ApiMessage {
+            usage,
+            command_turn: (!calls.is_empty()).then_some(turn),
+            tool_calls: calls,
+            ..ApiMessage::new(ChatRole::Assistant, ApiContent::Text(reply))
+        });
+        self.commands = commands;
+        Ok(())
+    }
+
+    /// Call once after loading a saved chat. An attempt without a recorded result becomes
+    /// unknown; nothing is approved, prepared or started. Returns how many were interrupted.
+    pub fn restore_commands(&mut self, now: &str) -> usize {
+        self.commands.restore(now)
+    }
+}
+
+/// Set on an unsaved proposal whose file a command changed underneath it.
+pub const CHANGED_BY_COMMAND: &str =
+    "Changed on disk after this was proposed. Review it against the current file before saving.";
+
+/// Unsaved proposals and the last save, checked against the disk after a command ran.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Revalidated {
+    /// The pending proposals, with a conflict on each whose baseline no longer holds.
+    pub changes: Vec<Change>,
+    /// Paths that became conflicts in this check.
+    pub conflicts: Vec<String>,
+    /// A file of the last save differs from what was saved: undoing it would overwrite
+    /// later work, so Undo must no longer be offered.
+    pub undo_stale: bool,
+}
+
+/// Re-checks what a command may have invalidated. `disk` maps each checked path to its text
+/// now, or `None` when it no longer exists as readable text. A path that is not in `disk` was
+/// not checked and is left alone.
+///
+/// A proposal is never applied or adjusted here: one whose file changed is kept, marked as a
+/// conflict, and thereby left out of Save until the user has reviewed it.
+pub fn revalidate_after_command(
+    pending: &[Change],
+    saved: &[Change],
+    disk: &BTreeMap<String, Option<String>>,
+) -> Revalidated {
+    let mut conflicts = Vec::new();
+    let changes = pending
+        .iter()
+        .cloned()
+        .map(|mut change| {
+            let Some(now) = disk.get(&change.path) else {
+                return change;
+            };
+            let holds = match change.status {
+                // A new file is still new only if nothing was created in its place.
+                ChangeStatus::A => now.is_none(),
+                ChangeStatus::M | ChangeStatus::D => now.as_deref() == Some(change.old.as_str()),
+            };
+            if !holds && change.conflict.is_none() {
+                change.conflict = Some(CHANGED_BY_COMMAND.to_owned());
+                conflicts.push(change.path.clone());
+            }
+            change
+        })
+        .collect();
+    let undo_stale = saved.iter().any(|change| {
+        let Some(now) = disk.get(&change.path) else {
+            return false;
+        };
+        match change.status {
+            ChangeStatus::D => now.is_some(),
+            ChangeStatus::A | ChangeStatus::M => now.as_deref() != Some(change.new.as_str()),
+        }
+    });
+    Revalidated {
+        changes,
+        conflicts,
+        undo_stale,
+    }
+}
+
+/// What the model will be told when the conversation continues, in one sentence: shown next
+/// to the button that continues. Empty when there is nothing to tell.
+pub fn continuation_summary(answers: &[PlannedAnswer]) -> String {
+    let count = |status: &dyn Fn(&str) -> bool| {
+        answers
+            .iter()
+            .filter(|planned| status(&planned.result.status))
+            .count()
+    };
+    let plural = |n: usize, one: &str, many: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {many}")),
+    };
+    let known = ["rejected", "notRun", "notShared"];
+    let parts: Vec<String> = [
+        plural(
+            count(&|status| !known.contains(&status)),
+            "result shared",
+            "results shared",
+        ),
+        plural(
+            count(&|status| status == "rejected"),
+            "rejected",
+            "rejected",
+        ),
+        plural(count(&|status| status == "notRun"), "not run", "not run"),
+        plural(
+            count(&|status| status == "notShared"),
+            "ran without sharing its result",
+            "ran without sharing their results",
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("The model will be told: {}.", parts.join(", "))
+    }
+}
+
+/// The results of a planned continuation as the request's tool results.
+pub fn tool_results(answers: &[PlannedAnswer]) -> Vec<ToolResult> {
+    answers
+        .iter()
+        .map(|planned| ToolResult {
+            call_id: planned.call.call.clone(),
+            output: planned.result.to_output(),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +516,9 @@ pub struct UiMessage {
     /// Assistant: the context the model asked for in this reply, and what it got.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reads: Option<ReadLog>,
+    /// Assistant: the model turn whose command proposals belong under this reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_turn: Option<String>,
 }
 
 /// What a read request fetched (shown as one row under the reply).
@@ -329,6 +653,7 @@ impl UiMessage {
             usage: None,
             cost: None,
             reads: None,
+            command_turn: None,
         }
     }
 
@@ -396,7 +721,12 @@ impl SavedThread {
     }
 
     pub fn turns(&self) -> usize {
-        self.thread.transcript.len() / 2
+        // One turn per assistant reply; command results are not turns of their own.
+        self.thread
+            .transcript
+            .iter()
+            .filter(|message| message.role == ChatRole::Assistant)
+            .count()
     }
 
     /// Legacy chats stored only per-reply proposals. Keep the latest version of every path,
@@ -610,6 +940,9 @@ pub fn history(thread: &ThreadState) -> Vec<LlmMessage> {
         .map(|m| LlmMessage {
             role: m.role,
             content: to_message_content(&m.content),
+            // Calls and results go back as history data, never as work to perform.
+            tool_calls: m.tool_calls.clone(),
+            tool_call_id: m.tool_call_id.clone(),
         })
         .collect()
 }
@@ -1272,5 +1605,440 @@ mod tests {
         );
         assert_eq!(notes[0].1, Tone::Warn);
         assert_eq!(notes.len(), 2);
+    }
+
+    #[test]
+    fn a_command_that_changed_files_turns_stale_proposals_into_conflicts() {
+        let change = |path: &str, status: ChangeStatus, old: &str, new: &str| Change {
+            path: path.into(),
+            status,
+            old: old.into(),
+            new: new.into(),
+            conflict: None,
+            edits: None,
+            unplaced: None,
+        };
+        let pending = vec![
+            change("same.rs", ChangeStatus::M, "v1", "v2"),
+            change("touched.rs", ChangeStatus::M, "v1", "v2"),
+            change("new.rs", ChangeStatus::A, "", "fresh"),
+            change("created.rs", ChangeStatus::A, "", "fresh"),
+            change("gone.rs", ChangeStatus::D, "v1", ""),
+            change("unchecked.rs", ChangeStatus::M, "v1", "v2"),
+        ];
+        let saved = vec![change("saved.rs", ChangeStatus::M, "before", "after")];
+        let disk: BTreeMap<String, Option<String>> = [
+            ("same.rs", Some("v1")),
+            ("touched.rs", Some("v1 + formatted")),
+            ("new.rs", None),
+            ("created.rs", Some("the command made this")),
+            ("gone.rs", None),
+            ("saved.rs", Some("after")),
+        ]
+        .into_iter()
+        .map(|(path, text)| (path.to_owned(), text.map(str::to_owned)))
+        .collect();
+
+        let checked = revalidate_after_command(&pending, &saved, &disk);
+        assert_eq!(checked.conflicts, ["touched.rs", "created.rs", "gone.rs"]);
+        // Nothing was applied, dropped or rewritten: every proposal is still there as it was.
+        assert_eq!(checked.changes.len(), pending.len());
+        for (before, after) in pending.iter().zip(&checked.changes) {
+            assert_eq!((&before.old, &before.new), (&after.old, &after.new));
+        }
+        let conflicting: Vec<bool> = checked
+            .changes
+            .iter()
+            .map(|change| change.conflict.is_some())
+            .collect();
+        assert_eq!(conflicting, [false, true, false, true, true, false]);
+        assert!(!checked.undo_stale);
+
+        // The saved file changed afterwards: undoing the save would overwrite that.
+        let mut later = disk.clone();
+        later.insert("saved.rs".into(), Some("after, then generated".into()));
+        assert!(revalidate_after_command(&pending, &saved, &later).undo_stale);
+        // A file the save deleted was recreated.
+        let deleted = vec![change("removed.rs", ChangeStatus::D, "old", "")];
+        let mut recreated = BTreeMap::new();
+        recreated.insert("removed.rs".to_owned(), Some("back".to_owned()));
+        assert!(revalidate_after_command(&[], &deleted, &recreated).undo_stale);
+        recreated.insert("removed.rs".to_owned(), None);
+        assert!(!revalidate_after_command(&[], &deleted, &recreated).undo_stale);
+
+        // An existing conflict keeps its own reason and is not reported again.
+        let mut known = pending.clone();
+        known[1].conflict = Some("earlier reason".into());
+        let again = revalidate_after_command(&known, &[], &disk);
+        assert_eq!(again.changes[1].conflict.as_deref(), Some("earlier reason"));
+        assert_eq!(again.conflicts, ["created.rs", "gone.rs"]);
+    }
+
+    // ----- Command proposals in the saved chat -----
+
+    mod commands {
+        use super::*;
+        use crate::commands::execution::{
+            CapturedOutput, ExecutionProgress, ExecutionResult, ExecutionStatus,
+        };
+        use crate::commands::history::{Answer, ShareChoice};
+        use crate::llm::tools::{PROPOSE_COMMAND, validate_transcript};
+        use crate::llm::types::ConversationRequest;
+        use crate::logic::prompt::content_text;
+        use serde_json::json;
+
+        const NOW: &str = "2026-11-10T12:00:00Z";
+
+        fn arguments(program: &str) -> String {
+            json!({
+                "version": 1,
+                "purpose": "Check the project.",
+                "command": { "kind": "exec", "program": program, "args": ["test"] },
+                "cwd": ".",
+                "timeoutSeconds": 60,
+                "environment": []
+            })
+            .to_string()
+        }
+
+        fn call(id: &str, program: &str) -> ToolCall {
+            ToolCall {
+                call_id: id.into(),
+                name: PROPOSE_COMMAND.into(),
+                arguments: arguments(program),
+                problem: None,
+            }
+        }
+
+        /// A chat whose last reply proposed these calls.
+        fn asked(calls: Vec<ToolCall>) -> ThreadState {
+            let mut thread = ThreadState::fresh();
+            thread
+                .record_command_round(
+                    Vec::new(),
+                    Some(ApiContent::Text("Check it".into())),
+                    "system",
+                    false,
+                    String::new(),
+                    calls,
+                    None,
+                    &Location::Local,
+                    NOW,
+                )
+                .unwrap();
+            thread
+        }
+
+        fn id_of(thread: &ThreadState, call: &str) -> CallId {
+            CallId {
+                turn: thread.unanswered_calls().0.unwrap().to_owned(),
+                call: call.into(),
+            }
+        }
+
+        fn ran(status: ExecutionStatus) -> ExecutionResult {
+            let stream = |text: &str| CapturedOutput {
+                text: text.into(),
+                bytes_seen: text.len() as u64,
+                bytes_retained: text.len(),
+                truncated: false,
+                complete: true,
+                read_failed: false,
+            };
+            ExecutionResult {
+                status,
+                exit_code: Some(0),
+                spawned: true,
+                cancelled: false,
+                timed_out: false,
+                output: ExecutionProgress {
+                    stdout: stream("PRIVATE-OUTPUT\n"),
+                    stderr: stream(""),
+                },
+                detail: None,
+                history_error: None,
+            }
+        }
+
+        /// The request the next turn would send, checked the way the client checks it.
+        fn next_request(thread: &ThreadState, answers: &[PlannedAnswer]) -> ConversationRequest {
+            let request = ConversationRequest {
+                system: "system".into(),
+                history: history(thread),
+                input: MessageContent::Text(String::new()),
+                previous_response_id: None,
+                command_tool: true,
+                tool_results: tool_results(answers),
+            };
+            validate_transcript(&request).unwrap();
+            request
+        }
+
+        #[test]
+        fn a_reply_with_calls_is_recorded_as_proposals_awaiting_review() {
+            let mut unusable = call("call_2", "git");
+            unusable.name = "run_now".into();
+            let thread = asked(vec![call("call_1", "cargo"), unusable]);
+
+            // The transcript holds the calls natively; nothing was written as prose.
+            let reply = thread.transcript.last().unwrap();
+            assert_eq!(reply.role, ChatRole::Assistant);
+            assert_eq!(content_text(&reply.content), "");
+            assert_eq!(reply.tool_calls.len(), 2);
+            assert!(reply.command_turn.is_some());
+
+            let (turn, pending) = thread.unanswered_calls();
+            assert_eq!(pending.len(), 2);
+            let records: Vec<_> = thread.commands.of_turn(turn.unwrap()).collect();
+            assert_eq!(records[0].status(), RecordStatus::NeedsReview);
+            assert_eq!(records[1].status(), RecordStatus::Unusable);
+            assert!(thread.commands.running().is_none());
+        }
+
+        #[test]
+        fn every_call_is_answered_truthfully_when_the_conversation_continues() {
+            let mut thread = asked(vec![
+                call("call_rejected", "a"),
+                call("call_shared", "b"),
+                call("call_withheld", "c"),
+                call("call_undecided", "d"),
+            ]);
+            thread
+                .commands
+                .reject(&id_of(&thread, "call_rejected"), NOW)
+                .unwrap();
+            let mut shared = BTreeMap::new();
+            for name in ["call_shared", "call_withheld"] {
+                let id = id_of(&thread, name);
+                let invocation = InvocationId::new();
+                let request = thread.command(&id).unwrap().request().unwrap().clone();
+                thread
+                    .commands
+                    .begin(&id, invocation.clone(), request, NOW)
+                    .unwrap();
+                let result = ran(ExecutionStatus::Success);
+                thread
+                    .commands
+                    .finish(&id, &invocation, &result, NOW)
+                    .unwrap();
+                if name == "call_shared" {
+                    let attempt = &thread.command(&id).unwrap().attempts[0];
+                    let choice = ShareChoice {
+                        stdout: true,
+                        stderr: true,
+                        ..ShareChoice::default()
+                    };
+                    shared.insert(
+                        name.to_owned(),
+                        SharedResult::observed(&id, attempt, &result, &choice),
+                    );
+                }
+            }
+
+            let answers = thread.plan_answers(&shared).unwrap();
+            assert_eq!(
+                continuation_summary(&answers),
+                "The model will be told: 1 result shared, 1 rejected, 1 not run, \
+                 1 ran without sharing its result."
+            );
+            assert_eq!(continuation_summary(&[]), "");
+            let statuses: Vec<&str> = answers
+                .iter()
+                .map(|planned| planned.result.status.as_str())
+                .collect();
+            assert_eq!(statuses, ["rejected", "success", "notShared", "notRun"]);
+            // Planning changed nothing, and the request it leads to is well-formed.
+            assert!(
+                thread
+                    .commands
+                    .records()
+                    .iter()
+                    .all(|r| r.answered.is_none())
+            );
+            let request = next_request(&thread, &answers);
+            assert_eq!(request.tool_results.len(), 4);
+            // Only the result the user chose to share carries output or an outcome.
+            let outputs: Vec<&str> = request
+                .tool_results
+                .iter()
+                .map(|result| result.output.as_str())
+                .collect();
+            assert!(outputs[1].contains("PRIVATE-OUTPUT"));
+            assert!(!outputs[2].contains("PRIVATE-OUTPUT") && !outputs[2].contains("exitCode"));
+
+            thread
+                .record_command_round(
+                    answers,
+                    None,
+                    "system",
+                    false,
+                    "Thanks.".into(),
+                    Vec::new(),
+                    None,
+                    &Location::Local,
+                    NOW,
+                )
+                .unwrap();
+            // Nothing is left unanswered, and the whole transcript is valid history.
+            assert!(thread.unanswered_calls().1.is_empty());
+            next_request(&thread, &[]);
+            let answered: Vec<_> = thread
+                .commands
+                .records()
+                .iter()
+                .map(|record| record.answered.as_ref().unwrap().answer.clone())
+                .collect();
+            assert_eq!(answered[0], Answer::Rejected);
+            assert!(matches!(
+                answered[1],
+                Answer::Outcome {
+                    stdout_shared: true,
+                    stderr_shared: true,
+                    redacted: false,
+                    ..
+                }
+            ));
+            assert!(matches!(answered[2], Answer::Withheld { .. }));
+            assert!(matches!(answered[3], Answer::NotRun { .. }));
+            // The undecided proposal is closed: it can no longer be started.
+            assert_eq!(thread.commands.records()[3].status(), RecordStatus::NotRun);
+            assert_eq!(thread.transcript.len(), 2 + 4 + 1);
+        }
+
+        #[test]
+        fn a_running_command_blocks_the_conversation_from_continuing() {
+            let mut thread = asked(vec![call("call_1", "cargo")]);
+            let id = id_of(&thread, "call_1");
+            let request = thread.command(&id).unwrap().request().unwrap().clone();
+            thread
+                .commands
+                .begin(&id, InvocationId::new(), request, NOW)
+                .unwrap();
+            assert!(thread.plan_answers(&BTreeMap::new()).is_err());
+        }
+
+        #[test]
+        fn a_failed_round_records_nothing() {
+            let mut thread = asked(vec![call("call_1", "cargo")]);
+            let before = thread.clone();
+            let mut answers = thread.plan_answers(&BTreeMap::new()).unwrap();
+            // An answer that does not match what was recorded for the call.
+            answers[0].result = SharedResult::rejected(&answers[0].call);
+            assert!(
+                thread
+                    .record_command_round(
+                        answers,
+                        None,
+                        "system",
+                        false,
+                        "x".into(),
+                        Vec::new(),
+                        None,
+                        &Location::Local,
+                        NOW,
+                    )
+                    .is_err()
+            );
+            assert_eq!(thread, before);
+        }
+
+        #[test]
+        fn a_saved_chat_keeps_calls_and_shared_results_but_no_unshared_output() {
+            let mut thread = asked(vec![call("call_1", "cargo")]);
+            let id = id_of(&thread, "call_1");
+            let invocation = InvocationId::new();
+            let request = thread.command(&id).unwrap().request().unwrap().clone();
+            thread
+                .commands
+                .begin(&id, invocation.clone(), request, NOW)
+                .unwrap();
+            thread
+                .commands
+                .finish(&id, &invocation, &ran(ExecutionStatus::Success), NOW)
+                .unwrap();
+
+            // Ran, not shared: the output exists only in memory.
+            let saved =
+                serde_json::to_string(&SavedThread::new(thread.clone(), Vec::new())).unwrap();
+            assert!(!saved.contains("PRIVATE-OUTPUT"));
+            for absent in ["approval", "permit", "hostEpoch", "environmentPolicy"] {
+                assert!(!saved.contains(absent), "{absent}");
+            }
+            let restored: SavedThread = serde_json::from_str(&saved).unwrap();
+            assert_eq!(restored.thread, thread);
+
+            // Continuing without sharing tells the model only that it ran.
+            let answers = thread.plan_answers(&BTreeMap::new()).unwrap();
+            thread
+                .record_command_round(
+                    answers,
+                    Some(ApiContent::Text("Never mind.".into())),
+                    "system",
+                    false,
+                    "OK.".into(),
+                    Vec::new(),
+                    None,
+                    &Location::Local,
+                    NOW,
+                )
+                .unwrap();
+            let saved = serde_json::to_string(&SavedThread::new(thread, Vec::new())).unwrap();
+            assert!(!saved.contains("PRIVATE-OUTPUT"));
+            assert!(saved.contains("notShared"));
+        }
+
+        #[test]
+        fn restoring_a_chat_interrupted_mid_command_leaves_it_unknown_and_unapproved() {
+            let mut thread = asked(vec![call("call_1", "cargo"), call("call_2", "git")]);
+            let id = id_of(&thread, "call_1");
+            let request = thread.command(&id).unwrap().request().unwrap().clone();
+            thread
+                .commands
+                .begin(&id, InvocationId::new(), request, NOW)
+                .unwrap();
+
+            let saved = serde_json::to_value(SavedThread::new(thread, Vec::new())).unwrap();
+            let mut restored: SavedThread = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored.thread.restore_commands("2026-11-11T08:00:00Z"), 1);
+
+            let thread = &restored.thread;
+            assert_eq!(
+                thread.command(&id).unwrap().status(),
+                RecordStatus::Finished(ExecutionStatus::Unknown)
+            );
+            assert!(thread.commands.running().is_none());
+            assert_eq!(
+                thread.command(&id_of(thread, "call_2")).unwrap().status(),
+                RecordStatus::NeedsReview
+            );
+            // The conversation can continue; the interrupted command is reported as
+            // withheld, never as a made-up result.
+            let answers = thread.plan_answers(&BTreeMap::new()).unwrap();
+            assert_eq!(answers[0].result.status, "notShared");
+            assert_eq!(answers[1].result.status, "notRun");
+        }
+
+        #[test]
+        fn chats_saved_before_command_proposals_still_load_and_save_unchanged() {
+            let old = json!({
+                "version": 1,
+                "id": "t1",
+                "responseId": null,
+                "api": null,
+                "transcript": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"}
+                ],
+                "fileVersions": {},
+                "messages": []
+            });
+            let saved: SavedThread = serde_json::from_value(old).unwrap();
+            assert!(saved.thread.commands.is_empty());
+            assert!(saved.thread.unanswered_calls().1.is_empty());
+            let again = serde_json::to_value(&saved).unwrap();
+            assert!(again.get("commands").is_none());
+            assert!(again["transcript"][1].get("toolCalls").is_none());
+            assert_eq!(saved.turns(), 1);
+        }
     }
 }

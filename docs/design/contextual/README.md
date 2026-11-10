@@ -1,6 +1,6 @@
 # Contextual — design system
 
-Contextual is a local desktop chat client for code. You tick the project files the model should see, ask for a change, review the proposed edits as a GitHub-style diff, and apply what you want. The model talks to a self-hosted Azure AI Foundry deployment and **never writes to disk**: every write is an explicit, deterministic action by the user (Apply, Copy file content, Copy diff), and every write can be undone.
+Contextual is a local desktop chat client for code. You tick the project files the model should see, ask for a change, review the proposed edits as a GitHub-style diff, and apply what you want. The model talks to a self-hosted Azure AI Foundry deployment and **never writes to disk by itself**: file proposals are written only by an explicit, deterministic action by the user (Apply, Copy file content, Copy diff), and a save can be undone. Where command execution is enabled, the model can also *propose* a command; it runs only when the user approves that exact command, and what a command does is not covered by Save/Undo (see `components/CommandCard`).
 
 The visual language borrows from VS Code and GitHub's pull-request view on purpose: the people using Contextual live in those tools all day, so code here looks and reads exactly like code there. Dark is the default theme; Light and Moss are full variants. The title-bar toggle and theme shortcut cycle Dark → Light → Moss → Dark and remember the selection. System remains a separate Settings preference for OS appearance.
 
@@ -19,7 +19,7 @@ The **Screens** cards show the app end to end, using a sample .NET clean-archite
 
 ## Principles
 
-1. **The user writes, not the model.** Nothing touches disk without a button press that names the count ("Apply 4 files"). The status bar says so all the time: *Read-only: nothing is written until you apply*.
+1. **The user writes, not the model.** A file proposal touches disk only through a button press that names the count ("Apply 4 files"). A proposed command runs only through Run on its review card, which approves exactly what the card shows. The status bar says so all the time, in scoped words: *File proposals are saved only with Save.* and, where commands can run, *Commands run only with your approval; their effects are not covered by Save/Undo.* The app does not claim that nothing is ever written or that every write can be undone.
 2. **Show the cost before it's spent.** Every file shows its token count; the context bar shows the total, the share of the deployment's limit and an estimated price per message, and it turns amber at 75% and red at 95%.
 3. **Code looks like code.** Real syntax highlighting, line numbers, indent guides, and diffs with word-level highlights. Never plain text, never placeholder lines.
 4. **Dense but calm.** VS Code row density (22px rows, 13px text), hairline borders instead of shadows, one accent colour. Colour is spent on code and on status, not on chrome.

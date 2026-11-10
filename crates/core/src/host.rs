@@ -69,6 +69,19 @@ pub trait WorkspaceHost: Send + Sync {
             "Command execution is unavailable on this workspace host.",
         ))
     }
+    /// Explicitly reconciles this project's unresolved command history on this host.
+    ///
+    /// Establishes with evidence that earlier invocations no longer run, and only then
+    /// lets a new, separately approved command be admitted. It launches nothing, restores
+    /// no approval, and leaves blocked whatever it cannot establish.
+    async fn reconcile_commands(
+        &self,
+        _root: &str,
+    ) -> Result<crate::commands::execution::ReconciliationReport> {
+        Err(Error::tool(
+            "Command reconciliation is unavailable on this workspace host.",
+        ))
+    }
     /// Source Control and pull requests. Use the typed helpers on `dyn WorkspaceHost` (`git_status`, `pr_compare`…).
     async fn git(&self, call: GitCall) -> Result<GitReply>;
 }
@@ -242,9 +255,9 @@ impl LocalHost {
     /// Creates a fresh host with an explicitly supplied managed backend and durable journal.
     ///
     /// This is a host-service integration seam, not an app setting or a native backend
-    /// selector. The runner must meet ManagedCommandRunner's ownership contract. Linux and
-    /// macOS have native runners in `commands::execution`; Windows does not yet, and
-    /// nothing constructs one at ordinary startup.
+    /// selector. The runner must meet ManagedCommandRunner's ownership contract. Linux,
+    /// macOS and Windows have native runners in `commands::execution`; nothing constructs
+    /// one at ordinary startup.
     /// Construction gives the host a fresh preparation epoch, invalidating earlier snapshots.
     pub fn with_command_backend(
         runner: Arc<dyn ManagedCommandRunner>,
@@ -355,6 +368,29 @@ impl WorkspaceHost for LocalHost {
             backend.journal.clone(),
         )
         .start(permit, scope)
+    }
+
+    async fn reconcile_commands(
+        &self,
+        root: &str,
+    ) -> Result<crate::commands::execution::ReconciliationReport> {
+        let backend = self.command_backend.clone().ok_or_else(|| {
+            Error::tool("Command reconciliation is unavailable on this workspace host.")
+        })?;
+        let allowlist = self.allowlist.clone();
+        let requested = root.to_owned();
+        let canonical = blocking(move || allowlist.check_command_root(&requested)).await?;
+        let project = crate::location::ProjectRoot {
+            location: crate::location::Location::Local,
+            path: root.to_owned(),
+        };
+        ExecutionEngine::new(
+            Arc::new(self.clone()),
+            backend.runner.clone(),
+            backend.journal.clone(),
+        )
+        .reconcile(&project, &canonical)
+        .await
     }
 
     async fn git(&self, call: GitCall) -> Result<GitReply> {

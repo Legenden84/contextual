@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::tools::{ToolCall, ToolResult, definition_tokens};
 use crate::logic::context::PICTURE_TOKENS;
 use crate::logic::format::estimate_tokens;
 
@@ -84,38 +85,64 @@ pub enum ChatRole {
     System,
     User,
     Assistant,
+    /// The answer to one tool call of the preceding assistant message.
+    Tool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: MessageContent,
+    /// Calls the assistant issued in this message. History data, never work to perform.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    /// For a `Tool` message: the call it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
-    /// Estimated content plus message framing.
+    /// Estimated content plus message framing, including any calls.
     pub fn estimated_tokens(&self) -> u64 {
-        self.content
-            .estimated_tokens()
-            .saturating_add(MESSAGE_OVERHEAD_TOKENS)
+        self.tool_calls.iter().fold(
+            self.content
+                .estimated_tokens()
+                .saturating_add(MESSAGE_OVERHEAD_TOKENS),
+            |total, call| total.saturating_add(call.estimated_tokens()),
+        )
+    }
+
+    fn plain(role: ChatRole, content: MessageContent) -> Self {
+        Self {
+            role,
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
     }
 
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: ChatRole::System,
-            content: MessageContent::Text(content.into()),
-        }
+        Self::plain(ChatRole::System, MessageContent::Text(content.into()))
     }
     pub fn user(content: impl Into<MessageContent>) -> Self {
-        Self {
-            role: ChatRole::User,
-            content: content.into(),
-        }
+        Self::plain(ChatRole::User, content.into())
     }
     pub fn assistant(content: impl Into<String>) -> Self {
+        Self::plain(ChatRole::Assistant, MessageContent::Text(content.into()))
+    }
+    /// An assistant message that issued calls; `text` may be empty for a tool-only reply.
+    pub fn assistant_calls(text: impl Into<String>, calls: Vec<ToolCall>) -> Self {
         Self {
-            role: ChatRole::Assistant,
-            content: MessageContent::Text(content.into()),
+            tool_calls: calls,
+            ..Self::assistant(text)
+        }
+    }
+    /// The answer to one call.
+    pub fn tool(call_id: impl Into<String>, output: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: Some(call_id.into()),
+            ..Self::plain(ChatRole::Tool, MessageContent::Text(output.into()))
         }
     }
 }
@@ -135,6 +162,13 @@ pub struct ConversationRequest {
     /// Last stored Azure response of this conversation, if any.
     #[serde(default)]
     pub previous_response_id: Option<String>,
+    /// Offer the `propose_command` tool in this turn. Off by default.
+    #[serde(default)]
+    pub command_tool: bool,
+    /// Answers to the calls of the last assistant message in `history`, sent before `input`.
+    /// When they are present and `input` is empty text, no user message is sent.
+    #[serde(default)]
+    pub tool_results: Vec<ToolResult>,
 }
 
 impl ConversationRequest {
@@ -144,6 +178,14 @@ impl ConversationRequest {
             .saturating_add(self.input.estimated_tokens())
             // System message, current user message, and assistant reply prefix.
             .saturating_add(3 * MESSAGE_OVERHEAD_TOKENS);
+        let current = if self.command_tool {
+            current.saturating_add(definition_tokens())
+        } else {
+            current
+        };
+        let current = self.tool_results.iter().fold(current, |total, result| {
+            total.saturating_add(result.estimated_tokens())
+        });
         self.history.iter().fold(current, |total, message| {
             total.saturating_add(message.estimated_tokens())
         })
@@ -172,6 +214,20 @@ pub enum ChatEvent {
         input_tokens: u64,
         output_tokens: u64,
         cached_tokens: u64,
+    },
+    /// One call from a response that has ended. Sent before `Usage` and `Done`, in the
+    /// provider's order. A call with a `problem` can never become a proposal, but it still
+    /// has to be answered in the transcript. Receiving this event runs nothing.
+    ToolCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+        problem: Option<String>,
+    },
+    /// The deployment refused the tool declaration. The turn continues without it; text
+    /// that resembles a command request stays inert.
+    ToolsUnsupported {
+        message: String,
     },
     Done {
         finish_reason: Option<String>,
@@ -245,6 +301,8 @@ mod tests {
             history: vec![ChatMessage::user("abcd"), ChatMessage::assistant("abcd")],
             input: "abcd".into(),
             previous_response_id: Some("stored-response".into()),
+            command_tool: false,
+            tool_results: Vec::new(),
         };
         assert_eq!(
             request.estimated_input_tokens(),
@@ -259,6 +317,8 @@ mod tests {
             history: vec![ChatMessage::user("An earlier file")],
             input: "Continue".into(),
             previous_response_id: None,
+            command_tool: false,
+            tool_results: Vec::new(),
         };
         let full = request.estimated_input_tokens();
         request.previous_response_id = Some("stored-response".into());

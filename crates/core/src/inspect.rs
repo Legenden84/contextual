@@ -1,8 +1,16 @@
 //! The conversation round by round, exactly as sent and received (the Inspect view): what went
 //! in (system prompt, project tree, files, read answers, the request) and what came back (read
 //! requests, prose, edit blocks), raw.
+//!
+//! Command proposals appear as what they are on the wire: the model's calls on the reply
+//! side, and on the input side exactly what the model was told about each earlier call —
+//! a rejection, "not run", a withheld result, or the outcome with whatever output the user
+//! chose to share. Each is labelled from the chat's command history.
 
 use crate::chat::{ApiMessage, ThreadState, Usage, touched_paths};
+use crate::commands::CallId;
+use crate::commands::execution::ExecutionStatus;
+use crate::commands::history::{Answer, CommandRecord, RecordStatus};
 use crate::llm::types::ChatRole;
 use crate::logic::format::estimate_tokens;
 use crate::logic::prompt::{ApiContent, content_images, content_text};
@@ -24,6 +32,82 @@ pub struct Section {
     pub tokens: u64,
 }
 
+/// One command call the model issued in a reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoundCall {
+    pub call_id: String,
+    pub tool: String,
+    /// The arguments exactly as the model wrote them.
+    pub arguments: String,
+    /// Why it could never become a command, if so.
+    pub problem: Option<String>,
+    /// Where the proposal stands now: "Needs review", "Rejected", "Exit code 3"…
+    pub status: String,
+}
+
+/// What the model was told about one earlier call, as part of a round's input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoundResult {
+    pub call_id: String,
+    /// Exactly the text that was sent.
+    pub output: String,
+    /// "Rejected", "Not run", "Result not shared", "Outcome shared, stdout omitted"…
+    pub label: String,
+}
+
+fn status_label(record: &CommandRecord) -> String {
+    match record.status() {
+        RecordStatus::Unusable => "Could not be read as a command".into(),
+        RecordStatus::NeedsReview => "Needs review".into(),
+        RecordStatus::Rejected => "Rejected".into(),
+        RecordStatus::Running => "Running".into(),
+        RecordStatus::NotRun => "Not run".into(),
+        RecordStatus::Finished(status) => {
+            let observed = record.attempts.last().and_then(|attempt| attempt.observed);
+            match (status, observed) {
+                (_, Some(observed)) if observed.interrupted => {
+                    "Outcome unknown (the app stopped while it ran)".into()
+                }
+                (ExecutionStatus::Success, _) => "Succeeded".into(),
+                (ExecutionStatus::Failure, Some(observed)) => match observed.exit_code {
+                    Some(code) => format!("Exit code {code}"),
+                    None => "Failed".into(),
+                },
+                (ExecutionStatus::Failure, None) => "Failed".into(),
+                (ExecutionStatus::FailedToStart, _) => "Did not start".into(),
+                (ExecutionStatus::Cancelled, _) => "Stopped".into(),
+                (ExecutionStatus::TimedOut, _) => "Timed out".into(),
+                (ExecutionStatus::Unknown, _) => "Outcome unknown".into(),
+            }
+        }
+    }
+}
+
+fn answer_label(answer: &Answer) -> String {
+    match answer {
+        Answer::Rejected => "Rejected".into(),
+        Answer::NotRun { .. } => "Not run".into(),
+        Answer::Withheld { .. } => "Ran; result not shared".into(),
+        Answer::Outcome {
+            stdout_shared,
+            stderr_shared,
+            redacted,
+            ..
+        } => {
+            let mut label = match (stdout_shared, stderr_shared) {
+                (true, true) => "Outcome and output shared".to_owned(),
+                (true, false) => "Outcome shared, stderr omitted".to_owned(),
+                (false, true) => "Outcome shared, stdout omitted".to_owned(),
+                (false, false) => "Outcome shared, output omitted".to_owned(),
+            };
+            if *redacted {
+                label.push_str(", edited before sharing");
+            }
+            label
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Round {
     /// 1-based.
@@ -41,6 +125,10 @@ pub struct Round {
     pub usage: Option<Usage>,
     /// Still streaming.
     pub live: bool,
+    /// What the model was told about earlier calls in this round's input, in order.
+    pub results: Vec<RoundResult>,
+    /// The command calls in this round's reply, in order.
+    pub calls: Vec<RoundCall>,
 }
 
 /// Top-level sections the app writes into a turn (see `logic::prompt::build_turn`).
@@ -106,6 +194,8 @@ fn round(number: usize, input: &ApiContent, followup: bool) -> Round {
         reply: String::new(),
         usage: None,
         live: false,
+        results: Vec::new(),
+        calls: Vec::new(),
     }
 }
 
@@ -113,22 +203,82 @@ fn round(number: usize, input: &ApiContent, followup: bool) -> Round {
 pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
     let mut out = Vec::new();
     let mut system: Option<String> = None;
+    // The turn whose calls the next results answer.
+    let mut asked_turn: Option<String> = None;
     let mut msgs = thread.transcript.iter().peekable();
-    while let Some(m) = msgs.next() {
-        if m.role != ChatRole::User {
+    while let Some(first) = msgs.next() {
+        // A round's input is the answers to earlier calls, then what the user sent. Either
+        // part can be missing, but not both.
+        let mut results = Vec::new();
+        let mut changed = out.is_empty();
+        let mut message = Some(first);
+        while let Some(m) = message.filter(|m| m.role == ChatRole::Tool) {
+            if let Some(s) = &m.system {
+                system = Some(s.clone());
+                changed = true;
+            }
+            let call_id = m.tool_call_id.clone().unwrap_or_default();
+            let record = asked_turn.as_ref().and_then(|turn| {
+                thread.commands.get(&CallId {
+                    turn: turn.clone(),
+                    call: call_id.clone(),
+                })
+            });
+            results.push(RoundResult {
+                label: record
+                    .and_then(|record| record.answered.as_ref())
+                    .map_or_else(|| "Sent".into(), |answered| answer_label(&answered.answer)),
+                output: content_text(&m.content),
+                call_id,
+            });
+            message = msgs.next_if(|next| matches!(next.role, ChatRole::Tool | ChatRole::User));
+        }
+        let user = message.filter(|m| m.role == ChatRole::User);
+        if user.is_none() && results.is_empty() {
+            // A reply without an input: nothing to show as a round.
             continue;
         }
-        let changed = out.is_empty() || m.system.is_some();
-        if let Some(s) = &m.system {
+        if let Some(s) = user.and_then(|m| m.system.as_ref()) {
             system = Some(s.clone());
+            changed = true;
         }
+        let empty = ApiContent::Text(String::new());
         let reply: Option<&ApiMessage> = msgs.next_if(|r| r.role == ChatRole::Assistant);
+        asked_turn = reply.and_then(|r| r.command_turn.clone());
+        let calls = reply
+            .map(|r| {
+                r.tool_calls
+                    .iter()
+                    .map(|call| RoundCall {
+                        status: asked_turn
+                            .as_ref()
+                            .and_then(|turn| {
+                                thread.commands.get(&CallId {
+                                    turn: turn.clone(),
+                                    call: call.call_id.clone(),
+                                })
+                            })
+                            .map_or_else(|| "No record".into(), status_label),
+                        call_id: call.call_id.clone(),
+                        tool: call.name.clone(),
+                        arguments: call.arguments.clone(),
+                        problem: call.problem.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         out.push(Round {
             system: system.clone(),
             system_changed: changed,
             reply: reply.map(|r| content_text(&r.content)).unwrap_or_default(),
             usage: reply.and_then(|r| r.usage),
-            ..round(out.len() + 1, &m.content, m.followup)
+            results,
+            calls,
+            ..round(
+                out.len() + 1,
+                user.map_or(&empty, |m| &m.content),
+                user.is_some_and(|m| m.followup),
+            )
         });
     }
     if let Some(l) = live {
@@ -149,6 +299,10 @@ impl Round {
     pub fn input_label(&self) -> String {
         if self.followup {
             return "Requested context".into();
+        }
+        if self.input.trim().is_empty() && !self.results.is_empty() {
+            let n = self.results.len();
+            return format!("Command {}", if n == 1 { "result" } else { "results" });
         }
         let request = self
             .input
@@ -173,6 +327,13 @@ impl Round {
     pub fn reply_label(&self) -> String {
         if self.live {
             return "Streaming…".into();
+        }
+        if !self.calls.is_empty() {
+            let n = self.calls.len();
+            return format!(
+                "Proposed {n} {}",
+                if n == 1 { "command" } else { "commands" }
+            );
         }
         if self.reply.is_empty() {
             return "No reply".into();
@@ -296,5 +457,105 @@ mod tests {
         let r = rounds(&t, None);
         assert_eq!(r[0].system, None);
         assert_eq!(r[0].reply, "hello");
+    }
+
+    #[test]
+    fn command_calls_and_what_the_model_was_told_appear_round_by_round() {
+        use crate::commands::InvocationId;
+        use crate::commands::execution::{ExecutionProgress, ExecutionResult, ExecutionStatus};
+        use crate::llm::tools::{PROPOSE_COMMAND, ToolCall};
+        use crate::location::Location;
+        use std::collections::BTreeMap;
+
+        const NOW: &str = "2026-11-10T12:00:00Z";
+        let call = |id: &str| ToolCall {
+            call_id: id.into(),
+            name: PROPOSE_COMMAND.into(),
+            arguments: serde_json::json!({
+                "version": 1, "purpose": "Check.", "cwd": ".", "timeoutSeconds": 30,
+                "command": { "kind": "exec", "program": id, "args": [] }, "environment": []
+            })
+            .to_string(),
+            problem: None,
+        };
+        let mut t = ThreadState::fresh();
+        t.record_command_round(
+            Vec::new(),
+            Some(ApiContent::Text("Check it".into())),
+            "sys",
+            false,
+            "Two checks.".into(),
+            vec![call("call_run"), call("call_no")],
+            None,
+            &Location::Local,
+            NOW,
+        )
+        .unwrap();
+
+        let r = rounds(&t, None);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].reply_label(), "Proposed 2 commands");
+        assert_eq!(r[0].calls[0].status, "Needs review");
+        assert!(r[0].calls[0].arguments.contains("call_run"));
+
+        // One is run and fails, the other is rejected; the user continues without sharing.
+        let turn = t.unanswered_calls().0.unwrap().to_owned();
+        let id = |call: &str| CallId {
+            turn: turn.clone(),
+            call: call.into(),
+        };
+        let invocation = InvocationId::new();
+        let request = t
+            .command(&id("call_run"))
+            .unwrap()
+            .request()
+            .unwrap()
+            .clone();
+        t.commands
+            .begin(&id("call_run"), invocation.clone(), request, NOW)
+            .unwrap();
+        let failed = ExecutionResult {
+            status: ExecutionStatus::Failure,
+            exit_code: Some(3),
+            spawned: true,
+            cancelled: false,
+            timed_out: false,
+            output: ExecutionProgress::default(),
+            detail: None,
+            history_error: None,
+        };
+        t.commands
+            .finish(&id("call_run"), &invocation, &failed, NOW)
+            .unwrap();
+        t.commands.reject(&id("call_no"), NOW).unwrap();
+        let answers = t.plan_answers(&BTreeMap::new()).unwrap();
+        t.record_command_round(
+            answers,
+            None,
+            "sys",
+            false,
+            "Understood.".into(),
+            Vec::new(),
+            None,
+            &Location::Local,
+            NOW,
+        )
+        .unwrap();
+
+        let r = rounds(&t, None);
+        assert_eq!(r.len(), 2);
+        // The first round's calls now show how each ended.
+        assert_eq!(r[0].calls[0].status, "Exit code 3");
+        assert_eq!(r[0].calls[1].status, "Rejected");
+        // The second round's input is exactly what the model was told, correlated by call.
+        assert_eq!(r[1].input_label(), "Command results");
+        assert!(!r[1].system_changed);
+        assert_eq!(r[1].results.len(), 2);
+        assert_eq!(r[1].results[0].call_id, "call_run");
+        assert_eq!(r[1].results[0].label, "Ran; result not shared");
+        assert!(r[1].results[0].output.contains("notShared"));
+        assert_eq!(r[1].results[1].label, "Rejected");
+        assert_eq!(r[1].reply, "Understood.");
+        assert_eq!(r[1].reply_label(), "Answered");
     }
 }

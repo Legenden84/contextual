@@ -28,14 +28,16 @@ enum SettingsGroup {
     Foundry,
     Exclusions,
     OutputFormat,
+    Commands,
     Appearance,
 }
 
 impl SettingsGroup {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Foundry,
         Self::Exclusions,
         Self::OutputFormat,
+        Self::Commands,
         Self::Appearance,
     ];
 
@@ -44,6 +46,7 @@ impl SettingsGroup {
             Self::Foundry => "Azure AI Foundry",
             Self::Exclusions => "Exclusions",
             Self::OutputFormat => "Output format",
+            Self::Commands => "Commands",
             Self::Appearance => "Appearance",
         }
     }
@@ -58,7 +61,7 @@ struct Field {
 pub struct SettingsScreen {
     app: Entity<AppModel>,
     active_group: SettingsGroup,
-    group_focus: [FocusHandle; 4],
+    group_focus: [FocusHandle; 5],
     endpoint: Field,
     api_key: Field,
     api_version: Field,
@@ -77,6 +80,8 @@ pub struct SettingsScreen {
     skip_binary: bool,
     include_hidden: bool,
     reduce_motion: bool,
+    /// "Let the assistant propose commands". Applies from the next start.
+    propose_commands: bool,
     motion_focus: FocusHandle,
     /// Remove the stored key on save.
     remove_key: bool,
@@ -225,6 +230,7 @@ impl SettingsScreen {
             skip_binary: s.workspace.skip_binary,
             include_hidden: s.workspace.include_hidden,
             reduce_motion: s.reduce_motion,
+            propose_commands: s.chat.propose_commands,
             motion_focus: cx.focus_handle(),
             remove_key: false,
             env_path,
@@ -270,6 +276,7 @@ impl SettingsScreen {
         s.workspace.include_hidden = self.include_hidden;
         s.workspace.output_prompt = self.output_prompt.read(cx).value().to_string();
         s.reduce_motion = self.reduce_motion;
+        s.chat.propose_commands = self.propose_commands;
         // Appearance is saved immediately; keep the latest value, including title-bar changes.
         let key = if self.remove_key {
             Some(String::new())
@@ -867,6 +874,36 @@ impl Render for SettingsScreen {
                             .child("System prompt that tells the model how to return changes. The edit format is appended automatically."),
                     )
                     .child(div().type_style(contextual_theme::type_style::CODE_SMALL).child(Textarea::new(&self.output_prompt)))
+                    })
+                    .when(active_group == SettingsGroup::Commands, |d| {
+                        let note = |text: &'static str| {
+                            div()
+                                .mt(sp(2))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .whitespace_normal()
+                                .child(text)
+                        };
+                        d.child(self.switch_row(
+                            "propose-commands",
+                            "Let the assistant propose commands",
+                            self.propose_commands,
+                            |t| t.propose_commands = !t.propose_commands,
+                            cx,
+                        ))
+                        .child(note(
+                            "The assistant can ask to run a command in your project. You are \
+                             shown the exact command first, and it runs only when you press Run.",
+                        ))
+                        .child(note(contextual_core::commands::card::EFFECTS_NOTE))
+                        .child(note(
+                            "Running a command sends nothing to the assistant. You choose \
+                             afterwards whether to share its result.",
+                        ))
+                        .child(note(
+                            "Off by default. Takes effect the next time you start Contextual, \
+                             after you save settings.",
+                        ))
                     })
                     .when(active_group == SettingsGroup::Appearance, |d| {
                         d.child(div().flex().gap(sp(1)).children(theme_buttons))

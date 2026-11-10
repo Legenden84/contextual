@@ -338,7 +338,19 @@ impl WorkspaceScreen {
             let (project, host) = (project.clone(), host.clone());
             cx.new(|cx| ScmModel::new(project, host, cx))
         });
-        let chat = cx.new(|cx| ChatModel::new(project.clone(), host, cx));
+        let commands = {
+            let location = project.read(cx).location.clone();
+            app.read(cx).commands_enabled(&location)
+        };
+        let chat = cx.new(|cx| {
+            let mut chat = ChatModel::new(project.clone(), host, cx);
+            chat.commands_enabled = commands;
+            // A command may change any file: afterwards the project is scanned again,
+            // which also refreshes Source Control.
+            let rescan_app = app.clone();
+            chat.on_files_changed(move |cx| rescan_app.update(cx, |a, cx| a.rescan(cx)));
+            chat
+        });
         let diffs = cx.new(|_| DiffStore::default());
         let mut subs = subs;
         let mut chat_state = WorkspaceChatState::read(chat.read(cx));

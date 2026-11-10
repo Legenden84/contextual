@@ -2,30 +2,37 @@
 //! proposed changes and saving them. Pure steps come from `contextual_core::chat`; this model
 //! runs the async ones (read files through the host, stream from Foundry, repair, save, undo).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use contextual_core::chat::{
     self, MessageImage, PreparedTurn, ReadLog, STOPPED, SavedThread, ThreadState, Tone,
     TurnOptions, UiMessage, Usage,
 };
+use contextual_core::commands::execution::{ExecutionProgress, ExecutionResult};
+use contextual_core::commands::history::{RecordStatus, ShareChoice, SharedResult};
+use contextual_core::commands::{CallId, CommandRequest, LaunchPermit, ReviewPlan};
 use contextual_core::host::WorkspaceHost;
 use contextual_core::inspect::LiveRound;
+use contextual_core::llm::ToolCall;
 use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, RepairInput};
 use contextual_core::llm::{FoundryClient, FoundryConfig};
+use contextual_core::location::ProjectRoot;
 use contextual_core::logic::changes::ChangeContext;
 use contextual_core::logic::context::LiveContextTokens;
 use contextual_core::logic::edits::format_edits;
 use contextual_core::logic::format::estimate_tokens;
 use contextual_core::logic::images::Attachment;
 use contextual_core::logic::markdown::Block;
-use contextual_core::logic::prompt::{system_prompt, with_reads};
+use contextual_core::logic::prompt::ApiContent;
+use contextual_core::logic::prompt::{system_prompt, with_commands, with_reads};
 use contextual_core::logic::reads::{self, LIMITS, ReadRequest, Resolved};
 use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
 use contextual_core::threads::{ThreadStore, ThreadSummary};
+use contextual_protocol::commands::PrepareCommand;
 use contextual_protocol::fs::{Apply, ApplyChange, ChangeStatus as WireStatus, ReadFiles, Undo};
 use gpui_kit::{App, Context, Entity, Subscription, Task};
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::runtime;
 use crate::state::{Project, Tab};
@@ -93,6 +100,35 @@ pub struct SendEnv {
     pub auto: bool,
     /// The skills the model may load (system prompt), when `auto`.
     pub skill_index: String,
+    /// Offer the command-proposal tool in this turn (development switch).
+    pub commands: bool,
+}
+
+/// Called when a command may have changed files.
+type FilesChanged = std::rc::Rc<dyn Fn(&mut App)>;
+
+/// What a command card needs beyond what is recorded: transient, never saved.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CardRuntime {
+    /// The host is preparing the proposal.
+    pub preparing: bool,
+    /// Run was pressed and the launch is being set up.
+    pub starting: bool,
+    pub error: Option<String>,
+}
+
+/// The one command that runs in this chat.
+struct RunningCommand {
+    call: CallId,
+    stop: CancellationToken,
+    /// The latest bounded output, shown while it runs. In memory only.
+    progress: ExecutionProgress,
+}
+
+/// What the background launch reports back while it runs.
+enum Launch {
+    Started,
+    Progress(ExecutionProgress),
 }
 
 /// Read rounds of one user message.
@@ -111,6 +147,8 @@ struct Turn {
     /// The project tree version this turn sends (recorded when it completes).
     tree_version: Option<String>,
     rounds: Rounds,
+    /// The turn only returns command results: the user typed nothing.
+    results_only: bool,
 }
 
 /// The reads to answer a request with.
@@ -191,6 +229,23 @@ pub struct ChatModel {
     pub live: Option<LiveRound>,
     /// Small, incremental gauge estimate; never persisted or added to stored history.
     pub live_context: Option<LiveContextTokens>,
+    /// Approved commands can run for this project's host (development switch).
+    pub commands_enabled: bool,
+    /// Identifies this opening of the project to the host's command preparation.
+    project_epoch: String,
+    command_cards: HashMap<CallId, CardRuntime>,
+    running: Option<RunningCommand>,
+    /// Results the user chose to share when the conversation continues, by provider call
+    /// identity. In memory only until they are sent.
+    staged_shares: BTreeMap<String, SharedResult>,
+    /// Cancels the command being launched or running when this chat goes away with its
+    /// project, so that nothing keeps running unobserved.
+    command_scope: Option<DropGuard>,
+    /// Turns true when the host has finished with the running command, cleanup included.
+    command_done: Option<tokio::sync::watch::Receiver<bool>>,
+    /// Told when a command may have changed files, so that the project is rescanned.
+    files_changed: Option<FilesChanged>,
+    _quit_sub: Subscription,
     _navigation_sub: Subscription,
     _tasks: Vec<Task<()>>,
 }
@@ -267,6 +322,18 @@ impl ChatModel {
             pending: None,
             live: None,
             live_context: None,
+            commands_enabled: false,
+            project_epoch: format!(
+                "project-{}",
+                contextual_core::commands::InvocationId::new().as_str()
+            ),
+            command_cards: HashMap::new(),
+            running: None,
+            staged_shares: BTreeMap::new(),
+            command_scope: None,
+            command_done: None,
+            files_changed: None,
+            _quit_sub: cx.on_app_quit(Self::stop_command_for_quit),
             _navigation_sub: navigation_sub,
             _tasks: Vec::new(),
         };
@@ -388,6 +455,15 @@ impl ChatModel {
         if self.streaming() || self.saving {
             return;
         }
+        if self.command_running() {
+            // Continuing would have to answer the running command's call.
+            self.note(
+                "Not sent: a command is still running. Stop it or wait for it to finish.",
+                Tone::Warn,
+            );
+            cx.notify();
+            return;
+        }
         self.pending = None;
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
@@ -440,6 +516,7 @@ impl ChatModel {
                 prepared,
                 tree_version: tree.map(|(_, v)| v),
                 rounds: Rounds::default(),
+                results_only: false,
             };
             Self::stream(this, turn, env, rules_on, token, cx).await;
         });
@@ -501,21 +578,42 @@ impl ChatModel {
             prepared,
             tree_version,
             rounds,
+            results_only,
         } = turn;
-        let Ok((base, ai_id)) = this.update(cx, |this, cx| {
+        let Ok((base, ai_id, staged)) = this.update(cx, |this, cx| {
             let ai = UiMessage::assistant(&env.deployment.name, &now());
             let id = ai.id.clone();
             this.messages.push(ai);
             this.activity = ChatActivity::WaitingForResponse;
             cx.notify();
-            (this.thread.clone(), id)
+            (this.thread.clone(), id, this.staged_shares.clone())
         }) else {
             return;
+        };
+        // Every command call the model made in its last reply is answered with this request:
+        // rejected, not run, "ran, result not shared", or exactly the result the user chose
+        // to share in the preview. Nothing else about a command is sent.
+        let answers = match base.plan_answers(&staged) {
+            Ok(answers) => answers,
+            Err(error) => {
+                let _ = this.update(cx, |this, cx| {
+                    this.messages.retain(|m| m.id != ai_id);
+                    this.note(format!("Not sent: {}", error.message), Tone::Error);
+                    this.cancel = None;
+                    cx.notify();
+                });
+                return;
+            }
         };
 
         let mut system = system_prompt(&rules_on, &env.output_prompt);
         if env.auto {
             system = with_reads(system, &env.skill_index);
+        }
+        if env.commands {
+            // Only in turns that offer the tool: how to use it, and that proposing runs
+            // nothing. Inspect shows it with the rest of the system prompt.
+            system = with_commands(system);
         }
         let _ = this.update(cx, |this, cx| {
             this.live_context = Some(LiveContextTokens::new(&system, &prepared.input));
@@ -533,6 +631,8 @@ impl ChatModel {
             history: chat::history(&base),
             input: chat::to_message_content(&prepared.input),
             previous_response_id: base.response_id.clone(),
+            command_tool: env.commands,
+            tool_results: chat::tool_results(&answers),
         };
         let config = env.config.clone();
         let (tx, mut rx) = tokio::sync::mpsc::channel(runtime::STREAM_QUEUE_CAPACITY);
@@ -550,6 +650,10 @@ impl ChatModel {
         let mut usage: Option<Usage> = None;
         let mut done: Option<(Option<String>, Option<String>, ApiKind, bool)> = None;
         let mut failure: Option<String> = None;
+        // Command calls of the reply. They are only recorded as proposals below; receiving
+        // one prepares, approves and starts nothing.
+        let mut calls: Vec<ToolCall> = Vec::new();
+        let mut tools_unsupported: Option<String> = None;
         // Continue draining after Stop so already accepted text is retained. The bridge
         // cancels upstream independently and flushes its final buffered text before closing.
         while let Some(event) = rx.recv().await {
@@ -625,6 +729,18 @@ impl ChatModel {
                     chain_reset,
                 } => done = Some((finish_reason, response_id, api, chain_reset)),
                 ChatEvent::Error { message } => failure = Some(message),
+                ChatEvent::ToolCall {
+                    call_id,
+                    name,
+                    arguments,
+                    problem,
+                } => calls.push(ToolCall {
+                    call_id,
+                    name,
+                    arguments,
+                    problem,
+                }),
+                ChatEvent::ToolsUnsupported { message } => tools_unsupported = Some(message),
             }
         }
         if let Err(e) = streamer.await
@@ -639,21 +755,68 @@ impl ChatModel {
         let truncated = done
             .as_ref()
             .is_some_and(|d| d.0.as_deref() == Some("length"));
-        let completed = !reply.is_empty() && done.is_some() && failure.is_none();
+        // A reply can consist of command proposals alone.
+        let proposed_commands = !calls.is_empty();
+        let mut completed =
+            (!reply.is_empty() || proposed_commands) && done.is_some() && failure.is_none();
 
         // Commit the turn, then see whether the model asked for context (or edited files it
         // hadn't seen): if so, answer it in another round instead of finishing.
         let Ok(next) = this.update(cx, |this, cx| {
+            if completed {
+                if answers.is_empty() && calls.is_empty() {
+                    this.thread.record_round(
+                        prepared.input.clone(),
+                        &system_sent,
+                        prepared.followup,
+                        reply.clone(),
+                        usage,
+                    );
+                } else {
+                    let location = this.project.read(cx).location.clone();
+                    let answered: Vec<CallId> =
+                        answers.iter().map(|planned| planned.call.clone()).collect();
+                    let recorded = this.thread.record_command_round(
+                        answers,
+                        (!results_only).then(|| prepared.input.clone()),
+                        &system_sent,
+                        prepared.followup,
+                        reply.clone(),
+                        std::mem::take(&mut calls),
+                        usage,
+                        &location,
+                        &contextual_core::threads::now_iso(),
+                    );
+                    if recorded.is_ok() {
+                        // The model has its answers: what was held for sharing is done with.
+                        this.staged_shares.clear();
+                        this.project.update(cx, |project, _| {
+                            for call in &answered {
+                                project.commands.forget_output(call);
+                            }
+                        });
+                    }
+                    if let Err(error) = recorded {
+                        // Nothing was recorded: the chat is as it was before this turn.
+                        failure = Some(format!(
+                            "The reply could not be recorded. {}",
+                            error.message
+                        ));
+                        completed = false;
+                    }
+                }
+            }
             if completed && let Some((_, response_id, api, _)) = &done {
                 this.thread.response_id = response_id.clone();
                 this.thread.api = Some(*api);
-                this.thread.record_round(
-                    prepared.input.clone(),
-                    &system_sent,
-                    prepared.followup,
-                    reply.clone(),
-                    usage,
-                );
+                let turn = this
+                    .thread
+                    .transcript
+                    .last()
+                    .and_then(|message| message.command_turn.clone());
+                if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
+                    m.command_turn = turn;
+                }
                 this.thread.file_versions = prepared.versions.clone();
                 if let Some(v) = &tree_version {
                     this.thread.tree_version = Some(v.clone());
@@ -664,7 +827,9 @@ impl ChatModel {
             this.live_context = None;
             this.activity = ChatActivity::CheckingEdits;
             cx.notify();
-            if !(env.auto && completed && !truncated) {
+            // Automatic read follow-ups pause when the reply proposes commands: the next
+            // request must wait for the user's decisions.
+            if !(env.auto && completed && !truncated) || proposed_commands {
                 return None;
             }
             this.next_round(&reply, &ai_id, &rounds, usage, &env, cx)
@@ -775,7 +940,7 @@ impl ChatModel {
                 None => (None, None),
             };
             let api = done.as_ref().map(|d| d.2);
-            if reply.is_empty() {
+            if reply.is_empty() && !(completed && proposed_commands) {
                 this.messages.retain(|m| m.id != ai_id);
             } else if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
                 m.streaming = false;
@@ -801,12 +966,696 @@ impl ChatModel {
                 let merged = chat::merge_pending_changes(this.changes_ref(), &changes);
                 this.set_changes(merged);
             }
+            if let Some(message) = tools_unsupported {
+                this.note(message, Tone::Warn);
+            }
             this.cancel = None;
             cx.notify();
             if completed {
                 this.save_thread(cx);
+                this.prepare_open_commands(cx);
             }
         });
+    }
+
+    // ------------------------------------------------------------------ commands
+
+    /// A command started from this chat is running.
+    pub fn command_running(&self) -> bool {
+        self.running.is_some()
+    }
+
+    /// Registers what to do when a command may have changed files: rescan the project,
+    /// which also refreshes Source Control.
+    pub fn on_files_changed(&mut self, rescan: impl Fn(&mut App) + 'static) {
+        self.files_changed = Some(std::rc::Rc::new(rescan));
+    }
+
+    /// The app is quitting: stop the command, then give its host a bounded moment to end the
+    /// process tree and record what it observed. The framework only waits very briefly for
+    /// quit handlers, so the wait happens here, and only when a command is in flight.
+    fn stop_command_for_quit(
+        &mut self,
+        _: &mut Context<Self>,
+    ) -> impl Future<Output = ()> + 'static + use<> {
+        const QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(6);
+        const STEP: std::time::Duration = std::time::Duration::from_millis(20);
+        // Dropping the guard cancels the command's scope, in whatever phase it is.
+        drop(self.command_scope.take());
+        if let Some(done) = self.command_done.take() {
+            let deadline = std::time::Instant::now() + QUIT_WAIT;
+            // A closed channel means the launch ended without a running command.
+            while !*done.borrow() && done.has_changed().is_ok() {
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(STEP);
+            }
+        }
+        std::future::ready(())
+    }
+
+    /// After an attempt that may have run: whatever it changed on disk must not be
+    /// silently overwritten, and what the app shows must be current.
+    ///
+    /// Unsaved proposals and the last save are checked against the files as they are now.
+    /// A proposal whose file changed is kept but marked as a conflict, which leaves it out
+    /// of Save; an Undo that would overwrite later work is withdrawn. File contents
+    /// remembered for diffs are replaced by what was just read, and the project is
+    /// rescanned. File versions already sent to the model need no reset: every turn reads
+    /// the selected files again and resends those whose content changed.
+    fn refresh_after_command(&mut self, cx: &mut Context<Self>) {
+        let pending = self.changes();
+        let saved = self.undo_changes.clone();
+        let mut paths: Vec<String> = pending
+            .iter()
+            .chain(&saved)
+            .map(|change| change.path.clone())
+            .collect();
+        paths.sort();
+        paths.dedup();
+        // Originals remembered for other files may be stale now; they are read again
+        // when a reply touches them.
+        self.contents.clear();
+        self.context_revision = self.context_revision.wrapping_add(1);
+        let rescan = self.files_changed.clone();
+        if paths.is_empty() {
+            if let Some(rescan) = rescan {
+                cx.defer(move |cx| rescan(cx));
+            }
+            return;
+        }
+        let (host, root) = (self.host.clone(), self.root(cx));
+        let checked = paths.clone();
+        let job = runtime::spawn(cx, async move {
+            host.read(ReadFiles {
+                root,
+                paths: checked,
+                condense: false,
+            })
+            .await
+        });
+        cx.spawn(async move |this, cx| {
+            let read = job.await;
+            this.update(cx, |this, cx| {
+                // A file that cannot be read now counts as changed.
+                let mut disk: BTreeMap<String, Option<String>> =
+                    paths.into_iter().map(|path| (path, None)).collect();
+                if let Ok(read) = read {
+                    for file in read.files {
+                        if file.error.is_none() && file.condensed_from.is_none() {
+                            disk.insert(file.path, file.content);
+                        }
+                    }
+                }
+                for (path, text) in &disk {
+                    if let Some(text) = text {
+                        this.contents.insert(path.clone(), text.clone());
+                    }
+                }
+                let checked = chat::revalidate_after_command(&pending, &saved, &disk);
+                if !checked.conflicts.is_empty() {
+                    let n = checked.conflicts.len();
+                    this.note(
+                        format!(
+                            "The command changed {n} {} with unsaved proposals. {} marked as \
+                             {} and left out of Save until you review {}.",
+                            if n == 1 { "file" } else { "files" },
+                            if n == 1 { "It is" } else { "They are" },
+                            if n == 1 { "a conflict" } else { "conflicts" },
+                            if n == 1 { "it" } else { "them" },
+                        ),
+                        Tone::Warn,
+                    );
+                    this.set_changes(checked.changes);
+                }
+                if checked.undo_stale {
+                    this.undo_changes.clear();
+                    if this
+                        .toast
+                        .as_ref()
+                        .is_some_and(|toast| toast.backup_id.is_some())
+                    {
+                        this.toast = None;
+                    }
+                    this.note(
+                        "Undo for the last save is no longer offered: its files changed afterwards.",
+                        Tone::Warn,
+                    );
+                }
+                this.save_thread(cx);
+                cx.notify();
+                if let Some(rescan) = rescan {
+                    cx.defer(move |cx| rescan(cx));
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The result the user chose to share for this proposal, not yet sent.
+    pub fn staged_share(&self, call: &CallId) -> Option<&SharedResult> {
+        self.staged_shares.get(&call.call)
+    }
+
+    /// Builds exactly what would be shared for a finished attempt whose output is still
+    /// held. `None` omits a stream; text that differs from the capture is the user's edit.
+    fn shared_result(
+        &self,
+        call: &CallId,
+        stdout: Option<String>,
+        stderr: Option<String>,
+        cx: &App,
+    ) -> contextual_core::Result<SharedResult> {
+        let gone = || {
+            contextual_core::Error::conflict(
+                "This command's output is no longer held, so it cannot be shared.",
+            )
+        };
+        let desk = &self.project.read(cx).commands;
+        let (invocation, result) = desk.output(call).ok_or_else(gone)?;
+        let attempt = self
+            .thread
+            .commands
+            .get(call)
+            .and_then(|record| record.attempts.last())
+            .filter(|attempt| &attempt.invocation == invocation)
+            .ok_or_else(gone)?;
+        let choice = ShareChoice::from_edit(&result.output, stdout, stderr)?;
+        Ok(SharedResult::observed(call, attempt, result, &choice))
+    }
+
+    /// The text the model would receive for these choices, for the share preview.
+    pub fn share_preview(
+        &self,
+        call: &CallId,
+        stdout: Option<String>,
+        stderr: Option<String>,
+        cx: &App,
+    ) -> Result<String, String> {
+        let result = self
+            .shared_result(call, stdout, stderr, cx)
+            .map_err(|error| error.message)?;
+        serde_json::to_string_pretty(&result).map_err(|error| error.to_string())
+    }
+
+    /// The user confirmed the preview: this result is sent when the conversation continues.
+    /// Nothing is sent by this.
+    pub fn stage_share(
+        &mut self,
+        call: &CallId,
+        stdout: Option<String>,
+        stderr: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.shared_result(call, stdout, stderr, cx) {
+            Ok(result) => {
+                self.staged_shares.insert(call.call.clone(), result);
+                self.card_mut(call).error = None;
+                cx.notify();
+                true
+            }
+            Err(error) => {
+                self.fail_card(call, error.message, cx);
+                false
+            }
+        }
+    }
+
+    pub fn unstage_share(&mut self, call: &CallId, cx: &mut Context<Self>) {
+        self.staged_shares.remove(&call.call);
+        cx.notify();
+    }
+
+    /// What every open call of the last reply would be told right now.
+    pub fn pending_answers(&self) -> Vec<chat::PlannedAnswer> {
+        self.thread
+            .plan_answers(&self.staged_shares)
+            .unwrap_or_default()
+    }
+
+    /// The turn of the last reply, while it still has calls the model was not told about.
+    pub fn open_command_turn(&self) -> Option<&str> {
+        let (turn, calls) = self.thread.unanswered_calls();
+        turn.filter(|_| !calls.is_empty())
+    }
+
+    /// Continues the conversation with command results only: the user typed nothing. One
+    /// request, which answers every open call of the last reply. Any commands in the reply
+    /// come back as proposals awaiting review.
+    pub fn continue_commands(&mut self, env: SendEnv, rules_on: Vec<Rule>, cx: &mut Context<Self>) {
+        if self.streaming()
+            || self.saving
+            || self.command_running()
+            || self.open_command_turn().is_none()
+        {
+            return;
+        }
+        self.pending = None;
+        let token = CancellationToken::new();
+        self.cancel = Some(token.clone());
+        self.activity = ChatActivity::WaitingForResponse;
+        cx.notify();
+        let turn = Turn {
+            prepared: PreparedTurn {
+                input: ApiContent::Text(String::new()),
+                versions: self.thread.file_versions.clone(),
+                images: Vec::new(),
+                meta: String::new(),
+                followup: false,
+            },
+            tree_version: None,
+            rounds: Rounds::default(),
+            results_only: true,
+        };
+        let task = cx.spawn(async move |this, cx| {
+            Self::stream(this, turn, env, rules_on, token, cx).await;
+        });
+        self._tasks.push(task);
+    }
+
+    /// Transient state of one command card.
+    pub fn card_runtime(&self, call: &CallId) -> CardRuntime {
+        self.command_cards.get(call).cloned().unwrap_or_default()
+    }
+
+    /// The bounded output of the running command, if `call` is the one running.
+    pub fn running_output(&self, call: &CallId) -> Option<&ExecutionProgress> {
+        self.running
+            .as_ref()
+            .filter(|running| &running.call == call)
+            .map(|running| &running.progress)
+    }
+
+    fn card_mut(&mut self, call: &CallId) -> &mut CardRuntime {
+        self.command_cards.entry(call.clone()).or_default()
+    }
+
+    fn fail_card(&mut self, call: &CallId, message: impl Into<String>, cx: &mut Context<Self>) {
+        let card = self.card_mut(call);
+        card.preparing = false;
+        card.starting = false;
+        card.error = Some(message.into());
+        cx.notify();
+    }
+
+    /// Asks the host to inspect a request for this project. Inspection only.
+    fn preparation(
+        &self,
+        request: &CommandRequest,
+        cx: &Context<Self>,
+    ) -> impl Future<Output = contextual_core::Result<ReviewPlan>> + 'static + use<> {
+        let project = self.project.read(cx);
+        let root = ProjectRoot {
+            location: project.location.clone(),
+            path: project.root.clone(),
+        };
+        let prepare = serde_json::to_string(request).map(|command_json| PrepareCommand {
+            root: root.path.clone(),
+            project_epoch: self.project_epoch.clone(),
+            command_json,
+        });
+        let host = self.host.clone();
+        runtime::spawn(cx, async move {
+            let prepared = host.prepare_command(prepare?).await?;
+            ReviewPlan::from_prepared(root, prepared)
+        })
+    }
+
+    /// Prepares every proposal that still awaits the user and has no plan on screen: after
+    /// a reply, and after a saved chat is opened. This approves nothing.
+    pub fn prepare_open_commands(&mut self, cx: &mut Context<Self>) {
+        if !self.commands_enabled {
+            return;
+        }
+        let desk = &self.project.read(cx).commands;
+        let waiting: Vec<CallId> = self
+            .thread
+            .commands
+            .records()
+            .iter()
+            .filter(|record| {
+                record.answered.is_none()
+                    && record.status() == RecordStatus::NeedsReview
+                    && desk.plan(&record.call).is_none()
+            })
+            .map(|record| record.call.clone())
+            .collect();
+        for call in waiting {
+            self.prepare_command(call, None, cx);
+        }
+    }
+
+    /// Prepares one proposal and puts the plan up for review. `edited` replaces the request
+    /// with the user's version; otherwise it is what last ran, or what the model proposed.
+    pub fn prepare_command(
+        &mut self,
+        call: CallId,
+        edited: Option<CommandRequest>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.commands_enabled || self.card_runtime(&call).preparing {
+            return;
+        }
+        let Some(record) = self.thread.commands.get(&call) else {
+            return;
+        };
+        let request = edited
+            .or_else(|| {
+                record
+                    .attempts
+                    .last()
+                    .map(|attempt| attempt.request.clone())
+            })
+            .or_else(|| record.request().cloned());
+        let Some(request) = request else {
+            return;
+        };
+        let card = self.card_mut(&call);
+        card.preparing = true;
+        card.error = None;
+        cx.notify();
+        let job = self.preparation(&request, cx);
+        cx.spawn(async move |this, cx| {
+            let plan = job.await;
+            this.update(cx, |this, cx| {
+                let reviewed = plan.and_then(|plan| {
+                    this.project
+                        .update(cx, |project, _| project.commands.review(&call, plan))
+                });
+                match reviewed {
+                    Ok(()) => {
+                        this.card_mut(&call).preparing = false;
+                        cx.notify();
+                    }
+                    Err(error) => this.fail_card(&call, error.message, cx),
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The user opened the editor: approval is void from this moment, whatever follows.
+    pub fn edit_command(&mut self, call: &CallId, cx: &mut Context<Self>) {
+        let voided = self
+            .project
+            .update(cx, |project, _| project.commands.editing(call));
+        if let Err(error) = voided {
+            self.fail_card(call, error.message, cx);
+        }
+        cx.notify();
+    }
+
+    /// The user finished editing: the new text is validated and prepared, and goes back
+    /// up for review. Nothing is approved by editing.
+    pub fn review_edit(&mut self, call: CallId, text: &str, cx: &mut Context<Self>) -> bool {
+        match contextual_core::commands::parse_arguments(text) {
+            Ok(request) => {
+                self.prepare_command(call, Some(request), cx);
+                true
+            }
+            Err(error) => {
+                self.fail_card(&call, error.message, cx);
+                false
+            }
+        }
+    }
+
+    pub fn reject_command(&mut self, call: &CallId, cx: &mut Context<Self>) {
+        // The desk only knows proposals that were prepared; the record decides.
+        let _ = self
+            .project
+            .update(cx, |project, _| project.commands.reject(call));
+        match self
+            .thread
+            .commands
+            .reject(call, &contextual_core::threads::now_iso())
+        {
+            Ok(()) => {
+                self.command_cards.remove(call);
+                self.save_thread(cx);
+                cx.notify();
+            }
+            Err(error) => self.fail_card(call, error.message, cx),
+        }
+    }
+
+    /// The user pressed Run on the plan shown for `call`.
+    ///
+    /// Approval is taken synchronously, so a second click cannot produce a second one. The
+    /// host then prepares the request again; only if that matches what was shown is the
+    /// approval consumed and the command started.
+    pub fn run_command(&mut self, call: CallId, cx: &mut Context<Self>) {
+        if self.streaming() || self.saving || self.command_running() {
+            return;
+        }
+        let Some(shown) = self.project.read(cx).commands.plan(&call).cloned() else {
+            return;
+        };
+        let approval = match self
+            .project
+            .update(cx, |project, _| project.commands.approve(&call, &shown))
+        {
+            Ok(approval) => approval,
+            Err(error) => return self.fail_card(&call, error.message, cx),
+        };
+        let card = self.card_mut(&call);
+        card.starting = true;
+        card.error = None;
+        cx.notify();
+
+        let again = self.preparation(&shown.request, cx);
+        let thread_id = self.thread.id.clone();
+        cx.spawn(async move |this, cx| {
+            let current = again.await;
+            let Ok(permit) = this.update(cx, |this, cx| {
+                let permit = current.and_then(|current| {
+                    this.project
+                        .update(cx, |project, _| project.commands.begin(approval, &current))
+                });
+                if let Err(error) = &permit {
+                    this.fail_card(&call, error.message.clone(), cx);
+                }
+                permit
+            }) else {
+                return;
+            };
+            let Ok(permit) = permit else { return };
+            Self::supervise(this, call, permit, shown.request, thread_id, cx).await;
+        })
+        .detach();
+    }
+
+    /// Starts the permitted command on the host and follows it to its end.
+    async fn supervise(
+        this: gpui_kit::WeakEntity<Self>,
+        call: CallId,
+        permit: LaunchPermit,
+        request: CommandRequest,
+        thread_id: String,
+        cx: &mut gpui_kit::AsyncApp,
+    ) {
+        let invocation = permit.invocation().clone();
+        let stop = CancellationToken::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Launch>(16);
+        let (done_tx, done_rx) = tokio::sync::watch::channel(false);
+        let Ok(job) = this.update(cx, |this, cx| {
+            let host = this.host.clone();
+            let scope = stop.clone();
+            // From here on, losing this chat (its project closes) or quitting stops it.
+            this.command_scope = Some(stop.clone().drop_guard());
+            this.command_done = Some(done_rx);
+            runtime::spawn(cx, async move {
+                // Synchronous admission: an error here means nothing was started.
+                let handle = host.start_command(permit, scope)?;
+                let _ = tx.send(Launch::Started).await;
+                let mut progress = handle.progress();
+                let forward = tokio::spawn(async move {
+                    while progress.changed().await.is_ok() {
+                        let latest = progress.borrow_and_update().clone();
+                        if tx.send(Launch::Progress(latest)).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+                let result = handle.wait().await;
+                forward.abort();
+                // The host is finished with it: process tree ended, completion recorded.
+                let _ = done_tx.send(true);
+                Ok::<ExecutionResult, contextual_core::Error>(result)
+            })
+        }) else {
+            return;
+        };
+
+        let mut started = false;
+        while let Some(event) = rx.recv().await {
+            let alive = this
+                .update(cx, |this, cx| {
+                    match event {
+                        Launch::Started => {
+                            started = true;
+                            this.card_mut(&call).starting = false;
+                            this.running = Some(RunningCommand {
+                                call: call.clone(),
+                                stop: stop.clone(),
+                                progress: ExecutionProgress::default(),
+                            });
+                            if this.thread.id == thread_id {
+                                let recorded = this.thread.commands.begin(
+                                    &call,
+                                    invocation.clone(),
+                                    request.clone(),
+                                    &contextual_core::threads::now_iso(),
+                                );
+                                if recorded.is_ok() {
+                                    this.save_thread(cx);
+                                }
+                            }
+                        }
+                        Launch::Progress(progress) => {
+                            if let Some(running) = this.running.as_mut() {
+                                running.progress = progress;
+                            }
+                        }
+                    }
+                    cx.notify();
+                })
+                .is_ok();
+            if !alive {
+                // The chat is gone: ask the command to stop. Its host still cleans up.
+                stop.cancel();
+                return;
+            }
+        }
+
+        let result = job.await;
+        let _ = this.update(cx, |this, cx| {
+            this.running = None;
+            this.command_done = None;
+            if let Some(scope) = this.command_scope.take() {
+                // It ended by itself: nothing left to cancel.
+                scope.disarm();
+            }
+            this.card_mut(&call).starting = false;
+            // Anything that may have run can have changed files, whatever its outcome.
+            let may_have_run = match &result {
+                Ok(result) => result.spawned,
+                Err(_) => started,
+            };
+            match result {
+                Ok(result) => {
+                    if this.thread.id == thread_id {
+                        let _ = this.thread.commands.finish(
+                            &call,
+                            &invocation,
+                            &result,
+                            &contextual_core::threads::now_iso(),
+                        );
+                    }
+                    if let Some(detail) = result.detail.clone().filter(|_| !result.spawned) {
+                        this.card_mut(&call).error = Some(detail);
+                    }
+                    let held = this.project.update(cx, |project, _| {
+                        project.commands.finished(&call, &invocation, result)
+                    });
+                    if let Err(error) = held {
+                        this.card_mut(&call).error = Some(error.message);
+                    }
+                    this.save_thread(cx);
+                }
+                Err(error) if !started => {
+                    // Refused before anything started. The consumed approval is gone.
+                    let _ = this
+                        .project
+                        .update(cx, |project, _| project.commands.failed_to_start(&call));
+                    this.card_mut(&call).error = Some(error.message);
+                }
+                Err(error) => {
+                    // It started and its result was lost: the outcome is unknown, and the
+                    // project stays blocked until that is checked.
+                    if this.thread.id == thread_id {
+                        this.thread
+                            .restore_commands(&contextual_core::threads::now_iso());
+                        this.save_thread(cx);
+                    }
+                    this.card_mut(&call).error = Some(error.message);
+                }
+            }
+            if may_have_run {
+                this.refresh_after_command(cx);
+            }
+            cx.notify();
+        });
+    }
+
+    /// Asks the running command to stop. This does not undo what it already did.
+    pub fn stop_command(&mut self, cx: &mut Context<Self>) {
+        if let Some(running) = &self.running {
+            running.stop.cancel();
+        }
+        cx.notify();
+    }
+
+    /// After an unknown outcome: asks the host whether anything from it still runs. Only if
+    /// the host establishes that nothing does can commands be reviewed again; everything
+    /// then needs fresh preparation and approval. This starts and stops nothing.
+    pub fn reconcile_commands(&mut self, cx: &mut Context<Self>) {
+        if !self.commands_enabled || self.command_running() {
+            return;
+        }
+        let (host, root) = (self.host.clone(), self.root(cx));
+        let job = runtime::spawn(cx, async move { host.reconcile_commands(&root).await });
+        cx.spawn(async move |this, cx| {
+            let report = job.await;
+            this.update(cx, |this, cx| {
+                match report {
+                    Ok(report) if !report.blocked() => {
+                        let cleared = this
+                            .project
+                            .update(cx, |project, _| project.commands.reconciled());
+                        match cleared {
+                            Ok(()) => {
+                                this.command_cards.clear();
+                                this.note(
+                                    "Nothing from the earlier command is still running. \
+                                     Commands can be reviewed again.",
+                                    Tone::Ok,
+                                );
+                                this.prepare_open_commands(cx);
+                            }
+                            Err(error) => this.note(error.message, Tone::Warn),
+                        }
+                    }
+                    Ok(report) => {
+                        let detail = report
+                            .invocations
+                            .iter()
+                            .find_map(|invocation| invocation.detail.clone())
+                            .unwrap_or_default();
+                        this.note(
+                            format!(
+                                "It could not be established that the earlier command has \
+                                 ended, so commands stay blocked. {detail}"
+                            ),
+                            Tone::Warn,
+                        );
+                    }
+                    Err(error) => this.note(
+                        format!(
+                            "The earlier command could not be checked. {}",
+                            error.message
+                        ),
+                        Tone::Warn,
+                    ),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// After a completed reply (model picks files): the next round if the model asked for
@@ -1005,6 +1854,7 @@ impl ChatModel {
                     prepared,
                     tree_version: None,
                     rounds,
+                    results_only: false,
                 }
             }) else {
                 return;
@@ -1054,9 +1904,11 @@ impl ChatModel {
 
     /// A new, empty chat with no files selected or context carried over.
     pub fn start_fresh(&mut self, cx: &mut Context<Self>) {
-        if self.streaming() || self.saving {
+        if self.streaming() || self.saving || self.refuse_while_command_runs(cx) {
             return;
         }
+        self.command_cards.clear();
+        self.staged_shares.clear();
         self.contents.clear();
         self.reference_only.clear();
         self.pending = None;
@@ -1154,7 +2006,7 @@ impl ChatModel {
         let Some(store) = self.store.clone() else {
             return;
         };
-        if self.streaming() || self.saving {
+        if self.streaming() || self.saving || self.refuse_while_command_runs(cx) {
             return;
         }
         let generation = self.thread_generation;
@@ -1195,6 +2047,13 @@ impl ChatModel {
                 }
                 this.attachments.clear();
                 this.thread = saved.thread;
+                this.command_cards.clear();
+                this.staged_shares.clear();
+                // A command that was running when the app stopped has an unknown outcome.
+                // Nothing is approved or started by opening a chat.
+                let interrupted = this
+                    .thread
+                    .restore_commands(&contextual_core::threads::now_iso());
                 this.live = None;
                 this.live_context = None;
                 this.set_changes(changes);
@@ -1209,11 +2068,36 @@ impl ChatModel {
                         m
                     })
                     .collect();
+                if interrupted > 0 {
+                    this.note(
+                        "A command was running when the app stopped. Its outcome is unknown \
+                         and it was not run again.",
+                        Tone::Warn,
+                    );
+                    this.save_thread(cx);
+                }
+                this.prepare_open_commands(cx);
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Another chat cannot be opened or started while a command from this one runs: its
+    /// result belongs to this chat. Says so and returns true when that is the case.
+    fn refuse_while_command_runs(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.command_running() {
+            return false;
+        }
+        self.toast = Some(Toast {
+            title: "A command is running".into(),
+            detail: "Stop it or wait for it to finish before switching chats.".into(),
+            error: true,
+            backup_id: None,
+        });
+        cx.notify();
+        true
     }
 
     pub fn rename_thread(&mut self, id: String, title: String, cx: &mut Context<Self>) {

@@ -4,6 +4,17 @@
 //! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<message>|switch:<branch>`
 //! opens that view, or runs that Source Control action, at startup.
 //! `CONTEXTUAL_DEV_OPEN=envfile` with `--settings` opens the env-file picker in Settings.
+//!
+//! With `CONTEXTUAL_DEV_COMMANDS=1`,
+//! `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit` presses that
+//! button on the first proposed command once its review card is ready (`command-stop` presses
+//! Run, then Stop when the command has produced output; `command-edit` replaces every `ran`
+//! in the command with `edited`, has the edit reviewed, then presses Run). `command-share`
+//! presses Run, then chooses to share the output without the error output, then presses
+//! Continue; `command-withhold` presses Run and then Continue without sharing;
+//! `command-decline` presses Reject and then Continue. `command-quit` presses Run and quits the
+//! app once the command has produced output; `command-close` closes the project instead.
+//! These stand in for a person's actions and exist only in debug builds.
 
 use contextual_core::chat::Role;
 use gpui_kit::{App, Entity, Window};
@@ -38,6 +49,35 @@ pub fn install(
     }
     panel.update(cx, |p, cx| p.dev_send(text, window, cx));
 
+    if let Some(action) = after.strip_prefix("command-") {
+        // `CONTEXTUAL_DEV_EXPECT_FILE=<path>` reports on stderr when the project tree
+        // contains that file, which shows that a rescan picked up what a command created.
+        if let Ok(expected) = std::env::var("CONTEXTUAL_DEV_EXPECT_FILE") {
+            let mut reported = false;
+            cx.observe(project, move |project, cx| {
+                if !reported && project.read(cx).node(&expected).is_some() {
+                    reported = true;
+                    eprintln!("contextual dev: the project tree now contains {expected}");
+                }
+            })
+            .detach();
+        }
+        let (action, then) = match action {
+            "share" => ("run", Some(Followup::Share)),
+            "withhold" => ("run", Some(Followup::Continue)),
+            "decline" => ("reject", Some(Followup::Continue)),
+            "quit" | "close" => {
+                leave_while_command_runs(app, chat, action == "quit", cx);
+                ("run", None)
+            }
+            other => (other, None),
+        };
+        press_command_button(project, chat, action.to_string(), cx);
+        if let Some(then) = then {
+            continue_after_command(project, chat, panel, then, window, cx);
+        }
+        return;
+    }
     let (app, chat_for_obs, chats) = (app.clone(), chat.clone(), chats.clone());
     let mut done = false;
     cx.observe(chat, move |chat, cx| {
@@ -163,4 +203,166 @@ pub fn open(
             }
         }
     }
+}
+
+/// Presses Run, Stop or Reject on the first proposed command, as a person would, once the
+/// card offers it. Debug builds only; see the module documentation.
+fn press_command_button(
+    project: &Entity<Project>,
+    chat: &Entity<ChatModel>,
+    action: String,
+    cx: &mut App,
+) {
+    use contextual_core::commands::CommandState;
+
+    let project = project.clone();
+    let (mut pressed, mut stopped, mut edited) = (false, false, false);
+    cx.observe(chat, move |chat, cx| {
+        let model = chat.read(cx);
+        let Some(call) = model
+            .thread
+            .commands
+            .records()
+            .first()
+            .map(|record| record.call.clone())
+        else {
+            return;
+        };
+        if pressed {
+            // Run was pressed for `command-stop`: press Stop once there is output.
+            let has_output = model
+                .running_output(&call)
+                .is_some_and(|output| !output.stdout.text.is_empty());
+            if action == "stop" && !stopped && has_output {
+                stopped = true;
+                chat.update(cx, |chat, cx| chat.stop_command(cx));
+            }
+            return;
+        }
+        let desk = &project.read(cx).commands;
+        let reviewable = desk.state(&call) == Some(CommandState::NeedsReview)
+            && !model.streaming()
+            && !model.card_runtime(&call).preparing;
+        if !reviewable {
+            return;
+        }
+        if action == "edit" && !edited {
+            // Open the editor, change the command, and send the edit back for review.
+            let Some(draft) = desk
+                .plan(&call)
+                .and_then(|plan| serde_json::to_string(&plan.request).ok())
+            else {
+                return;
+            };
+            edited = true;
+            let draft = draft.replace("ran", "edited");
+            chat.update(cx, |chat, cx| {
+                chat.edit_command(&call, cx);
+                chat.review_edit(call, &draft, cx);
+            });
+            return;
+        }
+        pressed = true;
+        chat.update(cx, |chat, cx| match action.as_str() {
+            "reject" => chat.reject_command(&call, cx),
+            _ => chat.run_command(call, cx),
+        });
+    })
+    .detach();
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Followup {
+    /// Choose to share the output (not the error output), then continue.
+    Share,
+    /// Continue without sharing anything.
+    Continue,
+}
+
+/// Once the first proposed command has been decided (it finished, or was rejected), presses
+/// Continue under its card, after choosing what to share. Debug builds only.
+fn continue_after_command(
+    project: &Entity<Project>,
+    chat: &Entity<ChatModel>,
+    panel: &Entity<ChatPanel>,
+    then: Followup,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use contextual_core::commands::history::RecordStatus;
+
+    let (project, panel) = (project.clone(), panel.clone());
+    let mut done = false;
+    window
+        .observe(chat, cx, move |chat, window, cx| {
+            if done {
+                return;
+            }
+            let model = chat.read(cx);
+            let Some(record) = model.thread.commands.records().first() else {
+                return;
+            };
+            let decided = matches!(
+                record.status(),
+                RecordStatus::Finished(_) | RecordStatus::Rejected
+            );
+            if !decided || model.streaming() || model.command_running() {
+                return;
+            }
+            let call = record.call.clone();
+            done = true;
+            if then == Followup::Share {
+                let Some(stdout) = project
+                    .read(cx)
+                    .commands
+                    .output(&call)
+                    .map(|(_, result)| result.output.stdout.text.clone())
+                else {
+                    return;
+                };
+                chat.update(cx, |chat, cx| {
+                    chat.stage_share(&call, Some(stdout), None, cx);
+                });
+            }
+            panel.update(cx, |panel, cx| panel.continue_commands(window, cx));
+        })
+        .detach();
+}
+
+/// Once the running command has produced output, quits the app or closes the project, as a
+/// person might while a command is still going. Debug builds only.
+fn leave_while_command_runs(
+    app: &Entity<AppModel>,
+    chat: &Entity<ChatModel>,
+    quit: bool,
+    cx: &mut App,
+) {
+    let app = app.clone();
+    let mut left = false;
+    cx.observe(chat, move |chat, cx| {
+        let model = chat.read(cx);
+        let Some(call) = model
+            .thread
+            .commands
+            .records()
+            .first()
+            .map(|record| record.call.clone())
+        else {
+            return;
+        };
+        let has_output = model
+            .running_output(&call)
+            .is_some_and(|output| !output.stdout.text.is_empty());
+        if left || !has_output {
+            return;
+        }
+        left = true;
+        if quit {
+            cx.quit();
+        } else {
+            let app = app.clone();
+            cx.defer(move |cx| app.update(cx, |app, cx| app.close_project(cx)));
+        }
+    })
+    .detach();
 }

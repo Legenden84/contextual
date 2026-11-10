@@ -158,12 +158,16 @@ impl WorkspaceSettings {
 pub struct ChatSettings {
     /// The model gets the project tree and asks for the files and skills it needs.
     pub model_picks_files: bool,
+    /// The assistant may propose commands. Each one is shown first and runs only when the
+    /// user approves that exact command. Off unless the user turns it on.
+    pub propose_commands: bool,
 }
 
 impl Default for ChatSettings {
     fn default() -> Self {
         Self {
             model_picks_files: true,
+            propose_commands: false,
         }
     }
 }
@@ -399,6 +403,23 @@ pub fn resolve_foundry_config_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_proposals_are_off_until_the_user_turns_them_on() {
+        assert!(!Settings::default().chat.propose_commands);
+        // Settings saved before the option existed leave it off.
+        let old: Settings = serde_json::from_str(r#"{"chat":{"modelPicksFiles":false}}"#).unwrap();
+        assert!(!old.chat.propose_commands && !old.chat.model_picks_files);
+        let empty: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!empty.chat.propose_commands);
+
+        let mut on = Settings::default();
+        on.chat.propose_commands = true;
+        let saved = serde_json::to_value(&on).unwrap();
+        assert_eq!(saved["chat"]["proposeCommands"], true);
+        let back: Settings = serde_json::from_value(saved).unwrap();
+        assert!(back.chat.propose_commands);
+    }
 
     #[test]
     fn reduced_motion_defaults_off_and_round_trips() {

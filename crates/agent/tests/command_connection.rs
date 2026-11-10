@@ -3,15 +3,15 @@
 #![cfg(unix)]
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use contextual_agent::serve_with_execution;
 use contextual_core::Result;
 use contextual_core::commands::execution::{
-    ExecutionStatus, ManagedChild, ManagedCommandRunner, ManagedProcessTree, OUTPUT_LIMIT,
-    ProcessExit,
+    Containment, ExecutionStatus, ManagedChild, ManagedCommandRunner, ManagedProcessTree,
+    OUTPUT_LIMIT, ProcessExit, TerminationEvidence,
 };
 use contextual_core::commands::journal::FileExecutionJournal;
 use contextual_core::commands::service::AgentExecutionService;
@@ -39,6 +39,10 @@ struct Control {
     cleanup_entered: Notify,
     root_exit: CancellationToken,
     cleanup_release: CancellationToken,
+    /// Cleanup reports that termination could not be established.
+    fail_cleanup: AtomicBool,
+    /// The fake tree counts as ended once its owner lets go of the project.
+    owner_bound: AtomicBool,
 }
 
 struct Runner(Arc<Control>);
@@ -49,6 +53,14 @@ impl ManagedCommandRunner for Runner {
             CommandPlatform::Macos
         } else {
             CommandPlatform::Linux
+        }
+    }
+
+    fn containment(&self) -> Containment {
+        if self.0.owner_bound.load(Ordering::SeqCst) {
+            Containment::OwnerBound
+        } else {
+            Containment::Unverifiable
         }
     }
 
@@ -85,6 +97,9 @@ impl ManagedProcessTree for Tree {
 
     async fn terminate_and_wait(&mut self) -> Result<ProcessExit> {
         self.0.cleanup_entered.notify_one();
+        if self.0.fail_cleanup.load(Ordering::SeqCst) {
+            return Err(contextual_core::Error::tool("test cleanup failure"));
+        }
         self.0.cleanup_release.cancelled().await;
         self.0.cleaned.fetch_add(1, Ordering::SeqCst);
         Ok(ProcessExit {
@@ -354,6 +369,159 @@ async fn disconnected_outcome_stays_blocked_after_reconnection_and_agent_cleanup
             "reconnection is not reconciliation"
         );
         assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
+        replacement.close();
+        server.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn explicit_reconciliation_releases_a_disconnected_outcome_the_agent_resolved() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let fixture = Fixture::new().await;
+        let root = fixture.request().root;
+        let (host, server) = fixture.connect().await;
+        let plan = fixture.plan(&host).await;
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
+        fixture.control.spawned.notified().await;
+
+        // While the agent's worker still owns the project, nothing can be reconciled.
+        assert!(host.reconcile_commands(&root).await.is_err());
+
+        host.close();
+        assert_eq!(handle.wait().await.status, ExecutionStatus::Unknown);
+        fixture.control.cleanup_entered.notified().await;
+        fixture.control.cleanup_release.cancel();
+        server.await.unwrap().unwrap();
+
+        // Reconnecting and reviewing again is not reconciliation.
+        let (replacement, server) = fixture.connect().await;
+        let fresh = fixture.plan(&replacement).await;
+        assert!(
+            replacement
+                .start_command(permit(&fresh), CancellationToken::new())
+                .is_err()
+        );
+
+        // The agent recorded a confirmed outcome, so it reports nothing unresolved. Only
+        // that explicit answer releases this client, and it starts nothing by itself.
+        let report = replacement.reconcile_commands(&root).await.unwrap();
+        assert!(!report.blocked() && report.invocations.is_empty());
+        assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
+
+        // A new, separately approved attempt now runs.
+        let fresh = fixture.plan(&replacement).await;
+        let handle = replacement
+            .start_command(permit(&fresh), CancellationToken::new())
+            .unwrap();
+        fixture.control.root_exit.cancel();
+        assert_eq!(handle.wait().await.status, ExecutionStatus::Success);
+        assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 2);
+        assert_eq!(fixture.journal.records().await.unwrap().len(), 2);
+        replacement.close();
+        server.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_unknown_agent_outcome_stays_blocked_through_reconnection_and_reconciliation() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let fixture = Fixture::new().await;
+        let root = fixture.request().root;
+        fixture.control.fail_cleanup.store(true, Ordering::SeqCst);
+        let (host, server) = fixture.connect().await;
+        let plan = fixture.plan(&host).await;
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
+        fixture.control.spawned.notified().await;
+        fixture.control.root_exit.cancel();
+        assert_eq!(handle.wait().await.status, ExecutionStatus::Unknown);
+        host.close();
+        server.await.unwrap().unwrap();
+
+        for _ in 0..2 {
+            let (replacement, server) = fixture.connect().await;
+            // The fake backend's containment cannot be checked: nothing is established.
+            let report = replacement.reconcile_commands(&root).await.unwrap();
+            assert!(report.blocked());
+            assert_eq!(report.invocations.len(), 1);
+            assert!(report.invocations[0].detail.is_some());
+            let fresh = fixture.plan(&replacement).await;
+            assert!(
+                replacement
+                    .start_command(permit(&fresh), CancellationToken::new())
+                    .is_err()
+            );
+            replacement.close();
+            server.await.unwrap().unwrap();
+        }
+        assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_unknown_agent_outcome_is_released_once_the_agent_establishes_termination() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let fixture = Fixture::new().await;
+        let root = fixture.request().root;
+        fixture.control.fail_cleanup.store(true, Ordering::SeqCst);
+        fixture.control.owner_bound.store(true, Ordering::SeqCst);
+        let (host, server) = fixture.connect().await;
+        let plan = fixture.plan(&host).await;
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
+        fixture.control.spawned.notified().await;
+        fixture.control.root_exit.cancel();
+        let unknown = handle.wait().await;
+        assert_eq!(unknown.status, ExecutionStatus::Unknown);
+        host.close();
+        server.await.unwrap().unwrap();
+
+        let (replacement, server) = fixture.connect().await;
+        let fresh = fixture.plan(&replacement).await;
+        assert!(
+            replacement
+                .start_command(permit(&fresh), CancellationToken::new())
+                .is_err()
+        );
+        let report = replacement.reconcile_commands(&root).await.unwrap();
+        assert!(!report.blocked());
+        assert_eq!(report.invocations.len(), 1);
+        assert_eq!(
+            report.invocations[0].evidence,
+            Some(TerminationEvidence::OwnerBoundTreeReleased)
+        );
+        assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
+
+        fixture.control.fail_cleanup.store(false, Ordering::SeqCst);
+        fixture.control.cleanup_release.cancel();
+        let fresh = fixture.plan(&replacement).await;
+        let handle = replacement
+            .start_command(permit(&fresh), CancellationToken::new())
+            .unwrap();
+        assert_eq!(handle.wait().await.status, ExecutionStatus::Success);
+        assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 2);
+
+        // The first invocation keeps its unknown outcome in the agent's history.
+        let records = fixture.journal.records().await.unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.status() == ExecutionStatus::Unknown
+                    && record.reconciliation.is_some())
+                .count(),
+            1
+        );
         replacement.close();
         server.await.unwrap().unwrap();
     })

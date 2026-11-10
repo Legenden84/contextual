@@ -140,6 +140,8 @@ fn req(
         history,
         input: input.into(),
         previous_response_id: previous.map(str::to_string),
+        command_tool: false,
+        tool_results: Vec::new(),
     }
 }
 

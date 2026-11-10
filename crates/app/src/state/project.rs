@@ -30,6 +30,10 @@ pub enum Tab {
 }
 
 pub struct Project {
+    /// Review and approval state for proposed commands. In memory only, owned by the
+    /// project rather than a chat view, so that switching chats cannot lose a running
+    /// command or open a second way to start one.
+    pub commands: contextual_core::commands::desk::CommandDesk,
     pub root: String,
     /// Where the project lives (local, or a WSL distro).
     pub location: Location,
@@ -118,6 +122,7 @@ impl Project {
         let mut index = HashMap::new();
         build_index(&tree, &mut Vec::new(), &mut index);
         let mut this = Self {
+            commands: contextual_core::commands::desk::CommandDesk::new(),
             location,
             root: scan.root,
             name: scan.name,

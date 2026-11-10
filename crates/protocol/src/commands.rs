@@ -348,3 +348,42 @@ mod tests {
         assert!(restored == result);
     }
 }
+
+/// Asks the project's host to reconcile its unresolved command history. Not authorization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconcileCommands {
+    pub root: String,
+}
+
+/// Why an unresolved invocation's termination counts as established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CommandTerminationEvidence {
+    /// The launch marker that precedes every start was never written.
+    NeverLaunched,
+    /// The tree was owner-bound and its owner no longer holds the project.
+    OwnerBoundTreeReleased,
+    /// The recorded process group no longer exists.
+    ProcessGroupAbsent,
+    /// The host restarted since the launch.
+    HostRestarted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconciledCommand {
+    pub invocation_id: String,
+    /// Absent when termination could not be established; the invocation still blocks.
+    pub evidence: Option<CommandTerminationEvidence>,
+    pub detail: Option<String>,
+}
+
+/// The host's reconciliation result for one project. It carries no authorization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommandReconciliation {
+    /// The host-native canonical project root that admission is keyed by.
+    pub canonical_root: String,
+    pub invocations: Vec<ReconciledCommand>,
+}

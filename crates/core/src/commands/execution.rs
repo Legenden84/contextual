@@ -179,6 +179,135 @@ pub trait ExecutionJournal: Send + Sync {
 
     async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()>;
     async fn record_completion(&self, completion: &ExecutionCompletion) -> Result<()>;
+
+    /// Takes exclusive execution ownership of this project across every process that shares
+    /// the journal, without waiting. The returned guard holds it until dropped, and the
+    /// operating system releases it if the owning process dies.
+    ///
+    /// Default refusal prevents a journal without cross-process ownership from admitting work.
+    async fn acquire_ownership(
+        &self,
+        _project: &ProjectRoot,
+        _canonical_root: &std::path::Path,
+    ) -> Result<OwnershipGuard> {
+        Err(Error::tool(
+            "This execution journal does not support cross-process ownership.",
+        ))
+    }
+
+    /// Durably marks that a launch is about to be attempted, and how the backend contains the
+    /// process tree. Its absence is later read as proof that nothing was started, so an
+    /// implementation that supports reconciliation must not report success without saving it.
+    async fn record_launching(&self, _: &InvocationId, _: Containment) -> Result<()> {
+        Ok(())
+    }
+
+    /// Records how the started tree can be recognised after its owner is gone.
+    async fn record_launched(&self, _: &InvocationId, _: &TreeIdentity) -> Result<()> {
+        Ok(())
+    }
+
+    /// Establishes, with evidence, that unresolved earlier invocations for this project no
+    /// longer run, and records that. It never launches, retries, restores approval or
+    /// terminates anything. What cannot be established stays unresolved and keeps blocking.
+    async fn reconcile(
+        &self,
+        _project: &ProjectRoot,
+        _canonical_root: &std::path::Path,
+    ) -> Result<ReconciliationReport> {
+        Err(Error::tool(
+            "This execution journal does not support reconciliation.",
+        ))
+    }
+}
+
+/// Exclusive cross-process execution ownership of one project; released on drop.
+pub type OwnershipGuard = Box<dyn Send + Sync>;
+
+/// How a backend keeps hold of a process tree, as far as recovery can rely on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Containment {
+    /// The operating system ends the tree when its owner's handle closes, including when
+    /// the owning process dies. A released ownership lock therefore means the tree is gone.
+    OwnerBound,
+    /// A process group that outlives its owner. Recovery needs the recorded group identity.
+    ProcessGroup,
+    /// Nothing that recovery can rely on.
+    Unverifiable,
+}
+
+/// A started tree's identity, for recognising it after its owner is gone. A recorded number
+/// is only ever used to observe whether the group still exists, never to signal it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum TreeIdentity {
+    #[serde(rename_all = "camelCase")]
+    UnixGroup {
+        group: i32,
+        /// Identifies the running kernel instance where the platform offers one. A different
+        /// value means the host restarted, so no process of that boot remains.
+        boot_id: Option<String>,
+    },
+}
+
+/// Why an unresolved invocation's termination counts as established.
+pub use contextual_protocol::commands::CommandTerminationEvidence as TerminationEvidence;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconciledInvocation {
+    pub invocation: InvocationId,
+    /// None when termination could not be established; the invocation still blocks.
+    pub evidence: Option<TerminationEvidence>,
+    pub detail: Option<String>,
+}
+
+/// The result of one explicit reconciliation. It carries no authorization.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReconciliationReport {
+    pub invocations: Vec<ReconciledInvocation>,
+}
+
+impl ReconciliationReport {
+    /// Whether any invocation remains unresolved and keeps the project blocked.
+    pub fn blocked(&self) -> bool {
+        self.invocations
+            .iter()
+            .any(|invocation| invocation.evidence.is_none())
+    }
+}
+
+/// Whether a recorded process group is gone. Observation only: signal zero.
+pub(super) fn recorded_group_is_absent(group: i32) -> Result<bool> {
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    ))]
+    {
+        unix_launch::group_is_absent(nix::unistd::Pid::from_raw(group))
+    }
+    #[cfg(not(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    )))]
+    {
+        let _ = group;
+        Err(Error::tool(
+            "Process groups cannot be observed on this platform.",
+        ))
+    }
+}
+
+/// The running kernel instance's identity, where the platform offers one.
+pub(super) fn current_boot_id() -> Option<String> {
+    if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .ok()
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty() && id.len() <= 64)
+    } else {
+        None
+    }
 }
 
 /// Observed root-process exit. The process-tree handle must remain valid for cleanup after
@@ -207,6 +336,10 @@ pub type OutputPipe = Box<dyn AsyncRead + Unpin + Send>;
 pub trait ManagedProcessTree: Send {
     async fn wait_root(&mut self) -> Result<ProcessExit>;
     async fn terminate_and_wait(&mut self) -> Result<ProcessExit>;
+    /// How this tree can be recognised after its owner is gone, if it can outlive it.
+    fn identity(&self) -> Option<TreeIdentity> {
+        None
+    }
 }
 
 /// A process that already has tree ownership and two drainable pipes.
@@ -225,6 +358,10 @@ pub struct ManagedChild {
 pub trait ManagedCommandRunner: Send + Sync {
     fn platform(&self) -> CommandPlatform;
     fn spawn(&self, command: Cmd) -> Result<ManagedChild>;
+    /// What recovery may rely on for trees this runner starts.
+    fn containment(&self) -> Containment {
+        Containment::Unverifiable
+    }
 }
 
 /// Execution service for an in-process project host. Remote execution must be implemented
@@ -282,6 +419,26 @@ impl ExecutionEngine {
             plan: dispatch.plan().clone(),
         };
         self.start_bound(permit, scope)
+    }
+
+    /// Explicit reconciliation for one project on this in-process host.
+    ///
+    /// The journal establishes termination with evidence under exclusive ownership. Only
+    /// when nothing remains unresolved is this process's blocked admission slot released.
+    /// Nothing is launched, retried or approved, and a running command is never disturbed.
+    pub async fn reconcile(
+        &self,
+        project: &ProjectRoot,
+        canonical_root: &std::path::Path,
+    ) -> Result<ReconciliationReport> {
+        let admission = self.host.local_command_admission().ok_or_else(|| {
+            Error::forbidden("This workspace host cannot execute through an in-process runner.")
+        })?;
+        let report = self.journal.reconcile(project, canonical_root).await?;
+        if !report.blocked() {
+            admission.release_blocked(canonical_root);
+        }
+        Ok(report)
     }
 
     fn start_bound(
@@ -446,6 +603,22 @@ async fn supervise(
             return ExecutionResult::not_started(ExecutionStatus::FailedToStart, error.message);
         }
     };
+    // Held until this function returns, across recovery, intent, execution and completion.
+    // Another process that shares the journal cannot check recovery or publish intent for
+    // this project meanwhile, and the lock is released by the system if this process dies.
+    let ownership = tokio::time::timeout(
+        PREPARATION_TIMEOUT,
+        journal.acquire_ownership(&intent.project, permit.plan().directory.root()),
+    )
+    .await;
+    let Ok(Ok(_ownership)) = ownership else {
+        return ExecutionResult::not_started(
+            ExecutionStatus::FailedToStart,
+            "Another process owns command execution for this project, or ownership could \
+             not be established. Nothing was launched.",
+        );
+    };
+
     // An accepted attempt must reach durable replay protection even if Stop arrives before
     // spawn. Cancellation is checked by run_checked after intent publication. These bounded
     // journal operations are never mistaken for a process-cleanup acknowledgement.
@@ -476,7 +649,8 @@ async fn supervise(
         }
     }
 
-    let mut result = run_checked(&permit, host, runner, command, &cancel, &progress).await;
+    let mut result =
+        run_checked(&permit, host, runner, &journal, command, &cancel, &progress).await;
     let completion = ExecutionCompletion {
         invocation: intent.invocation,
         call: intent.call,
@@ -509,6 +683,7 @@ async fn run_checked(
     permit: &LaunchPermit,
     host: Arc<dyn WorkspaceHost>,
     runner: Arc<dyn ManagedCommandRunner>,
+    journal: &Arc<dyn ExecutionJournal>,
     mut command: Cmd,
     cancel: &CancellationToken,
     progress: &watch::Sender<ExecutionProgress>,
@@ -557,6 +732,21 @@ async fn run_checked(
             "Cancelled before launch.",
         );
     }
+    // Recovery reads a missing marker as proof that nothing was started, so no launch may
+    // be attempted unless the marker is confirmed saved.
+    let marked = tokio::time::timeout(
+        PREPARATION_TIMEOUT,
+        journal.record_launching(permit.invocation(), runner.containment()),
+    )
+    .await;
+    if !matches!(marked, Ok(Ok(()))) {
+        let mut result = ExecutionResult::not_started(
+            ExecutionStatus::FailedToStart,
+            "Command was not launched because its launch marker could not be saved.",
+        );
+        result.history_error = Some("Launch marker was not confirmed saved.".into());
+        return result;
+    }
     command.cancel = Some(cancel.clone());
     let timeout = command.timeout;
     let child = match runner.spawn(command) {
@@ -568,7 +758,24 @@ async fn run_checked(
             );
         }
     };
-    run_child(child, timeout, cancel, progress).await
+    // Saved alongside supervision so that a slow disk cannot delay Stop or draining. If it
+    // is never saved, a later crash leaves this invocation unresolved rather than guessed.
+    let identity = child.tree.identity().map(|identity| {
+        let journal = journal.clone();
+        let invocation = permit.invocation().clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(
+                PREPARATION_TIMEOUT,
+                journal.record_launched(&invocation, &identity),
+            )
+            .await;
+        })
+    });
+    let result = run_child(child, timeout, cancel, progress).await;
+    if let Some(identity) = identity {
+        let _ = identity.await;
+    }
+    result
 }
 
 #[derive(Default)]
@@ -603,7 +810,7 @@ impl Capture {
 /// ESC, C1 controls and bidi/invisible formatting characters are made visible rather than
 /// interpreted. Escaping instead of stripping also prevents OSC links from becoming UI links.
 /// These strings must still be rendered as plain text, never parsed as Markdown.
-pub(super) fn escape_controls(text: &str) -> String {
+pub(crate) fn escape_controls(text: &str) -> String {
     let mut escaped = String::new();
     for character in text.chars() {
         if (character.is_control() && !matches!(character, '\n' | '\t'))
@@ -768,34 +975,21 @@ async fn run_child(
     }
 }
 
-/// Launch and group checks shared by the native Unix backends.
-///
-/// Nothing here authorizes a command, and ordinary app and agent startup construct no native
-/// runner. A host must be given one explicitly through its execution backend seam.
+/// Checks on a launch request that every native backend applies before starting anything.
 #[cfg(any(
     all(target_os = "linux", not(target_env = "uclibc")),
-    target_os = "macos"
+    target_os = "macos",
+    windows
 ))]
-mod unix_launch {
+mod launch_request {
     use std::collections::HashSet;
-    use std::os::unix::process::CommandExt as _;
     use std::path::Path;
-    use std::process::{Child, Command, Stdio};
-
-    use nix::errno::Errno;
-    use nix::sys::signal::{Signal, killpg};
-    use nix::unistd::Pid;
-    use tokio::net::unix::pipe;
 
     use crate::process::Cmd;
     use crate::{Error, Result};
 
     pub(super) fn refused(reason: &str) -> Error {
         Error::tool(format!("The command was not started: {reason}"))
-    }
-
-    pub(super) fn ownership_error() -> Error {
-        Error::tool("Native command process ownership could not be verified.")
     }
 
     /// Refuses a launch request that an adapter would otherwise have to reinterpret.
@@ -814,15 +1008,48 @@ mod unix_launch {
         }
         let mut names = HashSet::new();
         for (name, value) in &command.env {
+            // Windows environment names are case-insensitive.
+            let key = if cfg!(windows) {
+                name.to_uppercase()
+            } else {
+                name.clone()
+            };
             if name.is_empty()
                 || name.contains(['=', '\0'])
                 || value.contains('\0')
-                || !names.insert(name.as_str())
+                || !names.insert(key)
             {
                 return Err(refused("the environment is not an exact variable list."));
             }
         }
         Ok(cwd)
+    }
+}
+
+/// Launch and group checks shared by the native Unix backends.
+///
+/// Nothing here authorizes a command, and ordinary app and agent startup construct no native
+/// runner. A host must be given one explicitly through its execution backend seam.
+#[cfg(any(
+    all(target_os = "linux", not(target_env = "uclibc")),
+    target_os = "macos"
+))]
+mod unix_launch {
+    use std::os::unix::process::CommandExt as _;
+    use std::path::Path;
+    use std::process::{Child, Command, Stdio};
+
+    use nix::errno::Errno;
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+    use tokio::net::unix::pipe;
+
+    pub(super) use super::launch_request::{checked_launch, refused};
+    use crate::process::Cmd;
+    use crate::{Error, Result};
+
+    pub(super) fn ownership_error() -> Error {
+        Error::tool("Native command process ownership could not be verified.")
     }
 
     /// Both ends exist, and the read end is registered with the runtime, before the launch.
@@ -897,10 +1124,21 @@ mod unix_launch {
         }
     }
 
-    /// Signal zero checks existence/permissions without delivering a signal.
+    /// Whether the group is gone for every practical purpose: it does not exist, or (on
+    /// Linux) none of its members can still run.
     ///
-    /// This remains safe after root reaping: a reused numeric group cannot receive SIGKILL
-    /// from this path. Only ESRCH establishes that the original group no longer exists.
+    /// Signal zero checks existence and permissions without delivering a signal. This
+    /// remains safe after root reaping: a reused numeric group cannot receive SIGKILL from
+    /// this path. ESRCH establishes that the group no longer exists.
+    ///
+    /// A group also "exists" while it holds only unreaped zombies, and their parent may
+    /// never reap them: after an agent is killed inside WSL, its orphans are adopted by a
+    /// session `init` that lingers without waiting for them. A zombie cannot execute, so on
+    /// Linux the group's members are read from `/proc`, and a group with no member that can
+    /// still run counts as gone. Two readings must agree, because `/proc` is not a snapshot.
+    /// A reused group number with live members still reads as present, which only ever
+    /// delays confirmation.
+    ///
     /// On Linux any other error refuses confirmation outright. On macOS EPERM is also the
     /// answer for a group of unreaped zombies, so it means "not yet" and never "absent".
     pub(super) fn group_is_absent(group: Pid) -> Result<bool> {
@@ -909,12 +1147,50 @@ mod unix_launch {
         }
         match killpg(group, None::<Signal>) {
             Err(Errno::ESRCH) => Ok(true),
-            Ok(()) | Err(Errno::EINTR) => Ok(false),
+            Ok(()) | Err(Errno::EINTR) => only_zombies_remain(group),
             Err(Errno::EPERM) if cfg!(target_os = "macos") => Ok(false),
             Err(_) => Err(Error::tool(
                 "Native command process-group disappearance could not be verified.",
             )),
         }
+    }
+
+    /// Linux: the group exists, but does any member still run? Observation only.
+    #[cfg(target_os = "linux")]
+    fn only_zombies_remain(group: Pid) -> Result<bool> {
+        let unreadable = || Error::tool("Native command process-group members could not be read.");
+        // State and process group follow the parenthesised command name, which may itself
+        // contain spaces and parentheses: read from the last closing one.
+        let live_member = |stat: &str| {
+            let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
+            let state = fields.next()?;
+            let member = fields.nth(1)?.parse::<i32>().ok()? == group.as_raw();
+            Some(member && !matches!(state, "Z" | "X" | "x"))
+        };
+        let any_live = || -> Result<bool> {
+            for entry in std::fs::read_dir("/proc").map_err(|_| unreadable())? {
+                let name = entry.map_err(|_| unreadable())?.file_name();
+                let Some(pid) = name
+                    .to_str()
+                    .filter(|n| n.bytes().all(|b| b.is_ascii_digit()))
+                else {
+                    continue;
+                };
+                // A process that ended while the directory was read is simply gone.
+                if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                    && live_member(&stat) == Some(true)
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        };
+        Ok(!any_live()? && !any_live()?)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn only_zombies_remain(_: Pid) -> Result<bool> {
+        Ok(false)
     }
 }
 
@@ -935,7 +1211,10 @@ pub mod linux {
         Launched, checked_launch, group_is_absent, kill_owned_group, launch, ownership_error,
         refused,
     };
-    use super::{ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit};
+    use super::{
+        Containment, ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit,
+        TreeIdentity, current_boot_id,
+    };
     use crate::Result;
     use crate::process::Cmd;
 
@@ -1049,6 +1328,13 @@ pub mod linux {
 
     #[async_trait]
     impl ManagedProcessTree for LinuxProcessTree {
+        fn identity(&self) -> Option<TreeIdentity> {
+            Some(TreeIdentity::UnixGroup {
+                group: self.group.as_raw(),
+                boot_id: current_boot_id(),
+            })
+        }
+
         async fn wait_root(&mut self) -> Result<ProcessExit> {
             loop {
                 if let Some(exit) = self.poll_root()? {
@@ -1172,6 +1458,10 @@ pub mod linux {
     impl ManagedCommandRunner for LinuxCommandRunner {
         fn platform(&self) -> CommandPlatform {
             CommandPlatform::Linux
+        }
+
+        fn containment(&self) -> Containment {
+            Containment::ProcessGroup
         }
 
         fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
@@ -1330,7 +1620,7 @@ pub mod linux {
         }
 
         #[tokio::test]
-        async fn early_root_exit_never_reports_completion_while_group_remains() {
+        async fn early_root_exit_ends_its_descendants_and_reports_the_real_exit_code() {
             tokio::time::timeout(Duration::from_secs(10), async {
                 let (child, group) = fixture("sleep 30 & exit 23");
                 let (progress, _) = watch::channel(ExecutionProgress::default());
@@ -1342,17 +1632,62 @@ pub mod linux {
                 )
                 .await;
 
+                // The descendant is ended and cleanup is confirmed even where nobody reaps
+                // the orphan: a zombie cannot run, so it does not keep the outcome unknown.
+                assert_eq!(result.status, ExecutionStatus::Failure, "{result:?}");
                 assert_eq!(result.exit_code, Some(23));
-                match result.status {
-                    ExecutionStatus::Failure => assert!(group_is_absent(group).unwrap()),
-                    // Some test hosts do not promptly reap orphan zombies. Their continued
-                    // group existence must remain Unknown, not a fabricated cleanup success.
-                    ExecutionStatus::Unknown => assert!(result.detail.is_some()),
-                    other => panic!("unexpected native cleanup result: {other:?}"),
-                }
+                assert!(result.detail.is_none());
+                assert!(group_is_absent(group).unwrap());
             })
             .await
             .unwrap();
+        }
+
+        #[tokio::test]
+        async fn a_group_of_unreaped_zombies_counts_as_gone_and_a_live_member_does_not() {
+            use nix::sys::signal::killpg;
+
+            // A group leader that has exited and is deliberately not reaped: a zombie.
+            let mut zombie = Command::new("/bin/sh")
+                .args(["-c", "exit 0"])
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let group = Pid::from_raw(zombie.id() as i32);
+            let state = || {
+                let stat = std::fs::read_to_string(format!("/proc/{group}/stat")).unwrap();
+                stat.rsplit_once(')')
+                    .unwrap()
+                    .1
+                    .trim()
+                    .chars()
+                    .next()
+                    .unwrap()
+            };
+            while state() != 'Z' {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            // The group still exists for signal zero, yet nothing in it can run.
+            assert!(killpg(group, None::<Signal>).is_ok());
+            assert!(group_is_absent(group).unwrap());
+            zombie.wait().unwrap();
+            assert!(group_is_absent(group).unwrap());
+
+            // A member that can still run keeps the group present, zombie leader or not.
+            let mut leader = Command::new("/bin/sh")
+                .args(["-c", "sleep 30 & exit 0"])
+                .stdout(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let group = Pid::from_raw(leader.id() as i32);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert!(!group_is_absent(group).unwrap());
+            killpg(group, Signal::SIGKILL).unwrap();
+            leader.wait().unwrap();
+            while !group_is_absent(group).unwrap() {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
         }
 
         #[tokio::test]
@@ -1394,7 +1729,10 @@ pub mod macos {
         Launched, checked_launch, group_is_absent, kill_owned_group, launch, ownership_error,
         refused,
     };
-    use super::{ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit};
+    use super::{
+        Containment, ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit,
+        TreeIdentity, current_boot_id,
+    };
     use crate::Result;
     use crate::process::Cmd;
 
@@ -1582,6 +1920,13 @@ pub mod macos {
 
     #[async_trait]
     impl ManagedProcessTree for MacosProcessTree {
+        fn identity(&self) -> Option<TreeIdentity> {
+            Some(TreeIdentity::UnixGroup {
+                group: self.group.as_raw(),
+                boot_id: current_boot_id(),
+            })
+        }
+
         async fn wait_root(&mut self) -> Result<ProcessExit> {
             loop {
                 if let Some(exit) = self.poll_root()? {
@@ -1704,6 +2049,10 @@ pub mod macos {
     impl ManagedCommandRunner for MacosCommandRunner {
         fn platform(&self) -> CommandPlatform {
             CommandPlatform::Macos
+        }
+
+        fn containment(&self) -> Containment {
+            Containment::ProcessGroup
         }
 
         fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
@@ -1842,6 +2191,710 @@ pub mod macos {
             assert!(refuse_shell_fallback(&file("text", b"echo hi\n")).is_err());
             assert!(refuse_shell_fallback(&file("empty", b"")).is_err());
             assert!(refuse_shell_fallback(&dir.path().join("missing")).is_err());
+        }
+    }
+}
+
+/// Windows native execution: job-object ownership and the exact-launch adapter.
+#[cfg(windows)]
+pub mod windows {
+    use std::os::windows::io::{AsRawHandle as _, OwnedHandle};
+    use std::path::Path;
+    use std::process::{Child, Command, ExitStatus, Stdio};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use ::windows::Win32::System::Threading::CREATE_NO_WINDOW;
+    use async_trait::async_trait;
+    use contextual_protocol::commands::CommandPlatform;
+    use process_wrap::std::{ChildWrapper, CommandWrap, CommandWrapper, CreationFlags, JobObject};
+    use win32job::{ExtendedLimitInfo, Job};
+
+    use super::launch_request::{checked_launch, refused};
+    use super::{Containment, ManagedChild, ManagedCommandRunner, ManagedProcessTree, ProcessExit};
+    use crate::process::Cmd;
+    use crate::{Error, Result};
+
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+    fn ownership_error() -> Error {
+        Error::tool("Native command process ownership could not be verified.")
+    }
+
+    /// Puts the still-suspended process into the observed job.
+    ///
+    /// `process-wrap` runs this hook after process creation and before its own job
+    /// assignment and resume, so the process is a member before any of its code runs and
+    /// every descendant inherits the membership.
+    #[derive(Debug)]
+    struct ObservedJob(Arc<Job>);
+
+    impl CommandWrapper for ObservedJob {
+        fn post_spawn(
+            &mut self,
+            _command: &mut Command,
+            child: &mut Child,
+            _core: &CommandWrap,
+        ) -> std::io::Result<()> {
+            let assigned = self.0.assign_process(child.as_raw_handle() as isize);
+            if let Err(error) = assigned {
+                // Still suspended: end it before it can run, since nothing else owns it.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::other(error));
+            }
+            Ok(())
+        }
+    }
+
+    /// A process tree held by two nested job objects.
+    ///
+    /// The inner job belongs to `process-wrap` and is the one that is terminated. The outer
+    /// job is ours: its member list is how an empty tree is confirmed, and it is created
+    /// kill-on-close, so dropping this value, or this process dying, ends the tree. Handles
+    /// identify the root and the jobs, so there is no numeric-ID reuse to guard against.
+    ///
+    /// Root exit is polled without consuming anything. Cleanup terminates the inner job,
+    /// waits until the root has exited and then until the outer job reports no members.
+    /// A terminated process leaves the list as soon as termination begins; its handles and
+    /// files can stay open for a moment longer.
+    ///
+    /// This is job containment, not a sandbox. Work that a member asks another process to
+    /// do — a service, a scheduled task, an already running server — is outside it.
+    pub struct WindowsProcessTree {
+        child: Box<dyn ChildWrapper>,
+        observed: Arc<Job>,
+        exit: Option<ProcessExit>,
+        kill_requested: bool,
+        cleanup_confirmed: bool,
+    }
+
+    fn process_exit(status: ExitStatus) -> ProcessExit {
+        ProcessExit {
+            success: status.success(),
+            code: status.code(),
+        }
+    }
+
+    impl WindowsProcessTree {
+        fn poll_root(&mut self) -> Result<Option<ProcessExit>> {
+            if let Some(exit) = self.exit {
+                return Ok(Some(exit));
+            }
+            match self.child.try_wait() {
+                Ok(None) => Ok(None),
+                Ok(Some(status)) => {
+                    // A root that this tree terminated has no exit code of its own; the
+                    // code Windows reports is the one passed to the termination call.
+                    let exit = if self.kill_requested {
+                        ProcessExit {
+                            success: false,
+                            code: None,
+                        }
+                    } else {
+                        process_exit(status)
+                    };
+                    self.exit = Some(exit);
+                    Ok(Some(exit))
+                }
+                Err(_) => Err(ownership_error()),
+            }
+        }
+
+        fn request_termination(&mut self) -> Result<()> {
+            // Record a natural exit first so that it is not reported as a termination.
+            self.poll_root()?;
+            self.child.start_kill().map_err(|_| {
+                Error::tool("Native command job termination could not be requested.")
+            })?;
+            self.kill_requested = true;
+            Ok(())
+        }
+
+        fn job_is_empty(&self) -> Result<bool> {
+            self.observed
+                .query_process_id_list()
+                .map(|members| members.is_empty())
+                .map_err(|_| Error::tool("Native command job membership could not be verified."))
+        }
+    }
+
+    #[async_trait]
+    impl ManagedProcessTree for WindowsProcessTree {
+        async fn wait_root(&mut self) -> Result<ProcessExit> {
+            loop {
+                if let Some(exit) = self.poll_root()? {
+                    return Ok(exit);
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+
+        async fn terminate_and_wait(&mut self) -> Result<ProcessExit> {
+            if self.cleanup_confirmed {
+                return self.exit.ok_or_else(ownership_error);
+            }
+            if !self.kill_requested {
+                self.request_termination()?;
+            }
+            let exit = loop {
+                if let Some(exit) = self.poll_root()? {
+                    break exit;
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            };
+            // A supervisor deadline can interrupt this loop; the tree then stays
+            // unconfirmed, and Drop still closes the kill-on-close job.
+            while !self.job_is_empty()? {
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            self.cleanup_confirmed = true;
+            Ok(exit)
+        }
+    }
+
+    impl Drop for WindowsProcessTree {
+        fn drop(&mut self) {
+            if !self.cleanup_confirmed {
+                let _ = self.child.start_kill();
+            }
+            // Closing the last handle of the observed job then terminates any member left.
+        }
+    }
+
+    /// Exact launch of one already approved, already revalidated invocation on Windows.
+    ///
+    /// The program is started directly with the standard library's argument quoting, exactly
+    /// `Cmd::env`, the given working directory, the null device as stdin, two pipes and no
+    /// console window. It is created suspended, placed in both job objects and only then
+    /// resumed, so ownership exists before any of its code runs.
+    ///
+    /// Only `.exe` and `.com` programs are accepted: the standard library would run a batch
+    /// file through `cmd.exe`, which would be an implicit shell. Pipes, the job object and
+    /// the runtime check all precede the launch, and a process whose job assignment or
+    /// resume fails is terminated while still suspended, so an error means that the
+    /// requested program did not run.
+    ///
+    /// Limits: arguments reach the program as a command line, quoted for the standard
+    /// C runtime rules; a program with its own command-line parser may read them
+    /// differently. A handle that other code in this process made inheritable is inherited
+    /// by the child. `spawn` must run inside a Tokio runtime.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct WindowsCommandRunner {
+        _explicit: (),
+    }
+
+    impl WindowsCommandRunner {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+
+    fn refuse_script_launchers(program: &Path) -> Result<()> {
+        let direct = program
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("com")
+            });
+        if direct {
+            Ok(())
+        } else {
+            Err(refused(
+                "only .exe and .com programs are started directly, and no shell is substituted.",
+            ))
+        }
+    }
+
+    type Pipes = (
+        Stdio,
+        tokio::process::ChildStdout,
+        Stdio,
+        tokio::process::ChildStderr,
+    );
+
+    /// Both pipes exist, with their read ends owned by the runtime, before the launch.
+    fn output_pipes() -> Result<Pipes> {
+        let failed = |_| refused("an output pipe could not be created.");
+        let (stdout, stdout_writer) = std::io::pipe().map_err(failed)?;
+        let (stderr, stderr_writer) = std::io::pipe().map_err(failed)?;
+        let stdout = std::process::ChildStdout::from(OwnedHandle::from(stdout));
+        let stderr = std::process::ChildStderr::from(OwnedHandle::from(stderr));
+        Ok((
+            Stdio::from(stdout_writer),
+            tokio::process::ChildStdout::from_std(stdout).map_err(failed)?,
+            Stdio::from(stderr_writer),
+            tokio::process::ChildStderr::from_std(stderr).map_err(failed)?,
+        ))
+    }
+
+    impl ManagedCommandRunner for WindowsCommandRunner {
+        fn platform(&self) -> CommandPlatform {
+            CommandPlatform::Windows
+        }
+
+        // The observed job is kill-on-close and this process holds its only handle.
+        fn containment(&self) -> Containment {
+            Containment::OwnerBound
+        }
+
+        fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
+            let cwd = checked_launch(&command)?;
+            refuse_script_launchers(Path::new(&command.program))?;
+            if tokio::runtime::Handle::try_current().is_err() {
+                return Err(refused("no async runtime is available to read its output."));
+            }
+            let (stdout_writer, stdout, stderr_writer, stderr) = output_pipes()?;
+            let mut limits = ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let observed = Arc::new(
+                Job::create_with_limit_info(&limits)
+                    .map_err(|_| refused("a job object could not be created."))?,
+            );
+
+            let mut launch = Command::new(&command.program);
+            launch
+                .args(&command.args)
+                .env_clear()
+                .envs(command.env.iter().map(|(name, value)| (name, value)))
+                .current_dir(cwd)
+                .stdin(Stdio::null())
+                .stdout(stdout_writer)
+                .stderr(stderr_writer);
+            let mut launch = CommandWrap::from(launch);
+            launch
+                .wrap(CreationFlags(CREATE_NO_WINDOW))
+                .wrap(ObservedJob(observed.clone()))
+                .wrap(JobObject);
+
+            let child = launch
+                .spawn()
+                .map_err(|error| refused(&format!("{error}.")))?;
+            // Closes this process's copies of the pipe write ends and the wrapper's
+            // reference to the observed job, leaving the tree as its only owner.
+            drop(launch);
+
+            Ok(ManagedChild {
+                tree: Box::new(WindowsProcessTree {
+                    child,
+                    observed,
+                    exit: None,
+                    kill_requested: false,
+                    cleanup_confirmed: false,
+                }),
+                stdout: Box::new(stdout),
+                stderr: Box::new(stderr),
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::io::{Read as _, Write as _};
+
+        use tokio::sync::watch;
+        use tokio_util::sync::CancellationToken;
+
+        use super::*;
+        use crate::commands::execution::{
+            ExecutionProgress, ExecutionResult, ExecutionStatus, OUTPUT_LIMIT, run_child,
+        };
+
+        const HELPER: &str = "commands::execution::windows::tests::helper_process";
+        const BEGIN: &str = "<<helper>>";
+        const END: &str = "<</helper>>";
+
+        /// Not a test of its own. Started as a child by the tests below, this binary runs
+        /// only this function, which reports exactly what the child process received.
+        #[test]
+        fn helper_process() {
+            let mut arguments = std::env::args().skip_while(|argument| argument != "--");
+            if arguments.next().is_none() {
+                return;
+            }
+            let arguments: Vec<String> = arguments.collect();
+            let mut stdout = std::io::stdout().lock();
+            match arguments.first().map(String::as_str) {
+                Some("flood") => {
+                    let mut stderr = std::io::stderr().lock();
+                    for _ in 0..8192 {
+                        stdout.write_all(b"0123456789abcdef").unwrap();
+                        stderr.write_all(b"fedcba9876543210").unwrap();
+                    }
+                    std::process::exit(7);
+                }
+                _ => {
+                    let mut input = Vec::new();
+                    std::io::stdin().read_to_end(&mut input).unwrap();
+                    let mut environment: Vec<String> = std::env::vars()
+                        .filter(|(name, _)| !name.starts_with('='))
+                        .map(|(name, value)| format!("{name}={value}"))
+                        .collect();
+                    environment.sort();
+                    let report = serde_json::json!({
+                        "args": arguments,
+                        "env": environment,
+                        "cwd": std::env::current_dir().unwrap(),
+                        "stdinBytes": input.len(),
+                    });
+                    writeln!(stdout, "{BEGIN}{report}{END}").unwrap();
+                }
+            }
+        }
+
+        fn system(program: &str) -> String {
+            let root = std::env::var("SystemRoot").unwrap();
+            format!("{root}\\System32\\{program}")
+        }
+
+        fn command(program: &str, args: &[&str], env: &[(&str, &str)], cwd: &Path) -> Cmd {
+            let mut command = Cmd::new(program, args.iter().copied()).cwd(cwd);
+            command.env = env
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect();
+            command
+        }
+
+        /// This test binary, restricted to `helper_process`, with `args` passed through.
+        fn helper(args: &[&str], env: &[(&str, &str)], cwd: &Path) -> Cmd {
+            let program = std::env::current_exe().unwrap();
+            let mut all = vec![HELPER, "--exact", "--nocapture", "--test-threads=1", "--"];
+            all.extend(args);
+            command(program.to_str().unwrap(), &all, env, cwd)
+        }
+
+        fn shell(script: &str, cwd: &Path) -> Cmd {
+            let root = std::env::var("SystemRoot").unwrap();
+            command(
+                &system("cmd.exe"),
+                &["/d", "/c", script],
+                &[("SystemRoot", &root)],
+                cwd,
+            )
+        }
+
+        async fn run(command: Cmd, timeout: Duration) -> ExecutionResult {
+            let child = WindowsCommandRunner::new().spawn(command).unwrap();
+            let (progress, _) = watch::channel(ExecutionProgress::default());
+            run_child(child, timeout, &CancellationToken::new(), &progress).await
+        }
+
+        fn report(result: &ExecutionResult) -> serde_json::Value {
+            let text = &result.output.stdout.text;
+            let start = text.find(BEGIN).unwrap_or_else(|| panic!("{result:?}")) + BEGIN.len();
+            let end = text.find(END).unwrap();
+            serde_json::from_str(&text[start..end]).unwrap()
+        }
+
+        fn refusal(command: Cmd) -> String {
+            match WindowsCommandRunner::new().spawn(command) {
+                Ok(_) => panic!("the launch adapter started a command it had to refuse"),
+                Err(error) => error.message,
+            }
+        }
+
+        #[tokio::test]
+        async fn launch_preserves_arguments_environment_cwd_and_null_stdin() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let cwd = dunce::canonicalize(cwd.path()).unwrap();
+                let arguments = [
+                    "a b",
+                    "",
+                    "*",
+                    "%PATH%",
+                    "q\"d",
+                    "trailing\\",
+                    "sp ace\\",
+                    "back\\\"slash",
+                    "^&|<>",
+                    "-n",
+                    "/c",
+                ];
+                // The parent's variables include at least the Cargo test variables.
+                assert!(std::env::vars_os().count() > 2);
+                let result = run(
+                    helper(&arguments, &[("ONLY", "this one"), ("Mixed", "")], &cwd),
+                    Duration::from_secs(20),
+                )
+                .await;
+
+                assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+                assert!(result.output.stdout.complete && result.output.stderr.complete);
+                let report = report(&result);
+                assert_eq!(report["args"], serde_json::json!(arguments));
+                assert_eq!(
+                    report["env"],
+                    serde_json::json!(["Mixed=", "ONLY=this one"])
+                );
+                assert_eq!(Path::new(report["cwd"].as_str().unwrap()), cwd);
+                assert_eq!(report["stdinBytes"], 0);
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn failed_start_reports_that_nothing_ran() {
+            let cwd = tempfile::tempdir().unwrap();
+            let marker = cwd.path().join("ran");
+            let path = |name: &str| cwd.path().join(name).to_str().unwrap().to_owned();
+            let touch = format!("echo x > \"{}\"", marker.display());
+
+            assert!(
+                refusal(command(&path("missing.exe"), &[], &[], cwd.path()))
+                    .contains("not started")
+            );
+            // A batch file would be run through cmd.exe by the standard library.
+            std::fs::write(path("script.bat"), format!("{touch}\r\n")).unwrap();
+            std::fs::write(path("script.cmd"), format!("{touch}\r\n")).unwrap();
+            refusal(command(&path("script.bat"), &[], &[], cwd.path()));
+            refusal(command(&path("script.cmd"), &[], &[], cwd.path()));
+            // Not an executable image, whatever its name says.
+            std::fs::write(path("text.exe"), format!("{touch}\r\n")).unwrap();
+            refusal(command(&path("text.exe"), &[], &[], cwd.path()));
+            // A missing working directory.
+            refusal(shell(&touch, &cwd.path().join("gone")));
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(!marker.exists());
+        }
+
+        #[tokio::test]
+        async fn inexact_launch_requests_are_refused_before_launch() {
+            let cwd = tempfile::tempdir().unwrap();
+            let marker = cwd.path().join("ran");
+            let touch = format!("echo x > \"{}\"", marker.display());
+            let root = std::env::var("SystemRoot").unwrap();
+            let cmd = system("cmd.exe");
+            let args = ["/d", "/c", touch.as_str()];
+            let base = ("SystemRoot", root.as_str());
+
+            // No PATH search, even with a PATH that would find the program.
+            let path = ("PATH", &*format!("{root}\\System32"));
+            refusal(command("cmd.exe", &args, &[base, path], cwd.path()));
+            refusal(command(&cmd, &args, &[base], Path::new(".")));
+            let mut no_cwd = command(&cmd, &args, &[base], cwd.path());
+            no_cwd.cwd = None;
+            refusal(no_cwd);
+            for env in [
+                [("", "x"), base],
+                [("A=B", "x"), base],
+                [("A", "x\0y"), base],
+                // Windows environment names differ only by case here.
+                [("systemroot", root.as_str()), base],
+            ] {
+                refusal(command(&cmd, &args, &env, cwd.path()));
+            }
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(!marker.exists());
+        }
+
+        #[test]
+        fn launch_outside_a_runtime_is_refused() {
+            let cwd = tempfile::tempdir().unwrap();
+            let marker = cwd.path().join("ran");
+            refusal(shell(
+                &format!("echo x > \"{}\"", marker.display()),
+                cwd.path(),
+            ));
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(!marker.exists());
+        }
+
+        #[tokio::test]
+        async fn launched_output_is_bounded_and_still_drained() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let result =
+                    run(helper(&["flood"], &[], cwd.path()), Duration::from_secs(20)).await;
+
+                assert_eq!(result.status, ExecutionStatus::Failure, "{result:?}");
+                assert_eq!(result.exit_code, Some(7));
+                let stderr = &result.output.stderr;
+                assert_eq!(stderr.bytes_seen, 8192 * 16);
+                assert_eq!(stderr.bytes_retained, OUTPUT_LIMIT);
+                assert!(stderr.truncated && stderr.complete && !stderr.read_failed);
+                // The test harness adds a line of its own to stdout.
+                let stdout = &result.output.stdout;
+                assert!(stdout.bytes_seen >= 8192 * 16);
+                assert!(stdout.truncated && stdout.complete && !stdout.read_failed);
+            })
+            .await
+            .unwrap();
+        }
+
+        /// A root (`cmd.exe`) that starts a descendant (`ping.exe`) and waits for it,
+        /// with a second handle on the tree's own job for looking at it from outside.
+        async fn tree_with_descendant(cwd: &Path) -> (WindowsProcessTree, Arc<Job>) {
+            let mut tree = tree(shell(
+                &format!("{} -n 60 127.0.0.1 >nul", system("ping.exe")),
+                cwd,
+            ));
+            let observed = tree.observed.clone();
+            // Wait for the descendant, without consuming anything from the root.
+            while observed.query_process_id_list().unwrap().len() < 2 {
+                assert!(tree.poll_root().unwrap().is_none());
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+            (tree, observed)
+        }
+
+        /// The tree alone, built the way the runner builds it, with output discarded.
+        fn tree(command: Cmd) -> WindowsProcessTree {
+            let mut limits = ExtendedLimitInfo::new();
+            limits.limit_kill_on_job_close();
+            let observed = Arc::new(Job::create_with_limit_info(&limits).unwrap());
+            let mut launch = Command::new(&command.program);
+            launch
+                .args(&command.args)
+                .env_clear()
+                .envs(command.env.iter().map(|(name, value)| (name, value)))
+                .current_dir(command.cwd.as_deref().unwrap())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let mut launch = CommandWrap::from(launch);
+            launch
+                .wrap(CreationFlags(CREATE_NO_WINDOW))
+                .wrap(ObservedJob(observed.clone()))
+                .wrap(JobObject);
+            let child = launch.spawn().unwrap();
+            drop(launch);
+            WindowsProcessTree {
+                child,
+                observed,
+                exit: None,
+                kill_requested: false,
+                cleanup_confirmed: false,
+            }
+        }
+
+        #[tokio::test]
+        async fn the_process_is_in_the_job_before_it_runs_and_descendants_join_it() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let (mut tree, observed) = tree_with_descendant(cwd.path()).await;
+                let members = observed.query_process_id_list().unwrap();
+                assert!(members.contains(&(tree.child.id() as usize)), "{members:?}");
+
+                let exit = tree.terminate_and_wait().await.unwrap();
+                assert_eq!(
+                    exit,
+                    ProcessExit {
+                        success: false,
+                        code: None
+                    }
+                );
+                assert!(observed.query_process_id_list().unwrap().is_empty());
+                assert_eq!(tree.terminate_and_wait().await.unwrap(), exit);
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn root_exit_is_observed_without_ending_its_descendants() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let mut tree = tree(shell(
+                    &format!(
+                        "start /b {} -n 60 127.0.0.1 >nul & exit 23",
+                        system("ping.exe")
+                    ),
+                    cwd.path(),
+                ));
+                let observed = tree.observed.clone();
+                let expected = ProcessExit {
+                    success: false,
+                    code: Some(23),
+                };
+
+                assert_eq!(tree.wait_root().await.unwrap(), expected);
+                assert_eq!(tree.wait_root().await.unwrap(), expected);
+                assert!(!tree.kill_requested);
+                assert!(!observed.query_process_id_list().unwrap().is_empty());
+
+                // The natural exit code survives the cleanup that ends the descendant.
+                assert_eq!(tree.terminate_and_wait().await.unwrap(), expected);
+                assert!(observed.query_process_id_list().unwrap().is_empty());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn dropping_the_tree_ends_every_member() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let (tree, observed) = tree_with_descendant(cwd.path()).await;
+                drop(tree);
+                while !observed.query_process_id_list().unwrap().is_empty() {
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn closing_the_last_job_handle_ends_the_tree_without_a_termination_call() {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let marker = cwd.path().join("ran");
+                let script = format!(
+                    "{} -n 4 127.0.0.1 >nul & echo x > \"{}\"",
+                    system("ping.exe"),
+                    marker.display()
+                );
+                let mut tree = tree(shell(&script, cwd.path()));
+                // Skip Drop's termination call, as a crash of this process would.
+                tree.cleanup_confirmed = true;
+                drop(tree);
+
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                assert!(!marker.exists());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn stopping_and_timing_out_a_launched_command_end_its_descendants() {
+            tokio::time::timeout(Duration::from_secs(40), async {
+                let cwd = tempfile::tempdir().unwrap();
+                let script = format!("{} -n 60 127.0.0.1", system("ping.exe"));
+                let script = script.as_str();
+
+                let child = WindowsCommandRunner::new()
+                    .spawn(shell(script, cwd.path()))
+                    .unwrap();
+                let (progress, mut seen) = watch::channel(ExecutionProgress::default());
+                let cancel = CancellationToken::new();
+                let stop = cancel.clone();
+                let task = tokio::spawn(async move {
+                    run_child(child, Duration::from_secs(30), &stop, &progress).await
+                });
+                // Output from the descendant shows that it is running and holds the pipe.
+                while seen.borrow_and_update().stdout.text.is_empty() {
+                    seen.changed().await.unwrap();
+                }
+                cancel.cancel();
+                let result = task.await.unwrap();
+                assert_eq!(result.status, ExecutionStatus::Cancelled, "{result:?}");
+                assert!(result.spawned && result.cancelled && result.detail.is_none());
+                assert_eq!(result.exit_code, None);
+                assert!(result.output.stdout.complete && result.output.stderr.complete);
+
+                let result = run(shell(script, cwd.path()), Duration::from_millis(1500)).await;
+                assert_eq!(result.status, ExecutionStatus::TimedOut, "{result:?}");
+                assert!(result.spawned && result.timed_out && result.detail.is_none());
+                assert!(result.output.stdout.complete && result.output.stderr.complete);
+            })
+            .await
+            .unwrap();
         }
     }
 }
@@ -2188,6 +3241,14 @@ mod tests {
 
     #[async_trait]
     impl ExecutionJournal for Journal {
+        async fn acquire_ownership(
+            &self,
+            _: &ProjectRoot,
+            _: &std::path::Path,
+        ) -> Result<OwnershipGuard> {
+            Ok(Box::new(()))
+        }
+
         async fn check_recovery(&self, _: &ProjectRoot, _: &std::path::Path) -> Result<()> {
             if self.fail_recovery {
                 Err(Error::internal("test recovery failure"))
@@ -2338,10 +3399,22 @@ mod tests {
     ) {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().to_str().unwrap().to_owned();
-        host.allow_root(&path).await.unwrap();
+        let (gate, call, plan) = proposal_at(&host, &path, program, args, 1).await;
+        (root, host, gate, call, plan)
+    }
+
+    /// A freshly prepared and proposed command in an existing project directory.
+    async fn proposal_at(
+        host: &Arc<LocalHost>,
+        path: &str,
+        program: &str,
+        args: &[&str],
+        timeout_seconds: u32,
+    ) -> (ApprovalGate, CallId, ReviewPlan) {
+        host.allow_root(path).await.unwrap();
         let prepared = host
             .prepare_command(PrepareCommand {
-                root: path.clone(),
+                root: path.to_owned(),
                 project_epoch: "project-1".into(),
                 command_json: serde_json::json!({
                     "version": 1,
@@ -2352,7 +3425,7 @@ mod tests {
                         "args": args
                     },
                     "cwd": ".",
-                    "timeoutSeconds": 1,
+                    "timeoutSeconds": timeout_seconds,
                     "environment": []
                 })
                 .to_string(),
@@ -2362,7 +3435,7 @@ mod tests {
         let plan = ReviewPlan::from_prepared(
             ProjectRoot {
                 location: Location::Local,
-                path,
+                path: path.to_owned(),
             },
             prepared,
         )
@@ -2373,7 +3446,7 @@ mod tests {
             call: "call-1".into(),
         };
         gate.propose(call.clone(), plan.clone()).unwrap();
-        (root, host, gate, call, plan)
+        (gate, call, plan)
     }
 
     fn runner(plan: &ReviewPlan) -> Runner {
@@ -2470,6 +3543,46 @@ mod tests {
         assert_eq!(result.exit_code, Some(3));
         assert_eq!(result.output.stdout.text, "out:a b");
         assert_eq!(result.output.stderr.text, "err");
+        assert!(marker.exists());
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
+        gate.finish(&call, result.outcome()).unwrap();
+        assert!(gate.approve(&call, &plan).is_err());
+    }
+
+    /// The complete local path with the native Windows adapter.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn approved_command_runs_once_through_the_native_windows_runner() {
+        let journal = Arc::new(Journal::default());
+        let configured = Arc::new(LocalHost::with_command_backend(
+            Arc::new(windows::WindowsCommandRunner::new()),
+            journal.clone(),
+        ));
+        let cmd = format!(
+            "{}\\System32\\cmd.exe",
+            std::env::var("SystemRoot").unwrap()
+        );
+        let script = "echo out& echo err>&2& echo x>ran& exit 3";
+        let (root, host, mut gate, call, plan) =
+            proposal_for(configured, &cmd, &["/d", "/c", script]).await;
+        let host: Arc<dyn WorkspaceHost> = host;
+        let marker = root.path().join("ran");
+
+        let approval = gate.approve(&call, &plan).unwrap();
+        assert!(!marker.exists());
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = host
+            .start_command(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::Failure, "{result:?}");
+        assert_eq!(result.exit_code, Some(3));
+        // The carriage return of each line is shown escaped, not interpreted.
+        assert_eq!(result.output.stdout.text, "out\\u{d}\n");
+        assert_eq!(result.output.stderr.text, "err\\u{d}\n");
         assert!(marker.exists());
         assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
         assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
@@ -2769,6 +3882,14 @@ mod tests {
 
         #[async_trait]
         impl ExecutionJournal for LegacyJournal {
+            async fn acquire_ownership(
+                &self,
+                _: &ProjectRoot,
+                _: &std::path::Path,
+            ) -> Result<OwnershipGuard> {
+                Ok(Box::new(()))
+            }
+
             async fn record_intent(&self, _: &ExecutionIntent) -> Result<()> {
                 self.intents.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -2846,6 +3967,14 @@ mod tests {
 
         #[async_trait]
         impl ExecutionJournal for HeldJournal {
+            async fn acquire_ownership(
+                &self,
+                _: &ProjectRoot,
+                _: &std::path::Path,
+            ) -> Result<OwnershipGuard> {
+                Ok(Box::new(()))
+            }
+
             async fn check_recovery(&self, _: &ProjectRoot, _: &std::path::Path) -> Result<()> {
                 Ok(())
             }
@@ -3069,6 +4198,661 @@ mod tests {
         capture.push(&bytes[..1]);
         capture.push(&bytes[1..]);
         assert_eq!(capture.snapshot().text, "雪");
+    }
+
+    // ----- M3: ownership across processes, crash recovery and reconciliation -----
+
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos",
+        windows
+    ))]
+    mod across_processes {
+        use std::io::{BufRead as _, BufReader};
+        use std::path::{Path, PathBuf};
+        use std::process::{Child, ChildStdout, Command, Stdio};
+
+        use super::*;
+        use crate::commands::journal::FileExecutionJournal;
+
+        const HELPER: &str = "commands::execution::tests::across_processes::helper_process";
+        const PREFIX: &str = "helper: ";
+
+        fn native_runner() -> Arc<dyn ManagedCommandRunner> {
+            #[cfg(target_os = "linux")]
+            let runner = linux::LinuxCommandRunner::new();
+            #[cfg(target_os = "macos")]
+            let runner = macos::MacosCommandRunner::new();
+            #[cfg(windows)]
+            let runner = windows::WindowsCommandRunner::new();
+            Arc::new(runner)
+        }
+
+        #[cfg(windows)]
+        fn system(program: &str) -> String {
+            format!(
+                "{}\\System32\\{program}",
+                std::env::var("SystemRoot").unwrap()
+            )
+        }
+
+        /// Prints `started`, then stays alive for about two minutes.
+        fn long_command() -> (String, Vec<String>) {
+            #[cfg(unix)]
+            let command = (
+                "/bin/sh".to_owned(),
+                "echo started; exec sleep 120".to_owned(),
+            );
+            #[cfg(windows)]
+            let command = (
+                system("cmd.exe"),
+                format!("echo started& {} -n 120 127.0.0.1 >nul", system("ping.exe")),
+            );
+            let flag = if cfg!(windows) { "/c" } else { "-c" };
+            (command.0, vec![flag.to_owned(), command.1])
+        }
+
+        /// Creates the file `ran` in the project directory.
+        fn marker_command() -> (String, Vec<String>) {
+            #[cfg(unix)]
+            let command = ("/bin/sh".to_owned(), ": > ran".to_owned());
+            #[cfg(windows)]
+            let command = (system("cmd.exe"), "echo x>ran".to_owned());
+            let flag = if cfg!(windows) { "/c" } else { "-c" };
+            (command.0, vec![flag.to_owned(), command.1])
+        }
+
+        fn local(root: &str) -> ProjectRoot {
+            ProjectRoot {
+                location: Location::Local,
+                path: root.to_owned(),
+            }
+        }
+
+        async fn open(journal: &Path) -> Arc<FileExecutionJournal> {
+            Arc::new(
+                FileExecutionJournal::open(journal.to_path_buf())
+                    .await
+                    .unwrap(),
+            )
+        }
+
+        /// One freshly reviewed and approved attempt to create the marker file.
+        /// Err is a synchronous admission refusal; either way nothing is retried.
+        async fn attempt(host: &Arc<LocalHost>, root: &str) -> Result<ExecutionResult> {
+            let (program, args) = marker_command();
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (mut gate, call, plan) = proposal_at(host, root, &program, &args, 30).await;
+            let approval = gate.approve(&call, &plan).unwrap();
+            let permit = gate.begin(approval, &plan).unwrap();
+            let host: Arc<dyn WorkspaceHost> = host.clone();
+            let started = host.start_command(permit, CancellationToken::new());
+            let result = match started {
+                Ok(handle) => Ok(handle.wait().await),
+                Err(error) => Err(error),
+            };
+            let outcome = result
+                .as_ref()
+                .map_or(Outcome::FailedToStart, ExecutionResult::outcome);
+            gate.finish(&call, outcome).unwrap();
+            // The consumed approval is gone whatever happened.
+            assert!(gate.approve(&call, &plan).is_err());
+            result
+        }
+
+        struct Helper {
+            child: Child,
+            lines: BufReader<ChildStdout>,
+        }
+
+        impl Helper {
+            /// Another process running this test binary's `helper_process` only.
+            fn spawn(mode: &str, journal: &Path, root: &str) -> Self {
+                let mut child = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        HELPER,
+                        "--exact",
+                        "--nocapture",
+                        "--test-threads=1",
+                        "--",
+                        mode,
+                    ])
+                    .arg(journal)
+                    .arg(root)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let lines = BufReader::new(child.stdout.take().unwrap());
+                Self { child, lines }
+            }
+
+            fn expect(&mut self, what: &str) -> String {
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(self.lines.read_line(&mut line).unwrap(), 0, "helper ended");
+                    // The test harness can put its own text before the message.
+                    if let Some(at) = line.find(PREFIX)
+                        && let Some(rest) = line[at + PREFIX.len()..].strip_prefix(what)
+                    {
+                        return rest.trim().to_owned();
+                    }
+                }
+            }
+        }
+
+        impl Drop for Helper {
+            fn drop(&mut self) {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+
+        /// Not a test of its own. As a separate process it either holds a project's
+        /// execution ownership, or supervises a long command until it is killed.
+        #[tokio::test]
+        async fn helper_process() {
+            let mut arguments = std::env::args().skip_while(|argument| argument != "--");
+            if arguments.next().is_none() {
+                return;
+            }
+            let arguments: Vec<String> = arguments.collect();
+            let (mode, journal_dir, root) = (&arguments[0], &arguments[1], &arguments[2]);
+            let journal = open(Path::new(journal_dir)).await;
+            if mode == "hold" {
+                let _held = journal
+                    .acquire_ownership(&local(root), Path::new(root))
+                    .await
+                    .unwrap();
+                println!("{PREFIX}held");
+                // Ends when the parent closes this process's stdin.
+                let _ = std::io::stdin().read_line(&mut String::new());
+                return;
+            }
+
+            let host = Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                journal.clone(),
+            ));
+            let (program, args) = long_command();
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (mut gate, call, plan) = proposal_at(&host, root, &program, &args, 300).await;
+            let approval = gate.approve(&call, &plan).unwrap();
+            let permit = gate.begin(approval, &plan).unwrap();
+            let invocation = permit.invocation().clone();
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+            let handle = serving
+                .start_command(permit, CancellationToken::new())
+                .unwrap();
+            let mut progress = handle.progress();
+            while progress.borrow_and_update().stdout.text.is_empty() {
+                progress.changed().await.unwrap();
+            }
+            // The group identity is saved alongside supervision; wait until it is durable.
+            let launched =
+                PathBuf::from(journal_dir).join(format!("{}.launched.json", invocation.as_str()));
+            while cfg!(unix) && !launched.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            println!("{PREFIX}running {}", invocation.as_str());
+            // Never finishes: the parent kills this process mid-command.
+            std::future::pending::<()>().await;
+        }
+
+        struct Fixture {
+            _storage: tempfile::TempDir,
+            _project: tempfile::TempDir,
+            journal: PathBuf,
+            root: String,
+        }
+
+        async fn fixture() -> Fixture {
+            let storage = tempfile::tempdir().unwrap();
+            let project = tempfile::tempdir().unwrap();
+            let journal = storage.path().join("journal");
+            let journal = open(&journal).await.dir().to_path_buf();
+            let root = dunce::canonicalize(project.path()).unwrap();
+            Fixture {
+                journal,
+                root: root.to_str().unwrap().to_owned(),
+                _storage: storage,
+                _project: project,
+            }
+        }
+
+        /// A freshly approved attempt that started nothing, whether it was refused at
+        /// admission or by the worker's recovery check.
+        async fn refused(host: &Arc<LocalHost>, fixture: &Fixture) -> bool {
+            let refused = match attempt(host, &fixture.root).await {
+                Err(_) => true,
+                Ok(result) => result.status == ExecutionStatus::FailedToStart && !result.spawned,
+            };
+            refused && !ran(fixture)
+        }
+
+        fn ran(fixture: &Fixture) -> bool {
+            Path::new(&fixture.root).join("ran").exists()
+        }
+
+        #[tokio::test]
+        async fn a_project_owned_by_another_process_admits_nothing_here() {
+            let fixture = fixture().await;
+            let mut owner = Helper::spawn("hold", &fixture.journal, &fixture.root);
+            owner.expect("held");
+
+            let journal = open(&fixture.journal).await;
+            let host = Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                journal.clone(),
+            ));
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+            assert!(!result.spawned && !ran(&fixture));
+            // Refused before any history was written, and not reconcilable around the owner.
+            assert!(journal.records().await.unwrap().is_empty());
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+            assert!(serving.reconcile_commands(&fixture.root).await.is_err());
+            assert!(!ran(&fixture));
+
+            // Once the other process lets go, a new separately approved attempt runs.
+            drop(owner.child.stdin.take());
+            owner.child.wait().unwrap();
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+            assert!(ran(&fixture));
+        }
+
+        #[tokio::test]
+        async fn a_crashed_owner_blocks_until_termination_is_established_and_nothing_replays() {
+            let fixture = fixture().await;
+            let mut owner = Helper::spawn("crash", &fixture.journal, &fixture.root);
+            let crashed = InvocationId::parse(&owner.expect("running ")).unwrap();
+            // The supervising process dies without any cleanup.
+            owner.child.kill().unwrap();
+            owner.child.wait().unwrap();
+
+            // "Restart": a new host over the same durable journal.
+            let journal = open(&fixture.journal).await;
+            let host = Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                journal.clone(),
+            ));
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+            let record = journal.load(&crashed).await.unwrap();
+            assert_eq!(record.status(), ExecutionStatus::Unknown);
+            assert!(record.blocks_execution());
+
+            // A fresh approval is refused, and re-preparing or asking again changes nothing.
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+            assert!(!result.spawned && !ran(&fixture));
+            assert!(refused(&host, &fixture).await);
+
+            #[cfg(unix)]
+            {
+                // The orphaned process group still runs: termination cannot be established.
+                let report = serving.reconcile_commands(&fixture.root).await.unwrap();
+                assert!(report.blocked(), "{report:?}");
+                assert!(refused(&host, &fixture).await);
+
+                // Reconciliation never ends a process. The test does, as the user would.
+                let launched: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(
+                        fixture
+                            .journal
+                            .join(format!("{}.launched.json", crashed.as_str())),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                let group = launched["identity"]["group"].as_i64().unwrap() as i32;
+                nix::sys::signal::killpg(
+                    nix::unistd::Pid::from_raw(group),
+                    nix::sys::signal::Signal::SIGKILL,
+                )
+                .unwrap();
+                while !recorded_group_is_absent(group).unwrap() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+
+            let report = serving.reconcile_commands(&fixture.root).await.unwrap();
+            assert!(!report.blocked(), "{report:?}");
+            assert_eq!(report.invocations.len(), 1);
+            assert_eq!(report.invocations[0].invocation, crashed);
+            assert_eq!(
+                report.invocations[0].evidence,
+                Some(if cfg!(windows) {
+                    TerminationEvidence::OwnerBoundTreeReleased
+                } else {
+                    TerminationEvidence::ProcessGroupAbsent
+                })
+            );
+            // Reconciling launched nothing by itself.
+            assert!(!ran(&fixture));
+
+            // Only a new, separately approved attempt runs.
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+            assert!(ran(&fixture));
+
+            // The crashed invocation keeps its unknown outcome, and was never run again.
+            let records = journal.records().await.unwrap();
+            assert_eq!(records.len(), 2);
+            let record = journal.load(&crashed).await.unwrap();
+            assert_eq!(record.status(), ExecutionStatus::Unknown);
+            assert!(record.completion.is_none() && record.reconciliation.is_some());
+        }
+
+        /// A file journal whose completion writes never succeed.
+        struct LosingCompletions(Arc<FileExecutionJournal>);
+
+        /// A file journal whose intent writes never succeed.
+        struct LosingIntents(Arc<FileExecutionJournal>);
+
+        #[async_trait]
+        impl ExecutionJournal for LosingIntents {
+            async fn check_recovery(&self, project: &ProjectRoot, root: &Path) -> Result<()> {
+                self.0.check_recovery(project, root).await
+            }
+            async fn record_intent(&self, _: &ExecutionIntent) -> Result<()> {
+                Err(Error::internal("test intent failure"))
+            }
+            async fn record_completion(&self, completion: &ExecutionCompletion) -> Result<()> {
+                self.0.record_completion(completion).await
+            }
+            async fn acquire_ownership(
+                &self,
+                project: &ProjectRoot,
+                root: &Path,
+            ) -> Result<OwnershipGuard> {
+                self.0.acquire_ownership(project, root).await
+            }
+        }
+
+        #[async_trait]
+        impl ExecutionJournal for LosingCompletions {
+            async fn check_recovery(&self, project: &ProjectRoot, root: &Path) -> Result<()> {
+                self.0.check_recovery(project, root).await
+            }
+            async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()> {
+                self.0.record_intent(intent).await
+            }
+            async fn record_completion(&self, _: &ExecutionCompletion) -> Result<()> {
+                Err(Error::internal("test completion failure"))
+            }
+            async fn acquire_ownership(
+                &self,
+                project: &ProjectRoot,
+                root: &Path,
+            ) -> Result<OwnershipGuard> {
+                self.0.acquire_ownership(project, root).await
+            }
+            async fn record_launching(&self, id: &InvocationId, kind: Containment) -> Result<()> {
+                self.0.record_launching(id, kind).await
+            }
+            async fn record_launched(&self, id: &InvocationId, tree: &TreeIdentity) -> Result<()> {
+                self.0.record_launched(id, tree).await
+            }
+            async fn reconcile(
+                &self,
+                project: &ProjectRoot,
+                root: &Path,
+            ) -> Result<ReconciliationReport> {
+                self.0.reconcile(project, root).await
+            }
+        }
+
+        #[tokio::test]
+        async fn reconciliation_releases_this_process_only_after_establishing_termination() {
+            let fixture = fixture().await;
+            let journal = open(&fixture.journal).await;
+            let host = Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                Arc::new(LosingCompletions(journal.clone())),
+            ));
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+
+            // The command ran, but its completion was not saved: unresolved history.
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+            assert!(result.history_error.is_some() && ran(&fixture));
+            std::fs::remove_file(Path::new(&fixture.root).join("ran")).unwrap();
+
+            // This process refuses synchronously; a fresh approval does not help.
+            assert!(attempt(&host, &fixture.root).await.is_err());
+            assert!(!ran(&fixture));
+
+            let report = serving.reconcile_commands(&fixture.root).await.unwrap();
+            assert!(!report.blocked(), "{report:?}");
+            assert_eq!(report.invocations.len(), 1);
+            assert!(!ran(&fixture));
+
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+            assert!(ran(&fixture));
+        }
+
+        // ----- M4: the complete local host path with the native backend -----
+
+        fn native_host(journal: &Arc<FileExecutionJournal>) -> Arc<LocalHost> {
+            Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                journal.clone(),
+            ))
+        }
+
+        /// Starts the long command with this timeout and returns after its first output.
+        async fn start_long(
+            host: &Arc<LocalHost>,
+            fixture: &Fixture,
+            timeout_seconds: u32,
+        ) -> ExecutionHandle {
+            let (program, args) = long_command();
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (mut gate, call, plan) =
+                proposal_at(host, &fixture.root, &program, &args, timeout_seconds).await;
+            let approval = gate.approve(&call, &plan).unwrap();
+            let permit = gate.begin(approval, &plan).unwrap();
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+            let handle = serving
+                .start_command(permit, CancellationToken::new())
+                .unwrap();
+            let mut progress = handle.progress();
+            while progress.borrow_and_update().stdout.text.is_empty() {
+                progress.changed().await.unwrap();
+            }
+            handle
+        }
+
+        /// On Unix, whether the recorded process group of this invocation is gone.
+        /// Windows confirms an empty job itself before it reports a confirmed outcome.
+        async fn tree_is_gone(fixture: &Fixture, invocation: &InvocationId) -> bool {
+            if cfg!(windows) {
+                return true;
+            }
+            let path = fixture
+                .journal
+                .join(format!("{}.launched.json", invocation.as_str()));
+            let launched: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            let group = launched["identity"]["group"].as_i64().unwrap() as i32;
+            recorded_group_is_absent(group).unwrap()
+        }
+
+        #[tokio::test]
+        async fn stop_and_timeout_through_the_local_host_end_the_tree() {
+            tokio::time::timeout(Duration::from_secs(60), async {
+                let fixture = fixture().await;
+                let journal = open(&fixture.journal).await;
+                let host = native_host(&journal);
+
+                let handle = start_long(&host, &fixture, 300).await;
+                let stopped = handle.invocation().clone();
+                handle.stop();
+                let result = handle.wait().await;
+                assert_eq!(result.status, ExecutionStatus::Cancelled, "{result:?}");
+                assert!(result.detail.is_none() && result.history_error.is_none());
+                assert!(tree_is_gone(&fixture, &stopped).await);
+
+                let handle = start_long(&host, &fixture, 1).await;
+                let timed_out = handle.invocation().clone();
+                let result = handle.wait().await;
+                assert_eq!(result.status, ExecutionStatus::TimedOut, "{result:?}");
+                assert!(tree_is_gone(&fixture, &timed_out).await);
+
+                // Confirmed outcomes block nothing.
+                let result = attempt(&host, &fixture.root).await.unwrap();
+                assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+                assert_eq!(
+                    journal.load(&stopped).await.unwrap().status(),
+                    ExecutionStatus::Cancelled
+                );
+                assert_eq!(
+                    journal.load(&timed_out).await.unwrap().status(),
+                    ExecutionStatus::TimedOut
+                );
+            })
+            .await
+            .unwrap();
+        }
+
+        /// One reviewed and approved attempt with this program and working directory,
+        /// after `change` has been applied between the review and the launch.
+        async fn attempt_after(
+            host: &Arc<LocalHost>,
+            fixture: &Fixture,
+            program: &str,
+            cwd: &str,
+            change: impl FnOnce(),
+        ) -> ExecutionResult {
+            let (_, args) = marker_command();
+            host.allow_root(&fixture.root).await.unwrap();
+            let prepared = host
+                .prepare_command(PrepareCommand {
+                    root: fixture.root.clone(),
+                    project_epoch: "project-1".into(),
+                    command_json: serde_json::json!({
+                        "version": 1,
+                        "purpose": "Change something between review and launch.",
+                        "command": { "kind": "exec", "program": program, "args": args },
+                        "cwd": cwd,
+                        "timeoutSeconds": 30,
+                        "environment": []
+                    })
+                    .to_string(),
+                })
+                .await
+                .unwrap();
+            let plan = ReviewPlan::from_prepared(local(&fixture.root), prepared).unwrap();
+            let mut gate = ApprovalGate::new(plan.binding.clone());
+            let call = CallId {
+                turn: "turn-1".into(),
+                call: "call-1".into(),
+            };
+            gate.propose(call.clone(), plan.clone()).unwrap();
+            let approval = gate.approve(&call, &plan).unwrap();
+            change();
+            let permit = gate.begin(approval, &plan).unwrap();
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+            serving
+                .start_command(permit, CancellationToken::new())
+                .unwrap()
+                .wait()
+                .await
+        }
+
+        #[tokio::test]
+        async fn an_executable_or_directory_that_changed_after_review_is_refused() {
+            let fixture = fixture().await;
+            let journal = open(&fixture.journal).await;
+            let host = native_host(&journal);
+            let root = Path::new(&fixture.root);
+            let (shell, _) = marker_command();
+
+            // The reviewed executable is gone at launch.
+            let name = if cfg!(windows) { "tool.exe" } else { "tool" };
+            let tool = root.join(name);
+            std::fs::copy(&shell, &tool).unwrap();
+            let relative = Path::new(".").join(name);
+            let result = attempt_after(&host, &fixture, relative.to_str().unwrap(), ".", || {
+                std::fs::remove_file(&tool).unwrap();
+            })
+            .await;
+            assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+            assert!(!result.spawned);
+
+            // The reviewed working directory is gone at launch.
+            let reviewed = root.join("reviewed");
+            std::fs::create_dir(&reviewed).unwrap();
+            let result = attempt_after(&host, &fixture, &shell, "reviewed", || {
+                std::fs::remove_dir(&reviewed).unwrap();
+            })
+            .await;
+            assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+            assert!(!result.spawned);
+
+            // On Unix it can also be made to lead somewhere else.
+            #[cfg(unix)]
+            {
+                let other = root.join("other");
+                std::fs::create_dir(&reviewed).unwrap();
+                std::fs::create_dir(&other).unwrap();
+                let result = attempt_after(&host, &fixture, &shell, "reviewed", || {
+                    std::fs::remove_dir(&reviewed).unwrap();
+                    std::os::unix::fs::symlink(&other, &reviewed).unwrap();
+                })
+                .await;
+                assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+                assert!(!result.spawned && !other.join("ran").exists());
+            }
+
+            // Nothing ran, and a properly reviewed command is still admitted.
+            assert!(!ran(&fixture));
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Success, "{result:?}");
+            assert!(ran(&fixture));
+        }
+
+        #[tokio::test]
+        async fn an_intent_that_cannot_be_saved_launches_nothing() {
+            let fixture = fixture().await;
+            let journal = open(&fixture.journal).await;
+            let host = Arc::new(LocalHost::with_command_backend(
+                native_runner(),
+                Arc::new(LosingIntents(journal.clone())),
+            ));
+
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::FailedToStart, "{result:?}");
+            assert!(!result.spawned && result.history_error.is_some());
+            assert!(!ran(&fixture));
+            assert!(journal.records().await.unwrap().is_empty());
+        }
+
+        #[tokio::test]
+        async fn an_uncheckable_backend_stays_blocked_through_reconciliation() {
+            let fixture = fixture().await;
+            let journal = open(&fixture.journal).await;
+            // A fake backend whose cleanup fails: outcome unknown, containment unverifiable.
+            let (_root, _host, _gate, _call, probe) = proposal().await;
+            let mut backend = runner(&probe);
+            backend.fail_cleanup = true;
+            let host = Arc::new(LocalHost::with_command_backend(
+                Arc::new(backend),
+                journal.clone(),
+            ));
+            let serving: Arc<dyn WorkspaceHost> = host.clone();
+
+            let result = attempt(&host, &fixture.root).await.unwrap();
+            assert_eq!(result.status, ExecutionStatus::Unknown, "{result:?}");
+            for _ in 0..2 {
+                let report = serving.reconcile_commands(&fixture.root).await.unwrap();
+                assert!(report.blocked(), "{report:?}");
+                assert!(attempt(&host, &fixture.root).await.is_err());
+            }
+        }
     }
 }
 

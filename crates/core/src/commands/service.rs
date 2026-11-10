@@ -92,8 +92,7 @@ fn observation_lost() -> Error {
 ///
 /// The journal must live outside projects and chat pruning. Reusing the service across
 /// connections preserves in-memory admission; reopening its journal preserves durable replay
-/// and unknown-outcome checks. Cross-process ownership is still a separate prerequisite for
-/// selecting any native backend.
+/// and unknown-outcome checks. The journal's project lock gives ownership across processes.
 pub struct AgentExecutionService {
     host: Arc<LocalHost>,
     location: Location,
@@ -148,6 +147,40 @@ impl AgentExecutionService {
             },
         );
         Ok(prepared)
+    }
+
+    /// Explicit reconciliation of one project on this agent. The location comes from the
+    /// trusted connection owner, exactly as for preparation. Nothing is launched or approved.
+    pub async fn reconcile(
+        &self,
+        root: &str,
+    ) -> Result<contextual_protocol::commands::CommandReconciliation> {
+        let host = self.host.clone();
+        let requested = root.to_owned();
+        let canonical =
+            tokio::task::spawn_blocking(move || host.allowlist().check_command_root(&requested))
+                .await
+                .map_err(|_| Error::internal("Agent reconciliation worker stopped."))??;
+        let project = ProjectRoot {
+            location: self.location.clone(),
+            path: root.to_owned(),
+        };
+        let report = self.engine.reconcile(&project, &canonical).await?;
+        Ok(contextual_protocol::commands::CommandReconciliation {
+            canonical_root: canonical
+                .to_str()
+                .ok_or_else(|| Error::invalid("Command root is not UTF-8."))?
+                .to_owned(),
+            invocations: report
+                .invocations
+                .into_iter()
+                .map(|entry| contextual_protocol::commands::ReconciledCommand {
+                    invocation_id: entry.invocation.as_str().to_owned(),
+                    evidence: entry.evidence,
+                    detail: entry.detail,
+                })
+                .collect(),
+        })
     }
 
     /// Trusted agent dispatch boundary, not a model-argument execution API.

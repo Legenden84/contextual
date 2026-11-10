@@ -18,6 +18,14 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# Verification harness for approved command execution (plan milestone M4). It is built
+# with the package so that tests can start it, but it is never deployed: only
+# `contextual-agent` is bundled with the app.
+[[bin]]
+name = "contextual-agent-execution-harness"
+path = "src/bin/execution_harness.rs"
+test = false
+
 [lints]
 workspace = true
 

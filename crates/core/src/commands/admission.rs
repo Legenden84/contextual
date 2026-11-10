@@ -4,8 +4,8 @@
 //! project root is the key, not a chat ID, project-open epoch, or LocalHost instance.
 //! Unknown outcomes and interrupted workers retain their slots.
 //!
-//! This is not authorization and does not provide cross-process ownership. Native execution
-//! must remain disabled until separate app/agent processes also have an ownership mechanism.
+//! This is not authorization. Ownership across processes is the journal's project lock,
+//! taken by the worker after this reservation; this registry only orders work in-process.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,8 +39,8 @@ struct Slot {
 /// Admission state for an execution host, separate from user approval.
 ///
 /// Production LocalHosts all use the process-wide native registry. There is deliberately no
-/// public reset or "assume stopped" operation. Reconciliation must establish termination and
-/// history integrity before a future implementation may release a blocked slot.
+/// public reset or "assume stopped" operation. A blocked slot is released only by
+/// reconciliation, after the journal established termination with evidence.
 #[derive(Default)]
 pub struct ExecutionAdmission {
     slots: Mutex<HashMap<PathBuf, Slot>>,
@@ -89,6 +89,29 @@ impl ExecutionAdmission {
             invocation: invocation.clone(),
             finished: false,
         })
+    }
+}
+
+impl ExecutionAdmission {
+    /// Releases a slot that an unresolved outcome left blocked. Only reconciliation calls
+    /// this, after the journal established termination for everything it had recorded.
+    /// A slot reserved by a preparing or running worker is never touched.
+    pub(crate) fn release_blocked(&self, canonical_root: &Path) -> bool {
+        let Ok(mut slots) = self.slots.lock() else {
+            return false;
+        };
+        if matches!(
+            slots.get(canonical_root),
+            Some(Slot {
+                state: State::Blocked,
+                ..
+            })
+        ) {
+            slots.remove(canonical_root);
+            true
+        } else {
+            false
+        }
     }
 }
 

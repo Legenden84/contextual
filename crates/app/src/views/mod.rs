@@ -5,6 +5,7 @@ pub mod changes_panel;
 pub mod chat_panel;
 pub mod chats_menu;
 pub mod code_preview;
+pub mod command_card;
 pub mod context_bar;
 pub mod diff_cache;
 pub mod diff_rows;

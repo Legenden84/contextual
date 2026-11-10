@@ -21,7 +21,19 @@
 //! Recovery returns observations, never authorization. The execution engine checks these
 //! observations under its process-wide host reservation before publishing a new intent.
 //! Unknown records block their canonical project root. Older unknown records lacking that root
-//! conservatively block their execution location. Cross-process ownership remains separate.
+//! conservatively block their execution location.
+//!
+//! Cross-process ownership is an operating-system lock on a per-project file in this
+//! directory. The supervising process holds it from before the recovery check until after
+//! the completion record, and the system releases it if that process dies. It excludes every
+//! process that shares this directory; it does not exclude another user's journal.
+//!
+//! Two more immutable files accompany an invocation that reaches launch: a marker written
+//! before the start is attempted, and the started tree's identity. Reconciliation takes the
+//! project lock and then unblocks an unknown invocation only on evidence: the marker was never
+//! written, the tree was bound to an owner that no longer holds the lock, the recorded process
+//! group no longer exists, or the host restarted. It records that evidence in a fourth file.
+//! It never launches, retries, signals or approves anything, and the outcome stays unknown.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -32,12 +44,19 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use super::InvocationId;
-use super::execution::{ExecutionCompletion, ExecutionIntent, ExecutionJournal, ExecutionStatus};
+use super::execution::{
+    Containment, ExecutionCompletion, ExecutionIntent, ExecutionJournal, ExecutionStatus,
+    OwnershipGuard, ReconciledInvocation, ReconciliationReport, TerminationEvidence, TreeIdentity,
+    current_boot_id, recorded_group_is_absent,
+};
 use crate::error::ErrorCode;
 use crate::location::Location;
 use crate::{Error, Result};
 
-const VERSION: u32 = 1;
+/// Version 2 intents are followed by a launch marker before any start is attempted.
+/// Version 1 intents predate the marker, so its absence proves nothing about them.
+const VERSION: u32 = 2;
+const FIRST_VERSION_WITH_LAUNCH_MARKER: u32 = 2;
 /// Each record excludes output and the inherited environment.
 const MAX_RECORD_BYTES: usize = 256 * 1024;
 /// Fail rather than return a silently incomplete recovery listing. No replay records are evicted.
@@ -59,6 +78,33 @@ struct StoredCompletion {
     completion: ExecutionCompletion,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredLaunching {
+    version: u32,
+    recorded_at: String,
+    invocation: InvocationId,
+    containment: Containment,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredLaunched {
+    version: u32,
+    recorded_at: String,
+    invocation: InvocationId,
+    identity: TreeIdentity,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredReconciliation {
+    version: u32,
+    recorded_at: String,
+    invocation: InvocationId,
+    evidence: TerminationEvidence,
+}
+
 /// Historical observations only. No approval, prepared environment, or unshared output.
 #[derive(Debug, Clone)]
 pub struct ExecutionRecord {
@@ -68,6 +114,9 @@ pub struct ExecutionRecord {
     pub completed_at: Option<String>,
     /// Missing, malformed, mismatched, or unreadable completion records remain unknown.
     pub recovery_warning: Option<String>,
+    /// Evidence that an unknown invocation no longer runs. It does not change the outcome.
+    pub reconciliation: Option<TerminationEvidence>,
+    pub reconciled_at: Option<String>,
 }
 
 impl ExecutionRecord {
@@ -77,9 +126,9 @@ impl ExecutionRecord {
             .map_or(ExecutionStatus::Unknown, |completion| completion.status)
     }
 
-    /// A lifecycle owner must establish termination before admitting more work for this project.
+    /// Termination must be established before more work is admitted for this project.
     pub fn blocks_execution(&self) -> bool {
-        self.status() == ExecutionStatus::Unknown
+        self.status() == ExecutionStatus::Unknown && self.reconciliation.is_none()
     }
 }
 
@@ -169,13 +218,23 @@ impl FileExecutionJournal {
                         ));
                     }
                     ids.push(InvocationId::parse(id)?);
-                } else if let Some(id) = name.strip_suffix(".completion.json") {
+                } else if let Some(id) = [
+                    ".completion.json",
+                    ".launching.json",
+                    ".launched.json",
+                    ".reconciled.json",
+                ]
+                .iter()
+                .find_map(|suffix| name.strip_suffix(suffix))
+                {
                     let id = InvocationId::parse(id)?;
                     if !fs::symlink_metadata(intent_path(&dir, &id))?.is_file() {
                         return Err(Error::conflict(
                             "Execution completion has no regular intent record.",
                         ));
                     }
+                } else if is_owner_lock(name) {
+                    // Ownership locks carry no history.
                 } else if !(name.starts_with('.') && name.ends_with(".tmp")) {
                     return Err(Error::invalid("Unrecognized execution journal entry."));
                 }
@@ -206,15 +265,9 @@ impl ExecutionJournal for FileExecutionJournal {
         canonical_root: &Path,
     ) -> Result<()> {
         let records = self.records().await?;
-        let unresolved = records.iter().any(|record| {
-            record.blocks_execution()
-                && record.intent.project.location == project.location
-                && record
-                    .intent
-                    .canonical_root
-                    .as_deref()
-                    .is_none_or(|root| Path::new(root) == canonical_root)
-        });
+        let unresolved = records
+            .iter()
+            .any(|record| record.blocks_execution() && concerns(record, project, canonical_root));
         if unresolved {
             return Err(Error::conflict(
                 "An earlier command has an unknown outcome. \
@@ -222,6 +275,111 @@ impl ExecutionJournal for FileExecutionJournal {
             ));
         }
         Ok(())
+    }
+
+    async fn acquire_ownership(
+        &self,
+        project: &crate::location::ProjectRoot,
+        canonical_root: &Path,
+    ) -> Result<OwnershipGuard> {
+        let dir = self.dir.clone();
+        let path = owner_lock_path(&dir, &project.location, canonical_root)?;
+        blocking(move || {
+            check_directory(&dir)?;
+            lock_project(&path)
+        })
+        .await
+    }
+
+    async fn record_launching(
+        &self,
+        invocation: &InvocationId,
+        containment: Containment,
+    ) -> Result<()> {
+        let stored = StoredLaunching {
+            version: VERSION,
+            recorded_at: crate::threads::now_iso(),
+            invocation: invocation.clone(),
+            containment,
+        };
+        self.publish_for_intent(
+            stored.invocation.clone(),
+            ".launching.json",
+            encode(&stored)?,
+        )
+        .await
+    }
+
+    async fn record_launched(
+        &self,
+        invocation: &InvocationId,
+        identity: &TreeIdentity,
+    ) -> Result<()> {
+        validate_identity(identity)?;
+        let stored = StoredLaunched {
+            version: VERSION,
+            recorded_at: crate::threads::now_iso(),
+            invocation: invocation.clone(),
+            identity: identity.clone(),
+        };
+        self.publish_for_intent(
+            stored.invocation.clone(),
+            ".launched.json",
+            encode(&stored)?,
+        )
+        .await
+    }
+
+    async fn reconcile(
+        &self,
+        project: &crate::location::ProjectRoot,
+        canonical_root: &Path,
+    ) -> Result<ReconciliationReport> {
+        // Held for the whole operation: no process can be supervising, or starting, a
+        // command for this project while its history is judged.
+        let _ownership = self
+            .acquire_ownership(project, canonical_root)
+            .await
+            .map_err(|error| {
+                if error.code == ErrorCode::Conflict {
+                    Error::conflict(
+                        "A process still owns command execution for this project. \
+                         Nothing was reconciled.",
+                    )
+                } else {
+                    error
+                }
+            })?;
+        let records = self.records().await?;
+        let dir = self.dir.clone();
+        let project = project.clone();
+        let canonical_root = canonical_root.to_path_buf();
+        blocking(move || {
+            let mut report = ReconciliationReport::default();
+            for record in records {
+                if !record.blocks_execution() || !concerns(&record, &project, &canonical_root) {
+                    continue;
+                }
+                let invocation = record.intent.invocation.clone();
+                let (evidence, detail) = match termination_evidence(&dir, &record) {
+                    Ok(evidence) => match publish_reconciliation(&dir, &invocation, evidence) {
+                        Ok(()) => (Some(evidence), None),
+                        Err(_) => (
+                            None,
+                            Some("The reconciliation could not be recorded.".to_owned()),
+                        ),
+                    },
+                    Err(reason) => (None, Some(reason.to_owned())),
+                };
+                report.invocations.push(ReconciledInvocation {
+                    invocation,
+                    evidence,
+                    detail,
+                });
+            }
+            Ok(report)
+        })
+        .await
     }
 
     async fn record_intent(&self, intent: &ExecutionIntent) -> Result<()> {
@@ -282,6 +440,221 @@ impl ExecutionJournal for FileExecutionJournal {
         })
         .await
     }
+}
+
+impl FileExecutionJournal {
+    /// Publishes one more immutable file for an invocation whose intent already exists.
+    async fn publish_for_intent(
+        &self,
+        invocation: InvocationId,
+        suffix: &'static str,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        let dir = self.dir.clone();
+        blocking(move || {
+            check_directory(&dir)?;
+            load_intent(&dir, &invocation)?;
+            publish_new(&dir, &record_path(&dir, &invocation, suffix), &bytes)
+        })
+        .await
+    }
+}
+
+/// Same scope as recovery admission: this project's canonical root at this location, plus
+/// older records that lack a canonical root.
+fn concerns(
+    record: &ExecutionRecord,
+    project: &crate::location::ProjectRoot,
+    canonical_root: &Path,
+) -> bool {
+    record.intent.project.location == project.location
+        && record
+            .intent
+            .canonical_root
+            .as_deref()
+            .is_none_or(|root| Path::new(root) == canonical_root)
+}
+
+fn is_owner_lock(name: &str) -> bool {
+    name.strip_suffix(".owner.lock")
+        .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+fn owner_lock_path(dir: &Path, location: &Location, canonical_root: &Path) -> Result<PathBuf> {
+    use sha2::{Digest as _, Sha256};
+
+    if !canonical_root.is_absolute() {
+        return Err(Error::invalid(
+            "Execution ownership requires a canonical absolute project root.",
+        ));
+    }
+    let mut hash = Sha256::new();
+    hash.update(serde_json::to_vec(location)?);
+    hash.update([0]);
+    hash.update(canonical_root.as_os_str().as_encoded_bytes());
+    let name: String = hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(dir.join(format!("{name}.owner.lock")))
+}
+
+/// Holds the project's lock for as long as the returned value lives. The lock belongs to
+/// one open file, so a second attempt conflicts even within one process, and the operating
+/// system releases it when the owning process dies.
+///
+/// Unix uses `flock`. Windows opens the file without sharing, which no other handle can do
+/// while this one is open. Filesystems or platforms without either fail closed.
+fn lock_project(path: &Path) -> Result<OwnershipGuard> {
+    const OWNED: &str = "Another process owns command execution for this project.";
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        options.share_mode(0);
+        match options.open(path) {
+            Ok(file) => Ok(Box::new(file)),
+            Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                Err(Error::conflict(OWNED))
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    ))]
+    {
+        use nix::errno::Errno;
+        use nix::fcntl::{Flock, FlockArg};
+
+        let file = options.open(path)?;
+        if !fs::symlink_metadata(path)?.is_file() {
+            return Err(Error::forbidden(
+                "Execution ownership lock is not a regular file.",
+            ));
+        }
+        match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+            Ok(lock) => Ok(Box::new(lock)),
+            Err((_, Errno::EWOULDBLOCK)) => Err(Error::conflict(OWNED)),
+            Err(_) => Err(Error::tool(
+                "Execution ownership could not be locked on this filesystem.",
+            )),
+        }
+    }
+    #[cfg(not(any(
+        windows,
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    )))]
+    {
+        let _ = (options, path, OWNED);
+        Err(Error::tool(
+            "Cross-process execution ownership is not supported on this platform.",
+        ))
+    }
+}
+
+fn validate_identity(identity: &TreeIdentity) -> Result<()> {
+    let TreeIdentity::UnixGroup { group, boot_id } = identity;
+    if *group <= 1
+        || boot_id
+            .as_deref()
+            .is_some_and(|id| !bounded_text(id, 64) || id.chars().any(char::is_control))
+    {
+        return Err(Error::invalid("Invalid process-tree identity."));
+    }
+    Ok(())
+}
+
+/// Reads one optional companion record. Present-but-unusable is an error, never "absent".
+fn read_optional<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+        Ok(_) => read_record(path).map(Some),
+    }
+}
+
+/// Decides, for one unknown invocation whose project lock the caller holds, whether its
+/// termination is established. The error is the reason shown for an unresolved invocation.
+fn termination_evidence(
+    dir: &Path,
+    record: &ExecutionRecord,
+) -> std::result::Result<TerminationEvidence, &'static str> {
+    const UNREADABLE: &str = "Its launch history could not be read.";
+    let id = &record.intent.invocation;
+    let version = load_intent(dir, id).map_err(|_| UNREADABLE)?.version;
+    if version < FIRST_VERSION_WITH_LAUNCH_MARKER {
+        return Err("It was recorded before launches were tracked.");
+    }
+    let launching: Option<StoredLaunching> =
+        read_optional(&record_path(dir, id, ".launching.json")).map_err(|_| UNREADABLE)?;
+    let Some(launching) = launching else {
+        return Ok(TerminationEvidence::NeverLaunched);
+    };
+    if &launching.invocation != id
+        || validate_header(launching.version, &launching.recorded_at).is_err()
+    {
+        return Err(UNREADABLE);
+    }
+    match launching.containment {
+        Containment::OwnerBound => Ok(TerminationEvidence::OwnerBoundTreeReleased),
+        Containment::Unverifiable => {
+            Err("Its process tree was not contained in a way that can be checked.")
+        }
+        Containment::ProcessGroup => {
+            let launched: Option<StoredLaunched> =
+                read_optional(&record_path(dir, id, ".launched.json")).map_err(|_| UNREADABLE)?;
+            let Some(launched) = launched else {
+                return Err("It may have started, but its process group was never recorded.");
+            };
+            if &launched.invocation != id
+                || validate_header(launched.version, &launched.recorded_at).is_err()
+                || validate_identity(&launched.identity).is_err()
+            {
+                return Err(UNREADABLE);
+            }
+            let TreeIdentity::UnixGroup { group, boot_id } = launched.identity;
+            if let (Some(recorded), Some(current)) = (&boot_id, current_boot_id())
+                && recorded != &current
+            {
+                return Ok(TerminationEvidence::HostRestarted);
+            }
+            match recorded_group_is_absent(group) {
+                Ok(true) => Ok(TerminationEvidence::ProcessGroupAbsent),
+                Ok(false) => Err("A process group with its recorded identity still exists. \
+                     The command, or an unrelated program that reused the identity, is running."),
+                Err(_) => Err("Its process group could not be observed."),
+            }
+        }
+    }
+}
+
+fn publish_reconciliation(
+    dir: &Path,
+    invocation: &InvocationId,
+    evidence: TerminationEvidence,
+) -> Result<()> {
+    let stored = StoredReconciliation {
+        version: VERSION,
+        recorded_at: crate::threads::now_iso(),
+        invocation: invocation.clone(),
+        evidence,
+    };
+    publish_new(
+        dir,
+        &record_path(dir, invocation, ".reconciled.json"),
+        &encode(&stored)?,
+    )
 }
 
 async fn blocking<T: Send + 'static>(
@@ -383,6 +756,10 @@ fn intent_path(dir: &Path, id: &InvocationId) -> PathBuf {
     dir.join(format!("{}.intent.json", id.as_str()))
 }
 
+fn record_path(dir: &Path, id: &InvocationId, suffix: &str) -> PathBuf {
+    dir.join(format!("{}{suffix}", id.as_str()))
+}
+
 fn completion_path(dir: &Path, id: &InvocationId) -> PathBuf {
     dir.join(format!("{}.completion.json", id.as_str()))
 }
@@ -457,7 +834,7 @@ fn read_record<T: DeserializeOwned>(path: &Path) -> Result<T> {
 }
 
 fn validate_header(version: u32, recorded_at: &str) -> Result<()> {
-    if version != VERSION
+    if !(1..=VERSION).contains(&version)
         || recorded_at.len() > 64
         || time::OffsetDateTime::parse(recorded_at, &time::format_description::well_known::Rfc3339)
             .is_err()
@@ -572,7 +949,18 @@ fn load_record(dir: &Path, id: &InvocationId) -> Result<ExecutionRecord> {
         completion: None,
         completed_at: None,
         recovery_warning: None,
+        reconciliation: None,
+        reconciled_at: None,
     };
+    // An unusable reconciliation record is no evidence: the invocation keeps blocking.
+    if let Ok(Some(stored)) =
+        read_optional::<StoredReconciliation>(&record_path(dir, id, ".reconciled.json"))
+        && &stored.invocation == id
+        && validate_header(stored.version, &stored.recorded_at).is_ok()
+    {
+        record.reconciliation = Some(stored.evidence);
+        record.reconciled_at = Some(stored.recorded_at);
+    }
     let completion = (|| {
         let stored: StoredCompletion = read_record(&completion_path(dir, id))?;
         validate_header(stored.version, &stored.recorded_at)?;
@@ -610,6 +998,13 @@ mod tests {
     use crate::location::ProjectRoot;
     use contextual_protocol::commands::CommandPlatform;
 
+    /// The canonical project root on record: absolute on the platform under test.
+    const ROOT: &str = if cfg!(windows) {
+        "C:\\project"
+    } else {
+        "/project"
+    };
+
     fn intent() -> ExecutionIntent {
         ExecutionIntent {
             invocation: InvocationId::new(),
@@ -621,7 +1016,7 @@ mod tests {
                 location: Location::Local,
                 path: "/project".into(),
             },
-            canonical_root: Some("/project".into()),
+            canonical_root: Some(ROOT.into()),
             platform: CommandPlatform::Linux,
             environment_policy: super::super::prepare::ENVIRONMENT_POLICY.into(),
             request: CommandRequest {
@@ -976,7 +1371,7 @@ mod tests {
         };
         assert!(
             journal
-                .check_recovery(&current, Path::new("/project"))
+                .check_recovery(&current, Path::new(ROOT))
                 .await
                 .is_err()
         );
@@ -1003,13 +1398,13 @@ mod tests {
         let local = intent().project;
         assert!(
             journal
-                .check_recovery(&local, Path::new("/project"))
+                .check_recovery(&local, Path::new(ROOT))
                 .await
                 .is_ok()
         );
         assert!(
             journal
-                .check_recovery(&pending.project, Path::new("/project"))
+                .check_recovery(&pending.project, Path::new(ROOT))
                 .await
                 .is_err()
         );
@@ -1030,7 +1425,7 @@ mod tests {
 
         assert!(
             journal
-                .check_recovery(&finished.project, Path::new("/project"))
+                .check_recovery(&finished.project, Path::new(ROOT))
                 .await
                 .is_ok()
         );
@@ -1131,7 +1526,7 @@ mod tests {
         let project = intent.project.clone();
         assert!(
             journal
-                .check_recovery(&project, Path::new("/project"))
+                .check_recovery(&project, Path::new(ROOT))
                 .await
                 .is_err()
         );
@@ -1189,7 +1584,7 @@ mod tests {
         assert!(record.recovery_warning.is_some());
         assert!(
             journal
-                .check_recovery(&intent.project, Path::new("/project"))
+                .check_recovery(&intent.project, Path::new(ROOT))
                 .await
                 .is_err()
         );
@@ -1209,7 +1604,7 @@ mod tests {
         assert!(journal.records().await.is_err());
         assert!(
             journal
-                .check_recovery(&intent.project, Path::new("/project"))
+                .check_recovery(&intent.project, Path::new(ROOT))
                 .await
                 .is_err()
         );
@@ -1252,5 +1647,328 @@ mod tests {
         let alias = directory.path().join("alias");
         symlink_dir(journal.dir(), &alias).unwrap();
         assert!(FileExecutionJournal::open(alias).await.is_err());
+    }
+
+    // ----- M3: cross-process ownership and reconciliation -----
+
+    fn project() -> crate::location::ProjectRoot {
+        intent().project
+    }
+
+    async fn journal_in(directory: &tempfile::TempDir) -> FileExecutionJournal {
+        FileExecutionJournal::open(directory.path().join("journal"))
+            .await
+            .unwrap()
+    }
+
+    /// An invocation that reached launch with this containment and has no completion.
+    async fn launched(journal: &FileExecutionJournal, containment: Containment) -> ExecutionIntent {
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        journal
+            .record_launching(&intent.invocation, containment)
+            .await
+            .unwrap();
+        intent
+    }
+
+    async fn reconcile(journal: &FileExecutionJournal) -> ReconciliationReport {
+        journal
+            .reconcile(&project(), Path::new(ROOT))
+            .await
+            .unwrap()
+    }
+
+    async fn blocked(journal: &FileExecutionJournal) -> bool {
+        journal
+            .check_recovery(&project(), Path::new(ROOT))
+            .await
+            .is_err()
+    }
+
+    #[tokio::test]
+    async fn ownership_excludes_every_other_holder_until_it_is_dropped() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = journal_in(&directory).await;
+        let second = journal_in(&directory).await;
+        let root = Path::new(ROOT);
+
+        let held = first.acquire_ownership(&project(), root).await.unwrap();
+        // The same journal, an independently opened one, and reconciliation are all refused.
+        for journal in [&first, &second] {
+            let refused = journal.acquire_ownership(&project(), root).await;
+            assert_eq!(refused.err().unwrap().code, ErrorCode::Conflict);
+            assert_eq!(
+                journal.reconcile(&project(), root).await.unwrap_err().code,
+                ErrorCode::Conflict
+            );
+        }
+        // Another project, and the same path at another location, are separate.
+        let _other = second
+            .acquire_ownership(&project(), &Path::new(ROOT).join("other"))
+            .await
+            .unwrap();
+        let wsl = crate::location::ProjectRoot {
+            location: Location::Wsl {
+                distro: "Ubuntu".into(),
+            },
+            path: "/project".into(),
+        };
+        let _wsl = second.acquire_ownership(&wsl, root).await.unwrap();
+
+        drop(held);
+        let _next = second.acquire_ownership(&project(), root).await.unwrap();
+        // Lock files are not history.
+        assert!(first.records().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_intent_that_never_reached_launch_is_reconciled_as_never_launched() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        assert!(blocked(&journal).await);
+
+        let report = reconcile(&journal).await;
+        assert!(!report.blocked());
+        assert_eq!(report.invocations.len(), 1);
+        assert_eq!(report.invocations[0].invocation, intent.invocation);
+        assert_eq!(
+            report.invocations[0].evidence,
+            Some(TerminationEvidence::NeverLaunched)
+        );
+        assert!(!blocked(&journal).await);
+
+        // The outcome is still unknown; only its blocking effect is resolved, durably.
+        let record = journal_in(&directory)
+            .await
+            .load(&intent.invocation)
+            .await
+            .unwrap();
+        assert_eq!(record.status(), ExecutionStatus::Unknown);
+        assert_eq!(
+            record.reconciliation,
+            Some(TerminationEvidence::NeverLaunched)
+        );
+        assert!(record.completion.is_none() && !record.blocks_execution());
+        // Nothing is left to reconcile, and the original intent still cannot be replayed.
+        assert!(reconcile(&journal).await.invocations.is_empty());
+        assert_eq!(
+            journal.record_intent(&intent).await.unwrap_err().code,
+            ErrorCode::Conflict
+        );
+    }
+
+    #[tokio::test]
+    async fn an_intent_from_before_launch_markers_cannot_be_reconciled() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let intent = intent();
+        let stored = StoredIntent {
+            version: 1,
+            recorded_at: crate::threads::now_iso(),
+            intent: intent.clone(),
+        };
+        fs::write(
+            intent_path(journal.dir(), &intent.invocation),
+            serde_json::to_vec(&stored).unwrap(),
+        )
+        .unwrap();
+
+        let report = reconcile(&journal).await;
+        assert!(report.blocked());
+        assert!(report.invocations[0].detail.is_some());
+        assert!(blocked(&journal).await);
+        assert!(
+            journal
+                .load(&intent.invocation)
+                .await
+                .unwrap()
+                .reconciliation
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn containment_decides_what_a_released_owner_proves() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+
+        // Nothing checkable: stays blocked.
+        launched(&journal, Containment::Unverifiable).await;
+        assert!(reconcile(&journal).await.blocked());
+        assert!(blocked(&journal).await);
+
+        // A process group whose identity was never recorded: stays blocked.
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        launched(&journal, Containment::ProcessGroup).await;
+        assert!(reconcile(&journal).await.blocked());
+        assert!(blocked(&journal).await);
+
+        // An owner-bound tree ended with its owner, whose lock we now hold.
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        launched(&journal, Containment::OwnerBound).await;
+        let report = reconcile(&journal).await;
+        assert_eq!(
+            report.invocations[0].evidence,
+            Some(TerminationEvidence::OwnerBoundTreeReleased)
+        );
+        assert!(!blocked(&journal).await);
+    }
+
+    #[cfg(any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    ))]
+    #[tokio::test]
+    async fn a_recorded_process_group_must_be_gone_before_it_is_reconciled() {
+        use std::os::unix::process::CommandExt as _;
+
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let intent = launched(&journal, Containment::ProcessGroup).await;
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exec sleep 30"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let identity = TreeIdentity::UnixGroup {
+            group: child.id() as i32,
+            boot_id: current_boot_id(),
+        };
+        journal
+            .record_launched(&intent.invocation, &identity)
+            .await
+            .unwrap();
+
+        // Running: unresolved, however often it is asked.
+        for _ in 0..2 {
+            let report = reconcile(&journal).await;
+            assert!(report.blocked() && report.invocations[0].detail.is_some());
+            assert!(blocked(&journal).await);
+        }
+
+        // Reconciliation never ends a process; the test does, then reaps it.
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let report = reconcile(&journal).await;
+        assert_eq!(
+            report.invocations[0].evidence,
+            Some(TerminationEvidence::ProcessGroupAbsent)
+        );
+        assert!(!blocked(&journal).await);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_process_group_from_an_earlier_boot_is_reconciled_as_restarted() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let intent = launched(&journal, Containment::ProcessGroup).await;
+        assert!(current_boot_id().is_some());
+        // This test's own group certainly exists, yet belongs to another boot on record.
+        let identity = TreeIdentity::UnixGroup {
+            group: nix::unistd::getpgrp().as_raw(),
+            boot_id: Some("00000000-0000-0000-0000-000000000000".into()),
+        };
+        journal
+            .record_launched(&intent.invocation, &identity)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            reconcile(&journal).await.invocations[0].evidence,
+            Some(TerminationEvidence::HostRestarted)
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_is_scoped_and_leaves_recorded_outcomes_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let finished = intent();
+        journal.record_intent(&finished).await.unwrap();
+        journal
+            .record_completion(&completion(&finished))
+            .await
+            .unwrap();
+        let mut elsewhere = intent();
+        elsewhere.canonical_root = Some(format!("{ROOT}-elsewhere"));
+        journal.record_intent(&elsewhere).await.unwrap();
+
+        assert!(reconcile(&journal).await.invocations.is_empty());
+        let other = journal.load(&elsewhere.invocation).await.unwrap();
+        assert!(other.blocks_execution() && other.reconciliation.is_none());
+        let done = journal.load(&finished.invocation).await.unwrap();
+        assert_eq!(done.status(), ExecutionStatus::Success);
+        assert!(done.reconciliation.is_none());
+    }
+
+    #[tokio::test]
+    async fn unusable_launch_or_reconciliation_records_keep_the_project_blocked() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+
+        // A launch marker that cannot be read is not "absent".
+        let unreadable = intent();
+        journal.record_intent(&unreadable).await.unwrap();
+        fs::write(
+            record_path(journal.dir(), &unreadable.invocation, ".launching.json"),
+            b"{",
+        )
+        .unwrap();
+        assert!(reconcile(&journal).await.blocked());
+        assert!(blocked(&journal).await);
+
+        // A reconciliation record that cannot be read is not evidence, and is not replaced.
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let intent = intent();
+        journal.record_intent(&intent).await.unwrap();
+        fs::write(
+            record_path(journal.dir(), &intent.invocation, ".reconciled.json"),
+            b"{",
+        )
+        .unwrap();
+        assert!(blocked(&journal).await);
+        let report = reconcile(&journal).await;
+        assert!(report.blocked());
+        assert!(blocked(&journal).await);
+    }
+
+    #[tokio::test]
+    async fn launch_records_need_an_intent_and_are_immutable() {
+        let directory = tempfile::tempdir().unwrap();
+        let journal = journal_in(&directory).await;
+        let absent = InvocationId::new();
+        assert!(
+            journal
+                .record_launching(&absent, Containment::OwnerBound)
+                .await
+                .is_err()
+        );
+
+        let intent = launched(&journal, Containment::ProcessGroup).await;
+        assert_eq!(
+            journal
+                .record_launching(&intent.invocation, Containment::OwnerBound)
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Conflict
+        );
+        let invalid = TreeIdentity::UnixGroup {
+            group: 1,
+            boot_id: None,
+        };
+        assert!(
+            journal
+                .record_launched(&intent.invocation, &invalid)
+                .await
+                .is_err()
+        );
     }
 }

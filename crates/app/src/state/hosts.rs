@@ -3,11 +3,23 @@
 //!
 //! `CONTEXTUAL_DEV_REMOTE=1` (debug builds) treats every project as living in a "dev" distro
 //! served by a locally spawned `contextual-agent`, so the remote path can be exercised on Linux.
+//!
+//! Approved command execution is off unless the user turns on "Let the assistant propose
+//! commands" in Settings (`chat.proposeCommands`). When it is on, the in-process host gets
+//! this platform's native command backend, and agents are started in their explicit
+//! `--commands` mode for their distro. It is read once at startup.
+//!
+//! `CONTEXTUAL_DEV_COMMANDS=1` turns it on for a run without changing Settings (debug builds
+//! only; release builds ignore the variable). `CONTEXTUAL_DEV_COMMANDS_JOURNAL=<absolute dir>`
+//! moves the durable history of the in-process host and of a locally spawned agent (default:
+//! the app or agent data directory).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use contextual_core::commands::execution::ManagedCommandRunner;
+use contextual_core::commands::journal::FileExecutionJournal;
 use contextual_core::host::{LocalHost, WorkspaceHost};
 use contextual_core::location::{Detected, Location, ProjectRoot, detect_for_this_os};
 use contextual_core::remote::{AgentLauncher, LocalAgentLauncher, SupervisedHost};
@@ -20,6 +32,66 @@ pub struct Hosts {
     remotes: HashMap<String, Arc<SupervisedHost>>,
     pub distros: Vec<Distro>,
     dev_remote: bool,
+    /// The in-process host can run approved commands.
+    local_commands: bool,
+    /// Agents are started in their command-execution mode.
+    agent_commands: bool,
+}
+
+/// The user's setting, or the development variable in a debug build.
+fn commands_requested(setting: bool) -> bool {
+    setting
+        || (cfg!(debug_assertions)
+            && std::env::var("CONTEXTUAL_DEV_COMMANDS").is_ok_and(|v| v == "1"))
+}
+
+fn native_runner() -> Option<Arc<dyn ManagedCommandRunner>> {
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    return Some(Arc::new(
+        contextual_core::commands::execution::linux::LinuxCommandRunner::new(),
+    ));
+    #[cfg(target_os = "macos")]
+    return Some(Arc::new(
+        contextual_core::commands::execution::macos::MacosCommandRunner::new(),
+    ));
+    #[cfg(windows)]
+    return Some(Arc::new(
+        contextual_core::commands::execution::windows::WindowsCommandRunner::new(),
+    ));
+    #[allow(unreachable_code)]
+    None
+}
+
+/// The in-process host with the native command backend, when command proposals are turned
+/// on and its durable history can be opened. Anything else leaves execution unavailable.
+fn local_host_with_commands(requested: bool) -> Option<LocalHost> {
+    if !requested {
+        return None;
+    }
+    let runner = native_runner()?;
+    let journal = std::thread::spawn(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        runtime
+            .block_on(async {
+                match std::env::var("CONTEXTUAL_DEV_COMMANDS_JOURNAL") {
+                    Ok(dir) => FileExecutionJournal::open(PathBuf::from(dir)).await,
+                    Err(_) => FileExecutionJournal::open_default().await,
+                }
+            })
+            .map_err(|error| {
+                eprintln!(
+                    "contextual: command history is unavailable, commands stay off: {}",
+                    error.message
+                )
+            })
+            .ok()
+    })
+    .join()
+    .ok()??;
+    Some(LocalHost::with_command_backend(runner, Arc::new(journal)))
 }
 
 /// The directory of the running executable (bundled agents live next to it).
@@ -31,7 +103,9 @@ fn exe_dir() -> PathBuf {
 }
 
 impl Hosts {
-    pub fn new() -> Self {
+    /// `propose_commands` is the user's setting at startup.
+    pub fn new(propose_commands: bool) -> Self {
+        let commands = commands_requested(propose_commands);
         let dev_remote = cfg!(debug_assertions)
             && std::env::var("CONTEXTUAL_DEV_REMOTE").is_ok_and(|v| v == "1");
         let distros = if dev_remote {
@@ -42,11 +116,24 @@ impl Hosts {
         } else {
             list_distros()
         };
+        let with_commands = local_host_with_commands(commands);
         Self {
-            local: Arc::new(LocalHost::new()),
+            agent_commands: commands,
+            local_commands: with_commands.is_some(),
+            local: Arc::new(with_commands.unwrap_or_default()),
             remotes: HashMap::new(),
             distros,
             dev_remote,
+        }
+    }
+
+    /// Whether approved commands can run for a project at this location: only when the user
+    /// turned command proposals on, never by default. A WSL project runs them through its
+    /// agent, which must also offer the capability; an older agent leaves them unavailable.
+    pub fn commands_enabled(&self, location: &Location) -> bool {
+        match location {
+            Location::Local => self.local_commands,
+            Location::Wsl { .. } => self.agent_commands,
         }
     }
 
@@ -92,10 +179,26 @@ impl Hosts {
     fn launcher(&self, distro: &str) -> Arc<dyn AgentLauncher> {
         let app_version = env!("CARGO_PKG_VERSION").to_string();
         if self.dev_remote {
+            // The dev agent runs on this machine but serves the "dev" distro's projects.
+            let mut args = Vec::new();
+            if self.agent_commands {
+                args.extend([
+                    "--commands".into(),
+                    "--location".into(),
+                    format!("wsl:{distro}"),
+                ]);
+                if let Ok(journal) = std::env::var("CONTEXTUAL_DEV_COMMANDS_JOURNAL") {
+                    args.extend(["--journal".into(), format!("{journal}-agent")]);
+                }
+            }
             return Arc::new(LocalAgentLauncher {
                 binary: exe_dir().join("contextual-agent"),
                 app_version,
                 env: Vec::new(),
+                command_location: self.agent_commands.then(|| Location::Wsl {
+                    distro: distro.to_string(),
+                }),
+                args,
             });
         }
         // Bundled static Linux agents (release packaging puts them next to the app); a dev
@@ -116,6 +219,7 @@ impl Hosts {
             wsl: PathBuf::from("wsl.exe"),
             binaries,
             env: Vec::new(),
+            commands: self.agent_commands,
         })
     }
 }

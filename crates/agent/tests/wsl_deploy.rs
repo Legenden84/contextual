@@ -47,6 +47,7 @@ fn launcher(home: &std::path::Path, tools: &std::path::Path) -> WslLauncher {
                 home.join(".cache").to_string_lossy().into_owned(),
             ),
         ],
+        commands: false,
     }
 }
 

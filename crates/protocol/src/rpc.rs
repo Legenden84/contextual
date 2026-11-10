@@ -34,6 +34,10 @@ pub mod method {
     /// Reserved cooperative Stop RPC: `commands::CancelCommand` → `commands::CommandResult`.
     /// This is not `$/cancel`: completion must wait for process-tree cleanup.
     pub const COMMAND_CANCEL: &str = "workspace/commandCancel";
+    /// Explicit reconciliation of unresolved command history for one project:
+    /// `commands::ReconcileCommands` → `commands::CommandReconciliation`. Launches nothing.
+    /// Requires `commands::EXECUTION_CAPABILITY`.
+    pub const COMMAND_RECONCILE: &str = "workspace/commandReconcile";
     /// Reserved bounded cumulative notification: `commands::CommandProgress`.
     pub const COMMAND_PROGRESS: &str = "$/commandProgress";
     /// Notification, app → agent: `{ id }` of the request to cancel.

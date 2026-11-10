@@ -2,7 +2,9 @@
 //!
 //! The process-wide client reservation deliberately excludes host/project epochs: replacing
 //! an agent, reopening a project or constructing another RemoteHost cannot clear Unknown.
-//! This is not cross-process ownership or persisted app execution history.
+//! This is not cross-process ownership or persisted app execution history: the project's host
+//! owns those. An unresolved reservation is released only by explicit reconciliation, when
+//! that host reports nothing unresolved for the project.
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -19,7 +21,8 @@ use tokio::sync::{oneshot, watch};
 
 use super::{RemoteHost, agent_gone, method, raw};
 use crate::commands::execution::{
-    ExecutionHandle, ExecutionProgress, ExecutionResult, ExecutionStatus,
+    ExecutionHandle, ExecutionProgress, ExecutionResult, ExecutionStatus, ReconciledInvocation,
+    ReconciliationReport, escape_controls,
 };
 use crate::commands::wire::{MAX_OBSERVATION_BYTES, ObservationReceiver, encode_dispatch};
 use crate::commands::{InvocationId, LaunchPermit, ReviewPlan};
@@ -31,7 +34,37 @@ const MAX_PROJECTS: usize = 32;
 const MAX_RESERVATIONS: usize = 256;
 
 type ProjectKey = (Location, String);
-static RESERVED: LazyLock<Mutex<HashMap<ProjectKey, InvocationId>>> = LazyLock::new(Mutex::default);
+
+struct Reservation {
+    invocation: InvocationId,
+    /// Set once the dispatching worker has ended without a confirmed outcome. Only such a
+    /// reservation can be released by reconciliation; one with a live worker never is.
+    unresolved: bool,
+}
+
+static RESERVED: LazyLock<Mutex<HashMap<ProjectKey, Reservation>>> = LazyLock::new(Mutex::default);
+
+/// Marks the reservation unresolved when its worker ends for any reason other than a
+/// confirmed outcome, including a panic or an aborted task.
+struct Held {
+    key: ProjectKey,
+    invocation: InvocationId,
+    released: bool,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        if let Ok(mut reserved) = RESERVED.lock()
+            && let Some(reservation) = reserved.get_mut(&self.key)
+            && reservation.invocation == self.invocation
+        {
+            reservation.unresolved = true;
+        }
+    }
+}
 
 struct Observation {
     receiver: ObservationReceiver,
@@ -233,7 +266,13 @@ pub(super) fn start(
         if reserved.len() >= MAX_RESERVATIONS {
             return Err(Error::conflict("Remote command admission limit reached."));
         }
-        reserved.insert(key.clone(), invocation.clone());
+        reserved.insert(
+            key.clone(),
+            Reservation {
+                invocation: invocation.clone(),
+                unresolved: false,
+            },
+        );
     }
     {
         let mut active = match host.commands.active.lock() {
@@ -263,6 +302,11 @@ pub(super) fn start(
     let worker_host = host.clone();
     let worker_invocation = invocation.clone();
     let task = runtime.spawn(async move {
+        let mut held = Held {
+            key: key.clone(),
+            invocation: worker_invocation.clone(),
+            released: false,
+        };
         let result = observe(
             &worker_host,
             id,
@@ -281,8 +325,10 @@ pub(super) fn start(
             .remove(worker_invocation.as_str());
         if result.status != ExecutionStatus::Unknown && result.history_error.is_none() {
             release(&key, &worker_invocation);
+            held.released = true;
         }
-        // Unknown, history failure, panic and dropped workers all leave RESERVED occupied.
+        // Unknown, history failure, panic and dropped workers all leave RESERVED occupied,
+        // marked unresolved when `held` is dropped.
         result
     });
     Ok(ExecutionHandle::from_worker(
@@ -292,10 +338,81 @@ pub(super) fn start(
 
 fn release(key: &ProjectKey, invocation: &InvocationId) {
     if let Ok(mut reserved) = RESERVED.lock()
-        && reserved.get(key) == Some(invocation)
+        && reserved
+            .get(key)
+            .is_some_and(|reservation| &reservation.invocation == invocation)
     {
         reserved.remove(key);
     }
+}
+
+const MAX_RECONCILED: usize = 1024;
+const MAX_DETAIL_CHARS: usize = 512;
+
+/// Asks the project's host to reconcile, and only if it reports nothing unresolved releases
+/// this client's unresolved reservation for that project. One request, never repeated here.
+pub(super) async fn reconcile(host: &RemoteHost, root: &str) -> Result<ReconciliationReport> {
+    use contextual_protocol::commands::{CommandReconciliation, ReconcileCommands};
+
+    if !host
+        .info
+        .capabilities
+        .iter()
+        .any(|capability| capability == EXECUTION_CAPABILITY)
+    {
+        return Err(Error::tool(
+            "Command reconciliation is unavailable on this workspace host.",
+        ));
+    }
+    let location = host
+        .commands
+        .location
+        .lock()
+        .map_err(|_| unavailable())?
+        .clone()
+        .ok_or_else(|| Error::forbidden("Command connection location is not bound."))?;
+    let reply: CommandReconciliation = host
+        .request(
+            method::COMMAND_RECONCILE,
+            ReconcileCommands {
+                root: root.to_owned(),
+            },
+        )
+        .await?;
+    if reply.invocations.len() > MAX_RECONCILED
+        || reply.canonical_root.is_empty()
+        || reply.canonical_root.len() > 32 * 1024
+        || reply.canonical_root.contains('\0')
+    {
+        return Err(Error::invalid("Malformed command reconciliation."));
+    }
+    let report = ReconciliationReport {
+        invocations: reply
+            .invocations
+            .into_iter()
+            .map(|entry| {
+                Ok(ReconciledInvocation {
+                    invocation: InvocationId::parse(&entry.invocation_id)?,
+                    evidence: entry.evidence,
+                    // Shown as plain text later: bounded, with controls made visible.
+                    detail: entry.detail.map(|detail| {
+                        escape_controls(&detail.chars().take(MAX_DETAIL_CHARS).collect::<String>())
+                    }),
+                })
+            })
+            .collect::<Result<_>>()?,
+    };
+    if !report.blocked() {
+        let key = (location, reply.canonical_root);
+        if let Ok(mut reserved) = RESERVED.lock()
+            && reserved
+                .get(&key)
+                .is_some_and(|reservation| reservation.unresolved)
+        {
+            reserved.remove(&key);
+        }
+    }
+    Ok(report)
 }
 
 async fn observe(

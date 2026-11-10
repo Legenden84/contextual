@@ -2,44 +2,103 @@
 
 ## Current status and next task
 
-**Where we are (2026-11-10): M2.2 implemented and verified on Windows 11 (NTFS). M2.1 is
-implemented; its macOS half still has no recorded run. Next task: M2.3, the Windows backend.**
+**Where we are (2026-11-10): the code is complete. M1–M6 are implemented, WSL projects run
+commands through the real agent, and the feature is now reachable in the real app through
+an opt-in setting, "Let the assistant propose commands" (Settings → Commands, off by default,
+read at startup). With it on: the model proposes, the user reviews a card and runs, edits,
+rejects or stops, chooses what to share, and continues; the app cleans up on close and
+rescans afterwards. With it off, which is the default, nothing changes.**
+
+**What is not done is verification, not code** (M7): nobody has looked at the UI on screen,
+it has never met a real Foundry deployment, macOS has never run, and Windows could not be
+re-tested after M6.2. Until that is done the setting should be treated as experimental.
 
 | Step | State |
 | --- | --- |
+| M1 Validation | Passed on the Linux development host |
 | M2.1 Linux backend | Implemented; verified on Linux/WSL2 |
-| M2.1 macOS backend | Implemented; type-checked for Darwin; **no recorded run on a Mac** |
-| M2.2 Windows journal | Implemented; verified on Windows 11 / NTFS through WSL interop |
-| M2.3 Windows backend | **Not started — next** |
+| M2.1 macOS backend | Implemented; type-checked for Darwin; **blocked: no Mac available to run it** |
+| M2.2 Windows journal | Implemented; verified on Windows 11 / NTFS |
+| M2.3 Windows backend | Implemented; verified on Windows 11 |
+| M3 Cross-process ownership and reconciliation | Implemented; verified on Linux/WSL2 and Windows 11 |
+| M4 Host path: Linux agent process | Verified |
+| M4 Host path: native Windows | Verified |
+| M4 Host path: Windows-to-WSL | Relay verified; **Windows-built client blocked by application control after one passing test** |
+| M4 Host path: macOS | **Blocked: no Mac** |
+| M5 Native Foundry proposals | Implemented; verified against a mock provider; **not yet against a live deployment** |
+| M6.1 Execution state, history, restore, Inspect data | Implemented in core; verified on Linux and Windows |
+| M6.2 Review cards: Run, Edit, Reject, Stop | Implemented behind the development switch; behaviour verified in the running app; **appearance not yet looked at** |
+| M6.3 Output-sharing preview and continuation | Implemented behind the development switch; behaviour verified in the running app; **appearance not yet looked at** |
+| M6.4 Lifecycle: cancellation, shutdown, rescan after a command | Implemented; verified in the running app |
+| M6.5 Prompt, help and safety copy | Implemented; wording tested; prompt section verified in the running app |
+| Agent execution for WSL projects | Implemented in the real agent (`--commands`); verified on Linux and through the real `wsl.exe` relay with the Linux-built client |
+| Opt-in setting (`chat.proposeCommands`) | Implemented; off by default; verified in the running app (debug build) |
+| M7 Acceptance | **Not started — needs a person and real hosts.** The setting makes the feature available to whoever turns it on; it stays off by default until acceptance |
 
-Code (`crates/core/src/commands/`):
-- `execution.rs`: `unix_launch`, `linux::{LinuxProcessTree, LinuxCommandRunner}`,
-  `macos::{MacosProcessTree, MacosCommandRunner}`, `native_launch_tests`.
-- `journal.rs`: `FileExecutionJournal` now initializes on Windows as well as Unix.
+Two named blockers keep M2 and M4 from being formally closed. Neither stops M5 or M6:
+1. **No macOS host is available** (confirmed by the user on 2026-11-10). The macOS backend
+   stays implemented but unverified. When a Mac is available, run the commands under "macOS
+   verification". Do not rework the macOS code speculatively.
+2. **Windows application control blocks locally built test binaries.** On 2026-11-10 the
+   new `wsl_execution` test binary ran once and was then refused ("blocked by your
+   organization's Device Guard policy"). This is a security control on the development
+   machine and must not be worked around. Later the same day the rebuilt Windows core test
+   binary was refused as well, so nothing after M6.2 was re-run on Windows. Running the Windows-built `wsl_execution` tests needs the
+   machine owner to permit or sign the binary, or a Windows machine without that policy.
 
-No runner is selected at startup; a host gets one only through
-`LocalHost::with_command_backend`.
+Code:
+- `crates/core/src/commands/`: supervisor, journal, admission, agent service and the three
+  native backends.
+- `crates/core/src/llm/tools.rs`: the `propose_command` definition, `ToolCall`/`ToolResult`,
+  bounded call assembly and transcript correlation. `llm/conversation.rs` declares the tool,
+  assembles calls in both streams and sends calls and results as native items.
+- `crates/core/src/commands/history.rs`: `CommandHistory`, the records saved with a chat,
+  and `SharedResult`, exactly what the model is told about a call.
+  `crates/core/src/commands/desk.rs`: `CommandDesk`, the in-memory review and approval state
+  of one open project. `crates/core/src/chat.rs`: calls and results in the transcript,
+  `plan_answers`, `record_command_round`, `restore_commands`. `crates/core/src/inspect.rs`:
+  calls and results per round.
+- App: `crates/app/src/state/hosts.rs` (the development switch), `state/project.rs` (the
+  project owns the `CommandDesk`), `state/chat.rs` (proposals, preparation, run, stop, edit,
+  reject, reconcile), `views/command_card.rs` (the card), `dev.rs` (debug automation).
+  `crates/core/src/commands/card.rs` decides what a card shows and offers.
+- `crates/agent/src/main.rs`: the agent's explicit execution mode,
+  `contextual-agent --commands --location <local|wsl:NAME> [--journal <dir>]`. Started without
+  arguments, as the app does by default, the agent cannot run anything. (The separate test
+  harness binary that M4 introduced has been removed; the tests start the real agent.)
+- Host-path tests: `crates/agent/tests/execution_host_path.rs` (a real agent process),
+  `crates/core/tests/wsl_execution.rs` (the real `wsl.exe` relay; needs two environment
+  variables, otherwise it reports that it skipped), and
+  `commands::execution::tests::across_processes` (the in-process host).
+
+A host gets a runner only through `LocalHost::with_command_backend`, and an agent only
+through its `--commands` mode. The app uses either only when the user's setting is on at
+startup (or, in a debug build, when `CONTEXTUAL_DEV_COMMANDS=1` is set for that run).
 
 **Next concrete steps, in order:**
-1. M2.3: Windows job-object ownership established before target code runs, and the Windows
-   launch adapter. The workspace forbids unsafe code, so the first decision is which
-   inspected dependency supplies suspended creation and job assignment.
-2. Record a macOS run of the commands under "macOS verification" (M2.1). The user reported on
-   2026-11-10 that the code works and the tests complete, without naming the platform; that
-   is not recorded as macOS evidence.
-3. Close M2, then M3.
+1. **Look at it.** Run a debug build with the switch on and go through a command by hand:
+   the card, the editor, live output, Stop, the share preview, Continue, the status bar and
+   the welcome note. All of it was written from the design system and compiled, never seen.
+   Fix what looks wrong; expect layout issues.
+2. **One real deployment.** Use a Foundry deployment that supports tools. The tool payload
+   handling and the "tools not supported" detection were only ever run against a mock.
+3. **M7 acceptance** on each supported location, by hand: edits, duplicate clicks, sibling
+   proposals, rejection, cancellation, restart, output privacy, and that Save/Undo and Source
+   Control still behave. Then decide about enablement. Open before that: the two named
+   blockers below. The Windows app starting the agent with `--commands` inside a distro has
+   not been run: it needs the Windows GUI build, which this development host cannot run.
 
-Windows tests can be run from the Linux development host: build with
+Windows tests can be run from the Linux development host while application control allows
+them: build with
 `cargo test -p contextual-core --no-default-features --target x86_64-pc-windows-gnu --lib --no-run`
 and start the printed `.exe` directly; WSL interop runs it on Windows.
 
-Command execution is unavailable in the normal app. Windows process execution, cross-process
-ownership/reconciliation, Foundry tools and the command-specific app workflow remain unfinished.
-Ordinary LocalHost and agent startup do not enable execution.
+Command execution is unavailable in the normal app. Foundry tools and the command-specific app
+workflow remain unfinished. Ordinary LocalHost and agent startup do not enable execution.
 
-Fake-process tests are not evidence of native execution. Linux actual-process tests are not
-evidence for macOS, Windows or the Windows-to-WSL connection. A Darwin type-check is not
-evidence that the macOS backend works.
+Fake-process tests are not evidence of native execution. A Darwin type-check is not evidence
+that the macOS backend works. A Linux-built client talking through `wsl.exe` is not evidence
+for the Windows-built client.
 
 ## Authoritative delivery sequence
 
@@ -52,12 +111,12 @@ requirements and implementation history; they are not a second scheduling system
 | Milestone | Status | Successor |
 | --- | --- | --- |
 | M1 — Validate existing implementation | Passed on the Linux development host (ledger); native Windows/macOS runs not available | Required for M2 acceptance |
-| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux verified, macOS awaiting a recorded run; M2.2 verified on Windows; **M2.3 is next** | M3 |
-| M3 — Cross-process ownership and reconciliation | Not implemented | M4 |
-| M4 — Complete host-path verification | Blocked on M2 and M3 | M5; Phase 2 is closed |
-| M5 — Native Foundry proposals | Not implemented; original Stage 3 | M6 |
-| M6 — App workflow, history and Inspect | Not implemented; original Stage 4 | M7 |
-| M7 — Full acceptance and enablement | Blocked on preceding milestones; original Stage 5 | Feature enabled |
+| M2 — Native execution backends and Windows journal | Implemented. Linux and Windows verified; macOS blocked on hardware, so not formally passed | M3 |
+| M3 — Cross-process ownership and reconciliation | Implemented; verified on Linux and Windows; macOS code path unrun | M4 |
+| M4 — Complete host-path verification | Implemented and verified on Linux and native Windows; Windows-to-WSL verified through the relay only; macOS blocked. Not formally passed | M5; Phase 2 is closed |
+| M5 — Native Foundry proposals | Implemented; mock-provider evidence recorded; live deployment unverified | M6 |
+| M6 — App workflow, history and Inspect | Implemented (all five parts) behind the development switch; exit evidence recorded; appearance unseen | M7 |
+| M7 — Full acceptance and enablement | Not started — **next**; needs a person, a real deployment and the supported hosts; original Stage 5 | Feature enabled |
 
 ### M1 — Validate and freeze the existing implementation
 
@@ -230,8 +289,8 @@ macOS verification, to run on a Mac:
 
 Remaining work, in order:
 1. **Next:** run the macOS verification above, fix failures, and record results in the ledger.
-2. Decide whether the Linux early-root-exit Unknown branch occurs on supported hosts and, if
-   so, whether it blocks platform acceptance.
+2. Resolved (see "Agent execution for WSL projects"): a group that holds only zombies now
+   counts as gone on Linux, so an early root exit no longer ends as Unknown.
 3. Decide whether Linux needs the same executable-header check: on a host where the standard
    library launches through `execvp` (glibc older than 2.29 with a working directory set),
    glibc also falls back to `/bin/sh`. It was left out because it would refuse `binfmt_misc`
@@ -284,14 +343,56 @@ What is and is not established:
 - Not exercised: symbolic-link rejection (the test account cannot create links; the test
   reports that it skipped), junctions, ReFS, FAT/exFAT and network shares.
 
-#### M2.3 handoff
+#### M2.3 Windows backend
 
-- **M2.3 Windows backend: not started — next task.** Safe job ownership before target code
-  runs remains required. No spawn-then-assign race is accepted.
-- The standard library can create a process suspended (`CommandExt::creation_flags`) but
-  offers no safe way to assign it to a job object or resume it. Inspect candidate
-  dependencies' sources before selecting one; the workspace forbids unsafe code.
-- Do not mark M2 passed until all substeps have their required platform-specific evidence.
+**Status: implemented; verified on Windows 11 with actual processes.**
+
+Dependency inspection (sources read in the Cargo registry; the workspace forbids unsafe code,
+so the unsafe Windows calls must live in a dependency, as they do in Nix on Unix):
+- **`process-wrap` 10.0.1** (`std`, `job-object`, `creation-flags`): creates the process
+  suspended, assigns it to a job object, then resumes its threads; `start_kill` is
+  `TerminateJobObject`. A failed assignment or resume terminates the still-suspended process.
+  Its own "wait for the job" returns on *any* completion-port message, not only on "no active
+  processes", and its job handle is private, so it cannot confirm an empty tree. Its job is
+  not kill-on-close in the `std` variant. Pinned with `=`.
+- **`win32job` 2** (already in the lockfile through another dependency): creates a job with
+  kill-on-close, assigns a process by handle and lists a job's member process IDs. It has no
+  termination call.
+- **`winsafe` 0.0.29** was considered for a safe `ResumeThread`: it cannot open a thread by
+  ID, and using its `CreateProcess` would mean reimplementing the standard library's argument
+  quoting and handle inheritance. Not used.
+- `process-wrap` 10 requires Rust 1.87, so the workspace `rust-version` went from 1.85 to 1.87.
+  That also allows `std::io::pipe`. One unrelated line (`logic/format.rs`) was changed to
+  satisfy a Clippy lint that the new minimum enables.
+
+Design (`execution.rs`, module `windows`):
+- Two nested job objects. `process-wrap` runs a `post_spawn` hook after creating the process
+  and before its own job assignment and resume. `ObservedJob` uses that hook to put the
+  suspended process into our `win32job` job first. The process is therefore a member of both
+  jobs before any of its code runs, and descendants inherit both. There is no
+  spawn-then-assign window.
+- Termination is `TerminateJobObject` on the inner job. Confirmation is the root's exit
+  plus an empty member list on the outer job.
+- The outer job is kill-on-close. Dropping the tree, or the app process dying, ends every
+  member. Drop also calls the termination explicitly.
+- A root terminated by the tree reports no exit code (Windows would report the code passed to
+  the termination call). A root that exited by itself keeps its real code through cleanup.
+- Launch: resolved absolute `.exe`/`.com` only (the standard library would run a batch file
+  through `cmd.exe`), `env_clear` plus exactly the approved variables, the approved cwd, null
+  stdin, `CREATE_NO_WINDOW`. Pipes (`std::io::pipe`), the job and the runtime check all
+  precede the launch. Environment names that differ only by case are refused as duplicates.
+
+Known limits, to carry into M4/M7 acceptance:
+- Arguments reach a Windows program as one command line, quoted for the standard C runtime
+  rules. A program with its own parser (`cmd.exe` is one) may read them differently.
+- A member leaves the job's list when termination begins; its handles and open files can
+  outlive that briefly.
+- Job containment is not a sandbox. Work a member delegates to a service, a scheduled task or
+  an already running process is outside the job.
+- Handles that other code in the app made inheritable are inherited by the child.
+- Nested jobs need Windows 8 or later.
+- Tests ran with the test binary started through WSL interop, as a standard user. They have
+  not been run from a native Windows shell or under the GUI app.
 
 ### M3 — Finish cross-process ownership and reconciliation
 
@@ -306,7 +407,58 @@ Exit evidence: multi-process tests demonstrate concurrent admission refusal, cra
 without replay, unresolved-state blocking across reconnection, and a new separately approved
 attempt after confirmed reconciliation. Recovery UI belongs to M6.
 
-Next: M4.
+**Status: implemented; verified on Linux/WSL2 and Windows 11 (see the evidence ledger).**
+
+Ownership:
+- One lock file per project (hash of location and canonical root) in the journal directory.
+  Unix takes `flock` through Nix; Windows opens the file without sharing. Both belong to one
+  open handle, so a second attempt conflicts even inside one process, and the operating
+  system releases the lock when the owning process dies. Platforms or filesystems with
+  neither fail closed.
+- The supervising worker takes it without waiting, after its in-process reservation and
+  before the recovery check, and holds it until after the completion record. A refusal is
+  reported as FailedToStart; no intent is written and nothing is launched.
+- It excludes every process sharing the journal directory. Two users with separate journals
+  are not excluded from each other.
+- Rust's standard-library file lock (1.89) was not used: raising the minimum version again
+  would have enabled a dozen unrelated lints. The workspace stays at 1.87.
+
+Durable launch records (intent version 2):
+- `<id>.launching.json` is saved before any start is attempted and names the backend's
+  containment: owner-bound (Windows job), process group (Unix) or unverifiable (fakes).
+  If it cannot be saved, nothing is launched, because its absence is later read as proof
+  that nothing started.
+- `<id>.launched.json` holds the Unix process-group number and, on Linux, the kernel boot
+  identity. It is saved alongside supervision so a slow disk cannot delay Stop.
+- Version 1 intents predate the marker and can never be reconciled as "never launched".
+
+Reconciliation (`ExecutionJournal::reconcile`, `ExecutionEngine::reconcile`,
+`WorkspaceHost::reconcile_commands`, RPC `workspace/commandReconcile`):
+- Explicit only. It takes the project lock, so it fails while any process supervises or
+  starts a command for the project.
+- An unknown invocation is unblocked only on evidence: the launch marker was never written;
+  the tree was owner-bound and its owner no longer holds the lock; the recorded process group
+  no longer exists; or the host restarted since the launch.
+- The evidence is saved as `<id>.reconciled.json`. The outcome stays unknown and no completion
+  is fabricated. An unreadable launch or reconciliation record is never treated as absent.
+- It never launches, retries, restores approval, or signals a process. A recorded group
+  number is only ever observed with signal zero.
+- Only when nothing remains unresolved is the in-process blocked slot released, and, on the
+  remote client, only a reservation whose worker has ended (never one still dispatching).
+- Reconnecting, re-preparing and fresh approvals change nothing by themselves.
+
+Limits, to carry into M4/M7 acceptance:
+- **A surviving Unix process group stays blocked.** After its owner died, the group can only
+  be observed, not ended, because its number is no longer reserved. The project unblocks when
+  those processes end, or after a reboot (Linux). The recovery UI (M6) must say so.
+- A reused group number can keep a project blocked until the unrelated group ends. It can
+  never unblock one wrongly.
+- A crash in the instant between starting a Unix process and saving its group leaves that
+  invocation permanently unresolved. There is deliberately no manual override.
+- A Unix descendant that left the process group is not seen by the group check.
+- macOS has no boot identity here, so a reboot there is recognised only by the group being
+  gone.
+- Owner-bound evidence relies on the Windows job being kill-on-close with a single handle.
 
 ### M4 — Verify the complete host execution path; close Phase 2
 
@@ -322,6 +474,47 @@ Verify:
 Exit evidence: record platform-specific results for the complete approved host path. Missing
 hardware is a named blocker, not a reason to create more speculative hardening work.
 
+**Status: implemented; verified as listed. Not formally passed because of the two named
+blockers (macOS hardware; application control on the Windows-built relay test).**
+
+| Requirement | Linux agent process | Native Windows (in-process) | Windows-to-WSL |
+| --- | --- | --- | --- |
+| Approved command runs once, output returned | Pass | Pass | Pass with both client builds |
+| Stop ends the whole tree | Pass | Pass | Pass, Linux-built client |
+| Timeout ends the whole tree | Pass | Pass | Pass, Linux-built client |
+| Disconnect: agent cleans up, client stays blocked until reconciled | Pass | n/a | Pass, Linux-built client |
+| Agent failure: blocked until its command is gone, nothing replays | Pass | Pass (killed supervising process, M3) | Pass, Linux-built client |
+| Orderly shutdown stops a running command first | Pass | n/a | Pass for an idle agent, both client builds |
+| Executable or directory changed after review | Pass | Pass | Same agent code as the Linux column |
+| Intent-write refusal launches nothing | Fake-runner and in-process tests | Pass | Same agent code |
+| Completion-write failure is not reported as a process failure | In-process test (M3) | Pass (M3) | Same agent code |
+| No dispatch retry on another agent, no local fallback | Pass | n/a | Same client code |
+
+How it was done:
+- (As first done; the harness has since been replaced by the real agent's `--commands` mode.)
+  The harness binary serves the agent protocol on stdio with this platform's native backend
+  and a file journal. Tests start it as a separate process and connect a real `RemoteHost`.
+- `wsl_execution.rs` starts the harness inside a real distro through `wsl.exe`. Built for
+  Windows it is the app's client. Built for Linux and run inside WSL it reaches the same
+  `wsl.exe` through interop, which exercises the real relay with the Linux build of the client.
+
+Findings:
+- **Killing `wsl.exe` takes the agent and its command down together.** WSL ended the whole
+  Linux process tree of that session; the agent recorded nothing. A new connection was
+  refused until reconciliation, which then released the project on "process group absent".
+- **Closing the connection is different:** the agent notices, stops the command, records
+  Cancelled and exits by itself.
+- A killed agent *process* (inside the distro) leaves its command running, exactly as on plain
+  Linux: blocked until that process group ends.
+- The Windows-built client passed the run-and-report test in 0.64 s before the binary was
+  blocked. Nothing about it failed; it simply could not be started again.
+
+Known limits, to carry into M7 acceptance:
+- Review detects a removed or re-pointed executable or directory. It does not detect new
+  content at the same path: the plan records paths, not a content hash.
+- The four relay tests other than run-and-report have not run with the Windows-built client.
+- Nothing here has run under the GUI app or from a native Windows shell.
+
 **Passing M4 closes Phase 2.** Foundry, UI, chat persistence and app lifecycle integration are
 M5/M6 work and cannot extend Phase 2. Next: M5.
 
@@ -334,6 +527,59 @@ History reconstruction and chain resets must never dispatch commands.
 
 Exit evidence: mock-provider tests cover split, complete, malformed, incomplete and multiple
 calls, call/result correlation and history reconstruction. Parsing creates proposals only.
+
+**Status: implemented; exit evidence recorded against a mock provider (ledger).**
+
+What exists:
+- **Opt-in.** `ConversationRequest::command_tool` is false by default and the app does not
+  set it yet. With it off and no calls in the history, request bodies are byte-identical to
+  before (the recorded parity test still passes).
+- **The tool.** One function, `propose_command`, whose schema mirrors `CommandRequest`. It is
+  declared non-strict: the schema guides the model, `commands::parse_arguments` decides.
+- **Transcript types.** `ChatMessage` gained `tool_calls` (assistant) and `tool_call_id`
+  with a `Tool` role. `ConversationRequest::tool_results` answers the calls of the last
+  assistant message and is sent before the user's text; with results and no text, no user
+  message is sent. Nothing is flattened into prose.
+- **Events.** `ChatEvent::ToolCall` is emitted once per call after the response has ended,
+  before `Usage` and `Done`. `ChatEvent::ToolsUnsupported` announces a deployment that refuses
+  the declaration.
+- **Assembly.** Responses: by output item identity, from added/delta/done events, checked
+  against the completed response's own output list. Chat completions: by index, with
+  identity, name and arguments each allowed to arrive in pieces.
+- **Completion.** A call is usable only if the response completed: `response.completed`, or
+  `finish_reason: "tool_calls"` *and* the stream's `[DONE]` marker. An arguments-done event,
+  a cut-off stream or `length` never suffices.
+- **Nothing is lost.** Unknown tool, non-JSON or oversized arguments, a colliding identity,
+  disagreement between what was streamed and what was summarised, a call made when no tool
+  was offered: each is reported with its identity and a `problem`, and can never become a
+  proposal. More than 8 calls in one response fails the turn.
+- **Bounds.** 8 calls per response, 256-byte identities, 64-byte names, 64 KiB arguments
+  (never accumulated beyond that), 256 KiB per result.
+- **Correlation.** Before anything is sent, every call in the transcript must be answered
+  exactly once, directly after it, and no result may lack its call. A violation is a local
+  refusal (`FoundryError::Rejected`), not a provider error.
+- **Tool support is tracked on its own.** A refused declaration is recognised by a narrow
+  match (the message must name tools and refuse them), checked before the existing
+  "Responses API unsupported" match, so it is never read as a missing API. The turn then
+  continues on the same API without the tool, after the notice. If the conversation already
+  contains proposals, it fails explicitly instead of stripping them.
+- **Budget.** The tool definition, calls and results count toward the logical input estimate.
+- **No path to execution.** The `llm` module does not reference the execution engine. A
+  first attempt, an HTTP retry, a chain reset and the chat fallback all only build JSON.
+
+Limits, to carry into M6/M7:
+- **Not verified against a live Foundry deployment.** The streamed tool payloads in the tests
+  are written from the documented API shapes, not recorded. The refusal wording that marks
+  tool support as missing is a guess at what deployments send. M7 must include a real run.
+- A call whose arguments are not a JSON object is replayed in a rebuilt history with `{}` as
+  its arguments, because a provider would reject the whole request otherwise. With a stored
+  chain (`previous_response_id`) the provider keeps the original.
+- A response that ended incomplete still reports its calls, flagged. Whether a stored
+  incomplete response can be continued with results is not known; M6 should reset the chain
+  after one.
+- The app ignores both new events for now, and saved threads do not store calls or results.
+- Existing behaviour is unchanged where it was already loose: a text reply whose stream ends
+  without a terminal event still ends as `Done` with no finish reason.
 
 Next: M6.
 
@@ -354,6 +600,278 @@ Exit evidence: end-to-end proposal, review, approval, execution, observation and
 tests, including rejection and restored history that cannot launch anything.
 
 Next: M7.
+
+#### M6.1 — Execution state, history, restore and Inspect
+
+**Status: implemented in core; verified on Linux and Windows (ledger). No UI yet.**
+
+Two kinds of state, kept apart on purpose:
+- **Saved with the chat: observations** (`commands::history`). One `CommandRecord` per call:
+  the provider's call identity scoped by an app-generated turn identity, the original
+  proposal, every attempt with the exact request that ran (and whether the user edited it),
+  the execution location, timestamps, the observed status and flags, and what the model was
+  told. No approval, preparation, environment or output. At most 256 records per chat and 8
+  attempts per proposal; only fully resolved records are evicted.
+- **In memory only: review and approval** (`commands::desk`). `CommandDesk` belongs to the
+  open project, not to a chat view. It holds the prepared plans, the approval gate and
+  unshared output (the latest 8 results). It has no serialization.
+
+Behaviour:
+- A reply's calls enter the chat only through `record_command_round`, as records awaiting
+  review, or as unusable ones that keep their identity. Recording prepares and starts nothing.
+- Run is two explicit steps on the desk: `approve` of exactly the plan shown (synchronous, so
+  a second click cannot create a second approval), then `begin` against a plan prepared again
+  just now. Any difference returns the proposal to review.
+- Opening the editor voids approval at once. One command runs at a time; a sibling's approval
+  does not survive another launch; finishing starts nothing.
+- A re-run is a new attempt with its own review and approval; earlier attempts are kept.
+  A rejection is final for its proposal. The same invocation twice in one model turn is
+  reviewed once.
+- An unknown outcome blocks the desk until the host's reconciliation succeeds; after that
+  the session is empty and everything needs fresh preparation and review.
+- When the conversation continues, every unanswered call is answered truthfully
+  (`plan_answers`): rejected; not run (unusable, or the user had not decided — which closes
+  it); withheld (it ran and the user shared nothing: the model learns only that); or the
+  outcome with exactly the streams the user chose. Nothing continues while a command runs.
+  A round that fails leaves the chat untouched.
+- `SharedResult` is the bounded structured result: call identity, status, exit code,
+  cancellation and timeout flags, per-stream text with truncation and omission flags, whether
+  the user edited the text, and whether the command was edited before running.
+- Restore (`restore_commands`): an attempt without a recorded result becomes unknown and is
+  marked interrupted. Nothing is approved or prepared, and the desk starts empty.
+- Chats saved before this still load, and save byte-compatibly when they hold no commands.
+- Inspect shows, per round, the model's calls with their current status and exactly what the
+  model was told about earlier calls, labelled ("Rejected", "Ran; result not shared",
+  "Outcome shared, stdout omitted", …).
+
+Defect found and fixed while testing: the desk first gave every review its own identity in
+the gate, which defeated the gate's rule that one invocation proposed twice in a model turn
+is refused, and let a rejected proposal be put up for review again. Both now have tests.
+
+Not done here (later parts): any UI; the share preview and secret warning; lifecycle
+integration; the rescan after a command; safety copy. The app still does not set
+`command_tool`, so none of this is reachable from the running app.
+
+#### M6.2 — Review cards: Run, Edit, Reject, Stop
+
+**Status: implemented behind the development switch. Behaviour verified in the running app
+through debug automation; appearance not yet seen by anyone.**
+
+Enablement:
+- `CONTEXTUAL_DEV_COMMANDS=1`, debug builds only. It gives the in-process host this
+  platform's native backend and a file journal (`CONTEXTUAL_DEV_COMMANDS_JOURNAL` to move it).
+  Release builds ignore it. Projects served by an agent (WSL) stay without execution: the
+  shipped agent has none. With the switch off nothing changes: the tool is not offered.
+
+How it is wired:
+- `Project` owns the `CommandDesk`. `ChatModel` offers the tool, records a reply's calls with
+  `record_command_round`, and asks the host to prepare each open proposal; the plan goes to
+  the desk for review. Preparation approves nothing.
+- A reply that proposes commands pauses the automatic read follow-ups, and may have no text.
+- **Run** takes the approval synchronously, has the host prepare the request again, and only
+  if that matches what was shown consumes the approval and starts the command. The attempt is
+  recorded when the host reports it started; output is followed live and kept in memory.
+- **Edit** voids approval the moment the editor opens. The edited request is validated,
+  prepared and put back up for review; the record keeps the original proposal and marks the
+  attempt as edited.
+- **Reject** is final for the proposal. **Stop** cancels the running command's scope.
+- After an unknown outcome the card offers "Check whether it still runs", which calls the
+  host's reconciliation; only a clean answer lets commands be reviewed again.
+- Opening a saved chat calls `restore_commands`, notes an interrupted command, and prepares
+  what still awaits review. A chat cannot be switched while its command runs.
+- When the user sends the next message, every open call is answered: rejected, not run, or
+  "ran, result not shared". Sending is refused while a command runs.
+- What a card shows and offers is decided in core (`commands::card`, 8 tests); the view only
+  renders it. The component is specified in
+  `docs/design/contextual/components/CommandCard/README.md`. That spec is local: the design
+  system here is a copy of an external artifact, which does not contain this component.
+
+Looking at it:
+`CONTEXTUAL_DEV_COMMANDS=1 cargo run -p contextual -- <project>` with a deployment that
+supports tools, then ask for something that needs a command. Without a deployment, point
+`AZURE_OPENAI_*` at a local mock that answers with a `propose_command` function call.
+
+Not done here: the Share action and preview (M6.3) — a finished command's output is visible
+on its card but can only be withheld from the model; rescan and Source Control refresh after
+a command (M6.4); status-bar, help and prompt wording (M6.5). The Edit box is the request as
+JSON, not a form. A WSL project shows cards that cannot be run.
+
+#### M6.3 — Output sharing and explicit continuation
+
+**Status: implemented behind the development switch. Behaviour verified in the running app
+through debug automation; appearance not yet seen by anyone.**
+
+- **Running sends nothing.** Sharing is its own decision, in two steps, and continuing is a
+  third. None of them happens by itself.
+- **Share result…** on a finished card (only while this session still holds the output)
+  opens the preview: the warning "Output may contain secrets or contents of files you did not
+  select."; a tick box and an editable text area per stream; and exactly the structured
+  result that would be sent, updated as the user ticks and types. An unticked stream is
+  recorded as omitted; text that differs from the capture is recorded as edited. What can be
+  typed in place of a stream is bounded (128 KiB).
+- **Use this result** stages it in memory. Nothing is sent. The card says what will be sent
+  and offers **Don't share**.
+- **Continue**, under the latest reply's cards, sends one request that answers every open
+  call: staged results, rejections, "not run" for proposals the user had not decided on
+  (which closes them), and "ran, result not shared" for the rest. The sentence next to the
+  button says which (`chat::continuation_summary`). It needs no typed text. Sending a typed
+  message does the same with the text added.
+- The continuation is an ordinary turn: same cancellation, same budget check, and any
+  commands in the reply come back as proposals awaiting review.
+- After the model has its answers, staged results and held output are dropped. If the request
+  fails, nothing is recorded and the staged result is still there.
+- A result that shares no outcome ("rejected", "not run", "not shared") contains the call
+  identity, that status and a sentence — no flags about how the command ended. (Found in the
+  running app: the first version still sent `cancelled: false` and `timedOut: false`.)
+- Shared output becomes part of the saved transcript, as the result of its call; the preview
+  and the Continue row say so. Unshared output is never saved.
+
+Not done here: sharing after a restart is impossible by design (the output is gone; the card
+then offers only Continue, which reports "ran, result not shared"). There is no way yet to
+share part of the conversation's commands and keep others open: one Continue answers all.
+
+#### M6.4 — Lifecycle, and what happens after a command
+
+**Status: implemented; verified in the running app through debug automation.**
+
+Lifecycle:
+- **Closing the project** drops the chat model, and with it a guard that cancels the running
+  (or still launching) command's scope. The host ends the process tree and records the
+  outcome; nothing keeps running unobserved.
+- **Quitting the app** cancels the scope the same way and then waits, for at most six
+  seconds and only when a command is in flight, until the host reports it has finished with
+  the command. The framework itself waits only 200 ms for quit handlers, so the wait is done
+  inside the handler.
+- **Switching chats** is still refused while a command from the current chat runs, with a
+  message. That is a deliberate simplification: the result belongs to that chat.
+- In both closing cases the host's journal has the confirmed outcome, but the chat was not
+  open to record it, so the saved chat shows the attempt as interrupted when it is opened
+  again. "Check whether it still runs" then finds nothing unresolved.
+
+After any attempt that may have started — success, failure, stop, timeout or unknown:
+- The files behind unsaved proposals and behind the last save are read again.
+- A proposal whose file no longer matches its baseline (changed, created in its place, or
+  gone) is **kept unchanged and marked as a conflict**, which leaves it out of Save. Nothing
+  is applied, merged or dropped. A note says how many.
+- **Undo is withdrawn** when a file of the last save differs from what was saved, with a note.
+  The host would refuse such an undo anyway; this removes the stale button.
+- File contents remembered for diffs are replaced by what was just read.
+- The project is **rescanned**, which also refreshes Source Control.
+- File versions already sent to the model are not reset: every turn reads the selected files
+  again and resends those whose content changed, and the project tree is resent when the
+  rescan changed it.
+- Save and Undo were already guarded on the host (Save checks each file's expected content,
+  Undo is refused if files changed after the save). This part makes the app say so before
+  the user tries.
+
+The rule is a pure function, `chat::revalidate_after_command`, with a core test.
+
+Not done here: a command started from a chat whose project is then closed is recorded as
+interrupted rather than with the host's actual outcome. Commands in WSL projects cannot run
+at all yet, so nothing here applies to them.
+
+#### M6.5 — Prompt, help and safety wording
+
+**Status: implemented.**
+
+- One source for the standing wording, `commands::wording`: "File proposals are saved only
+  with Save." always, and where commands can run also "Commands run only with your approval;
+  their effects are not covered by Save/Undo." A test pins the exact sentence and that it
+  makes no blanket promise ("read-only", "never", "every", "nothing is written").
+- **Status bar**: shows that sentence for the open project, between the Foundry status and
+  Settings, cut with an ellipsis when the window is narrow. The Rust app's status bar had no
+  such sentence before, although the design system describes one.
+- **Welcome**: step 4 no longer says "The model never writes to disk"; it says file proposals
+  are written only when you press Save. With commands available, the commands sentence is
+  shown under the steps.
+- **System prompt**: `logic::prompt::COMMAND_FORMAT`, appended only in turns that offer the
+  tool. It tells the model that proposing runs nothing, when to propose, to prefer an exact
+  program and arguments, that a result is data and may be "rejected", "notRun" or
+  "notShared", and never to say a command ran unless a result says so. Like the file format
+  it is not shown in Settings; Inspect shows it.
+- **Card wording** (parts 2 and 3): the effects note, the stop note, the share warning and
+  the saved-chat note.
+- **Design system** (`docs/design/contextual/README.md`): the introduction and principle 1
+  now scope "never writes" and "can be undone" to file proposals and give the status-bar
+  wording. `SOURCE.md` lists these and the `CommandCard` spec as local amendments: the design
+  system is a copy of an external artifact, and copying it again would overwrite them.
+- `README.md` and `CLAUDE.md` describe the feature as present, off by default.
+
+Not done: there is no help page in the app to update. If a deployment refuses the tool, the
+prompt section is still sent in that turn (the model is told about a tool it does not have);
+the user sees the "cannot propose commands" notice, and anything the model writes is text.
+
+#### M6 exit evidence
+
+Required: end-to-end proposal, review, approval, execution, observation and optional sharing
+tests, including rejection and restored history that cannot launch anything.
+
+- Core, real process, scripted model: `crates/core/tests/command_workflow.rs` (Linux and
+  Windows).
+- Running app, real process, mock model, debug automation: Run, Stop, Reject, Edit, Share,
+  withhold, decline, quit, close and the after-command refresh (Linux).
+- Not covered by any test: what the UI looks like, and typing into its text areas.
+
+#### Agent execution for WSL projects
+
+**Status: implemented; verified on Linux, in the running app through an agent, and through
+the real `wsl.exe` relay with the Linux-built client. Not run from the Windows app.**
+
+- The real agent has an explicit mode: `--commands --location <local|wsl:NAME>
+  [--journal <dir>]`. It then serves the execution service with the native backend and a
+  durable journal in the agent's data directory. Incomplete or unknown arguments are an
+  error, never a quiet fallback in either direction. Without arguments nothing changes: the
+  agent prepares commands (inspection only) but offers neither execution nor reconciliation;
+  a test pins that.
+- The location comes from whoever starts the agent. `WslLauncher` passes the distro it
+  launches into, and only when asked (`commands`); a distro name that is not plainly safe in
+  a shell command leaves execution off. The connection is bound to that location.
+- The app asks for it only under `CONTEXTUAL_DEV_COMMANDS=1` (debug builds). Without the
+  switch nothing is passed. With it, an agent that predates the mode ignores the arguments
+  and serves without execution, so its cards cannot be run.
+- From there it is the same path as M4/M6: prepare on the agent, review and approve in the
+  app, dispatch over the reviewed connection, observe, reconcile over the connection.
+
+**Finding: zombies kept a project blocked inside WSL.** When the agent is killed while a
+command runs and the command's processes are then ended, they often stay as unreaped zombies:
+their adoptive parent is a WSL session `init` that lingers and does not wait for them. The
+process-group check counted them as "still exists", so reconciliation stayed blocked
+indefinitely (seen in about half the runs). A zombie cannot execute. On Linux the check now
+reads the group's members from `/proc` and treats a group with no member that can still run as
+gone (two readings must agree). A reused group number with live members still reads as
+present. This also resolves the open M2.1 item: a root that exits and leaves a descendant now
+ends deterministically as confirmed, not "Unknown" on hosts that do not reap promptly. macOS
+has no `/proc` and keeps the stricter check.
+
+Leftover from testing: the killed-agent tests leave a few zombie entries under those lingering
+WSL `init` processes on the development machine. They hold no resources beyond a process-table
+entry and disappear when the distro restarts.
+
+#### The opt-in setting
+
+**Status: implemented; verified in the running app.**
+
+Decision, made on 2026-11-10 at the user's direction to complete the code: the feature is
+reachable in normal builds through an explicit setting instead of only a debug-only
+environment variable. This departs from the original sequence, which kept every build
+disabled until M7 acceptance had passed. What preserves the intent of that rule:
+
+- **Off by default.** `chat.proposeCommands` is false in new and in existing settings.
+  A test pins that settings saved before the option existed leave it off.
+- **Explicit.** One switch in Settings → Commands, with the effects note, "Running a command
+  sends nothing to the assistant", and "Takes effect the next time you start Contextual".
+- **Nothing else relaxed.** Every command still needs review and approval of the exact
+  command; there is no always-allow; a restored chat still holds no approval.
+- It is read once at startup, so a running session cannot be switched on from under the user.
+- `CONTEXTUAL_DEV_COMMANDS=1` still turns it on for one run in debug builds only.
+
+Verified in the running app (debug build, no environment switch): with the setting on, the
+tool was offered and an approved command ran; with it off or absent, the tool was not offered
+and nothing ran. A release build compiles; the setting was not exercised in a release build,
+because the automation that drives the app exists only in debug builds.
+
+M7 is what turns "available to whoever opts in" into "accepted": it should end either with
+the experimental wording removed or with the default reconsidered. Neither is decided here.
 
 ### M7 — Full acceptance and enablement; original Stage 5
 
@@ -394,12 +912,51 @@ WSL2 kernel 6.18.33.2, rustc 1.99.1.
 | M2.1 Linux ownership probes | 2026-11-10, Linux/WSL2 | `unix_ownership_tests` (2 Linux tests) | Pass |
 | M2.1 Linux tree and launch adapter | 2026-11-10, Linux/WSL2, glibc and musl targets | `linux::tests` (6) and `native_launch_tests` (10): exact argv, exact environment, null stdin, cwd, own group, failed start, refusals, bounded output, timeout, cancellation, descendants, Drop | Pass; 20 consecutive runs of `commands::execution` without a failure after the shared-code restructuring |
 | M2.1 Linux end-to-end local path | 2026-11-10, Linux/WSL2 | `approved_command_runs_once_through_the_native_runner` | Pass |
+| Linux checks, independent run | 2026-11-10, the user's main checkout on Linux | Workspace tests | User reports passing |
 | M2.1 macOS type-check | 2026-11-10, cross-check from Linux | `cargo clippy -p contextual-core --no-default-features --lib --tests --target aarch64-apple-darwin -- -D warnings` | Pass. Library and test code compile for Darwin; nothing was linked or run |
 | M2.1 macOS execution | — | `macos::tests`, `native_launch_tests`, ownership probes, end-to-end test | Blocked: no macOS host has run them. Design assumptions are listed under M2.1 |
 | M2.2 Windows probe | 2026-11-10, Windows 11 build 26300, NTFS, standard user | Standalone probe of hard-link, flush, sharing and symlink behaviour | Findings listed under M2.2 |
 | M2.2 Windows journal | 2026-11-10, same host; `x86_64-pc-windows-gnu` test binary started through WSL interop | `commands::journal::tests` (22 on Windows) and the three supervisor journal tests in `commands::execution::tests` | Pass; all 104 `commands` tests pass; 15 consecutive runs without a failure. The symbolic-link test skipped itself |
 | M2.2 cross-checks | 2026-11-10, Linux/WSL2 | Workspace format, Clippy and tests; Clippy for `x86_64-pc-windows-msvc`, `x86_64-pc-windows-gnu` (with tests) and `aarch64-apple-darwin` (with tests); musl agent build | Pass: 519 tests, 0 failed |
-| Windows core suite outside this feature | 2026-11-10, same Windows host | Whole `contextual-core` unit-test binary | 251 passed, 5 failed, all in `process::tests` (the Git runner's tests). Not part of this delivery and not investigated |
+| M2.3 dependency inspection | 2026-11-10 | Read `process-wrap` 10.0.1, `win32job` 2.0.3/2.1.0 and `winsafe` 0.0.29 sources | Findings listed under M2.3 |
+| M2.3 job-object probe | 2026-11-10, Windows 11 build 26300, standard user | Standalone probe: assignment while suspended, member list, termination, kill-on-close, failed setup | Suspended process listed before running; descendants listed; list empty within 0.1 ms of termination; a process whose setup failed never ran |
+| M2.3 Windows backend | 2026-11-10, same host; `x86_64-pc-windows-gnu` test binary through WSL interop | `commands::execution::windows::tests` (11 plus the helper) and `approved_command_runs_once_through_the_native_windows_runner`: exact argv incl. quotes, backslashes and shell metacharacters; exact environment; cwd; null stdin; failed start; batch files and non-images refused; inexact requests; bounded output; Stop and timeout with a descendant; Drop; kill-on-close; root exit with a surviving descendant | Pass; all 116 `commands` tests pass on Windows; 12 consecutive runs without a failure |
+| M2.3 cross-checks | 2026-11-10, Linux/WSL2 | Workspace format, Clippy, tests (519, 0 failed); Clippy for `x86_64-pc-windows-msvc`, `x86_64-pc-windows-gnu` and `aarch64-apple-darwin` (the last two with tests); musl agent build; `cargo check -p contextual --target x86_64-pc-windows-gnu` | Pass |
+| M3 journal ownership and reconciliation | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `commands::journal::tests`: exclusive ownership between independently opened journals; never-launched, pre-marker, owner-bound, unverifiable, process-group present/absent, restarted host; scope; unusable records; immutability | Pass on both (the two process-group tests are Unix-only) |
+| M3 separate processes | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `commands::execution::tests::across_processes`: a second OS process holds ownership (admission refused, nothing written, reconciliation refused); a supervising process is killed mid-command (restart refuses fresh approvals, nothing replays, blocked until termination is established, then one new approved attempt runs); in-process release only after evidence; unverifiable backend stays blocked | Pass on both. Linux evidence: process group absent after the orphan was ended by the test; Windows evidence: owner-bound job |
+| M3 agent connection | 2026-11-10, Linux/WSL2 | `crates/agent/tests/command_connection.rs` (9 tests, 3 new): still blocked after reconnection; released only by explicit reconciliation; unknown agent outcome stays blocked; reconciliation refused while the agent's worker owns the project | Pass. Fake process trees with a real journal and the real RPC path |
+| M3 full checks | 2026-11-10 | Linux: format, Clippy, `cargo test --workspace` (536, 0 failed), 15 repeat runs of command and agent-connection tests. Windows: all 128 `commands` tests, 8 repeat runs. Clippy for windows-msvc, windows-gnu and Darwin (the last two with tests); musl agent build | Pass |
+| M4 real agent process | 2026-11-10, Linux/WSL2 | `crates/agent/tests/execution_host_path.rs` (7 tests): run and report; Stop and timeout with a descendant; lost connection; killed agent; orderly shutdown during a command; changed executable/directory; no retry on another agent and no local fallback | Pass; 12 consecutive runs without a failure |
+| M4 in-process host with native backend | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `across_processes`: Stop and timeout; changed executable/directory; unsavable intent | Pass on both; all 131 Windows `commands` tests pass |
+| M4 Windows-to-WSL, Windows-built client | 2026-11-10, Windows 11 build 26300 → `wsl.exe` → Ubuntu | `crates/core/tests/wsl_execution.rs`, test `an_approved_command_runs_inside_wsl_and_reports_back_to_windows` | Pass once. **Every later start of the binary was refused by Windows application control (Device Guard policy).** The other four tests did not run with this client |
+| M4 Windows-to-WSL relay, Linux-built client | 2026-11-10, Linux test process → `wsl.exe` (interop) → Ubuntu | All 5 tests of `wsl_execution.rs` | Pass; 3 consecutive runs. Killing `wsl.exe` ended the agent and its command together |
+| M4 full checks | 2026-11-10 | Linux: format, Clippy, `cargo test --workspace` (551, 0 failed). Clippy for core on windows-msvc, core and agent on windows-gnu (all targets) and Darwin; musl agent build | Pass |
+| M5 mock provider | 2026-11-10, Linux/WSL2 | `crates/core/tests/llm_tools.rs` (20 tests): split, complete, malformed, incomplete, ambiguous, oversized, too many and multiple calls in the Responses stream; indexed split calls, finish reason and end marker in chat completions; results with original identities; chain reset rebuilding calls and results as history with exactly two HTTP requests and no call events; inconsistent transcripts refused before any request; refused tool declaration announced and not treated as a missing API; budget | Pass; 15 consecutive runs. Payloads written from documented shapes, not recorded |
+| M5 unit tests | 2026-11-10, Linux/WSL2 | `llm::tools::tests` (7): schema matches the request shape, assembly, bounds, correlation | Pass |
+| M5 regression and full checks | 2026-11-10 | Existing Foundry tests including the recorded request-parity test; format; Clippy; `cargo test --workspace` (578, 0 failed); Clippy for core on windows-msvc and Darwin; Windows app check; musl agent build | Pass |
+| M6.1 history and desk | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `commands::history::tests` (7) and `commands::desk::tests` (7): record life cycle, nothing sensitive saved, share result contents, one command at a time, restore, unusable calls, eviction; review/approve/begin, editor voids approval, no queued approvals, re-run, rejection final, duplicate in one turn, unknown outcome until reconciled, new host instance | Pass on both (145 `commands` tests on Windows) |
+| M6.1 chat and Inspect | 2026-11-10, Linux/WSL2 | `chat::tests::commands` (7) and one Inspect test: proposals recorded natively, every call answered truthfully, running blocks continuation, failed round records nothing, no unshared output saved, restore, old chats load unchanged; calls and results per round | Pass |
+| M6.1 end to end | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `crates/core/tests/command_workflow.rs` (3): scripted model → proposal → host preparation → review → approval → real process → observation → shared result received by the model; rejection; a restored chat that can launch nothing without fresh preparation and approval | Pass on both; 12 consecutive runs on Linux, one run on Windows |
+| M6.1 full checks | 2026-11-10 | Format; Clippy; `cargo test --workspace` (603, 0 failed); Clippy for core on windows-msvc and Darwin; Windows app check; musl agent build | Pass |
+| M6.2 card rules | 2026-11-10, Linux/WSL2 and Windows 11 (interop) | `commands::card::tests` (8): exact argument boundaries and scripts; nothing runnable before a plan is shown; blocked reasons; running offers only Stop; finished and unknown outcomes; re-run; closed after an answer; rejected, unusable and restored cards | Pass on both (153 `commands` tests on Windows) |
+| M6.2 in the running app | 2026-11-10, Linux/WSL2 (WSLg), debug build, local mock model, isolated data directories | Debug automation pressing the card's buttons: Run (command ran, exit 0 recorded, journal complete, output not saved); Run then Stop (recorded cancelled, the command's later step never ran, nothing left running); Reject (nothing reached the journal); Edit then Run (original proposal kept, attempt marked edited, only the edited command ran) | All as expected. The window was not looked at: layout and rendering are unverified |
+| M6.2 full checks | 2026-11-10 | Format; Clippy for the workspace and for the Windows app; `cargo test --workspace` (611, 0 failed); core Clippy on windows-msvc and Darwin; musl agent build; no literal colours in the new view | Pass |
+| M6.3 share rules | 2026-11-10, Linux/WSL2 | Core tests: share choice records omissions and edits and bounds typed text; a result without an outcome carries only identity, status and note; sharing offered only for a finished attempt whose output is held; continuation summary wording | Pass |
+| M6.3 in the running app | 2026-11-10, Linux/WSL2 (WSLg), debug build, local mock model, isolated data directories | Debug automation: Run → share output without error output → Continue (the model received exactly that result for that call, with a stored-chain request and nothing else; the saved chat contains the shared output and not the unshared stream); Run → Continue without sharing (model told only "notShared"); Reject → Continue (model told "rejected", command never ran) | All as expected. The window was not looked at |
+| M6.3 full checks | 2026-11-10 | Format; Clippy for the workspace and the Windows app; `cargo test --workspace` (613, 0 failed); core Clippy on windows-msvc and Darwin; musl agent build | Pass |
+| M6.4 revalidation rule | 2026-11-10, Linux/WSL2 | `chat::tests::a_command_that_changed_files_turns_stale_proposals_into_conflicts`: changed, created, deleted and untouched files; nothing applied or dropped; stale Undo; existing conflicts kept | Pass |
+| M6.4 in the running app | 2026-11-10, Linux/WSL2 (WSLg), debug build, local mock model, isolated data directories | Quit while a command runs (app exited within a second, host recorded "cancelled", no process left); close the project while a command runs (host recorded "cancelled", no process left); a command that rewrites a file with an unsaved proposal and creates another (proposal kept and marked as a conflict with a note; the project tree contained the new file afterwards) | All as expected. The window was not looked at |
+| M6.4 full checks | 2026-11-10 | Format; Clippy for the workspace and the Windows app; `cargo test --workspace` (614, 0 failed); core Clippy on windows-msvc and Darwin; musl agent build; Run and Share re-checked in the app | Pass |
+| M6.5 wording | 2026-11-10, Linux/WSL2 | `commands::wording` test (exact sentence, no blanket promise); `logic::prompt` test (command section added only on request, states that proposing runs nothing); recorded prompt fixtures unchanged | Pass |
+| M6.5 in the running app | 2026-11-10, Linux/WSL2 (WSLg), debug build, local mock model | With the switch on, both requests carried the tool and the command section of the system prompt; with it off, neither, and a tool call the mock sent anyway ran nothing | As expected. Status bar and welcome text were compiled, not seen |
+| M6.5 full checks | 2026-11-10 | Format; Clippy for the workspace and the Windows app; `cargo test --workspace` (616, 0 failed); core Clippy on windows-msvc and Darwin; musl agent build | Pass |
+| Agent execution mode | 2026-11-10, Linux/WSL2 | Agent argument parsing; `crates/agent/tests/execution_host_path.rs` against the real agent binary (8 tests, one new: an agent started the default way cannot run or reconcile anything); launch-script quoting | Pass; 10 consecutive runs |
+| Agent path in the running app | 2026-11-10, Linux/WSL2 (WSLg), debug build, `CONTEXTUAL_DEV_REMOTE=1` with the switch, local mock model | Run and share; Run then Stop | Command ran through the agent (records in the agent's journal, none in the app's); record location is the distro; shared result reached the model; Stop recorded cancelled; no process or agent left |
+| Real `wsl.exe` relay with the real agent | 2026-11-10, Linux test process → `wsl.exe` → Ubuntu | All 5 tests of `wsl_execution.rs` | Pass; 6 consecutive runs after the zombie fix (before it, the killed-agent test failed about half the time) |
+| Zombie-only groups | 2026-11-10, Linux/WSL2, glibc and musl | `linux::tests`: a group of unreaped zombies counts as gone, a live member does not; early root exit now always confirmed | Pass; 15 consecutive runs of `commands::execution` |
+| Full checks after the agent work | 2026-11-10 | Linux: format, Clippy, `cargo test --workspace` (619, 0 failed). Clippy for the Windows app and agent, core on windows-msvc, core and agent on Darwin; musl agent build | Pass. **Windows tests not re-run: application control refused the rebuilt core test binary** |
+| Opt-in setting | 2026-11-10, Linux/WSL2 (WSLg), debug build, local mock model | Settings test (off by default, old settings stay off, round trip); running app with `chat.proposeCommands` true, false and absent, without the environment switch | On: tool offered, approved command ran, journal complete. Off or absent: tool not offered, nothing ran. Workspace 620 tests, 0 failed; release build of the app compiles |
+| Windows core suite outside this feature | 2026-11-10, same Windows host | Whole `contextual-core` unit-test binary (at M2.3) | 263 passed, 5 failed, all in `process::tests` (the Git runner's tests). Not part of this delivery and not investigated |
 | M4 Windows-to-WSL | — | Agent execution over the real connection | Not started; the Linux rows above ran natively inside WSL, not through the Windows app |
 
 Replace pending check entries or append results only after running the checks. Include the saved

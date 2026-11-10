@@ -318,6 +318,22 @@ async fn execute_request(
             },
             Err(error) => error_response(id, core_error(error)),
         },
+        method::COMMAND_RECONCILE => {
+            let request: Result<contextual_protocol::commands::ReconcileCommands, _> =
+                parse(request.params);
+            let result = match request {
+                Ok(request) => service.reconcile(&request.root).await.map_err(core_error),
+                Err(error) => Err(error),
+            };
+            match result.map(serde_json::to_value) {
+                Ok(Ok(value)) => response_bytes(&Response::ok(id, value)).unwrap_or_default(),
+                Ok(Err(_)) => error_response(
+                    id,
+                    RpcError::new(RpcError::INTERNAL_ERROR, "Could not encode reconciliation."),
+                ),
+                Err(error) => error_response(id, error),
+            }
+        }
         method::COMMAND_PREPARE => {
             let result = match parse(request.params) {
                 Ok(request) => service.prepare(request).await.map_err(core_error),

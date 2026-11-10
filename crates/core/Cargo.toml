@@ -49,14 +49,21 @@ workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+# M2.3 Windows backend; normal startup still selects none. `process-wrap` starts the
+# process suspended, assigns it to a job object and resumes it; `win32job` supplies the
+# job whose member list confirms cleanup; `windows` only names the creation flag.
+process-wrap = { version = "=10.0.1", default-features = false, features = ["std", "job-object", "creation-flags"] }
+win32job = "2"
+windows = { version = "0.62", features = ["Win32_System_Threading"] }
 
 # M2.1 native Unix backends; normal startup still selects none.
 # `net` supplies Tokio's anonymous pipes, created and registered before the launch.
+# `fs` supplies `flock`, the cross-process project ownership lock (M3).
 [target.'cfg(all(target_os = "linux", not(target_env = "uclibc")))'.dependencies]
-nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "fs"] }
 tokio = { workspace = true, features = ["net"] }
 
 # `event` supplies kqueue, the non-reaping root observation on macOS.
 [target.'cfg(target_os = "macos")'.dependencies]
-nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "event"] }
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "event", "fs"] }
 tokio = { workspace = true, features = ["net"] }

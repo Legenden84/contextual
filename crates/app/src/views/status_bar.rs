@@ -1,4 +1,4 @@
-//! 24px status bar: branch, Foundry connection, scanning, Settings.
+//! 24px status bar: branch, Foundry connection, what can write to disk, scanning, Settings.
 
 use contextual_core::logic::foundry_status::{FoundryStatus, Tone, describe_foundry};
 use gpui_kit::component::{Icon, IconName};
@@ -83,6 +83,12 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
         label
     });
     let app_for_settings = app.clone();
+    // What can write to disk in this project, always visible. Scoped wording: it does not
+    // claim that nothing is ever written, only what Save and approval each cover.
+    let writes = a.project.as_ref().map(|p| {
+        let location = p.read(cx).location.clone();
+        contextual_core::commands::wording::scope_note(a.commands_enabled(&location))
+    });
 
     div()
         .flex()
@@ -130,7 +136,15 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
                     },
                 )
                 .child(foundry)
-                .child(div().flex_1())
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .when_some(writes, |d, note| d.child(SharedString::from(note))),
+                )
                 .when(a.scanning, |d| {
                     d.child(
                         div()

@@ -88,6 +88,8 @@ fn launcher(f: &Fixture) -> LocalAgentLauncher {
             "XDG_CACHE_HOME".into(),
             f.undo.path().to_string_lossy().into_owned(),
         )],
+        args: Vec::new(),
+        command_location: None,
     }
 }
 

@@ -10,11 +10,15 @@
 //! process-tree backend. No native backend or executable host endpoint is enabled yet.
 
 pub mod admission;
+pub mod card;
+pub mod desk;
 pub mod execution;
+pub mod history;
 pub mod journal;
 pub mod prepare;
 pub mod service;
 pub mod wire;
+pub mod wording;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;

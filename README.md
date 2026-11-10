@@ -4,11 +4,13 @@ Contextual is a native Rust desktop chat client for working with project files t
 Azure AI Foundry. Select files as context, review proposed changes, and explicitly save or
 undo them. File proposals remain in memory until you explicitly Save.
 
-Assistant-proposed command execution is
-[being implemented in stages](docs/plans/approved-command-execution.md)
-and is not yet available in the chat UI. Commands will require approval for each exact
-invocation; their side effects will not be covered by Save/Undo. Existing user-operated
-Source Control actions are separate from saving file proposals.
+The assistant can also propose commands. This is off by default and experimental: turn on
+**Settings → Commands → Let the assistant propose commands** and restart. Each proposed
+command is shown first and runs only when you approve that exact command; running one sends
+nothing to the model unless you choose to share its result; and what a command does is not
+covered by Save/Undo. See [the plan](docs/plans/approved-command-execution.md) for what has
+and has not been verified.
+Existing user-operated Source Control actions are separate from saving file proposals.
 
 The desktop targets are **Windows and macOS**. Day-to-day development currently happens in
 **WSL (Ubuntu)**, where the Linux app opens through WSLg; Linux is not a supported desktop

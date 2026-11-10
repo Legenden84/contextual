@@ -22,7 +22,7 @@ const STEPS: [&str; 4] = [
     "Tick the files the model should see",
     "Ask for a change in chat",
     "Review the diff, file by file",
-    "Save what you want. The model never writes to disk.",
+    "Save what you want. File proposals are written only when you press Save.",
 ];
 
 /// "just now", "5 min ago", "3 hours ago", "Yesterday", "4 days ago", "12 Oct".
@@ -272,7 +272,25 @@ impl Render for WelcomeScreen {
                                             .flex_col()
                                             .gap(sp(2))
                                             .my(sp(6))
-                                            .children(steps),
+                                            .children(steps)
+                                            .when(
+                                                a.commands_enabled(
+                                                    &contextual_core::location::Location::Local,
+                                                ),
+                                                |d| {
+                                                    d.child(
+                                                        div()
+                                                            .type_style(
+                                                                contextual_theme::type_style::UI_SMALL,
+                                                            )
+                                                            .text_color(hsla(c.ink_muted))
+                                                            .whitespace_normal()
+                                                            .child(
+                                                                contextual_core::commands::wording::COMMANDS_NOTE,
+                                                            ),
+                                                    )
+                                                },
+                                            ),
                                     )
                                     .child(
                                         div()

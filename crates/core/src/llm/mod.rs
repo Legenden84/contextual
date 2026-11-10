@@ -12,6 +12,7 @@ pub mod config;
 pub mod conversation;
 pub mod sse;
 pub mod tasks;
+pub mod tools;
 pub mod types;
 
 pub use client::{FoundryClient, FoundryError, describe_error};
@@ -19,6 +20,7 @@ pub use config::{
     ConfigProblems, FoundryConfig, foundry_config_from_env, public_config, read_foundry_config,
 };
 pub use conversation::ChatStream;
+pub use tools::{PROPOSE_COMMAND, ToolCall, ToolResult, command_request};
 pub use types::{
     ApiKind, ChatEvent, ChatMessage, ChatRole, ContentPart, ConversationRequest, ImageUrl,
     MessageContent, PrDraftInput, RepairInput, RepairResult,

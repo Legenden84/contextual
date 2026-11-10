@@ -134,6 +134,22 @@ pub fn launch_script(version: &str) -> String {
     format!("exec \"{}/contextual-agent\"", agent_dir(version))
 }
 
+/// The launch script with the agent's explicit command-execution mode for this distro, or
+/// `None` when the distro's name cannot be passed through the shell unquoted-safe.
+/// The agent is told where it runs by its launcher, never by a request.
+pub fn launch_script_with_commands(version: &str, distro: &str) -> Option<String> {
+    let safe = !distro.is_empty()
+        && distro
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    safe.then(|| {
+        format!(
+            "{} --commands --location 'wsl:{distro}'",
+            launch_script(version)
+        )
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Probe {
     pub arch: String,
@@ -159,6 +175,9 @@ pub struct WslLauncher {
     pub binaries: Vec<(String, std::path::PathBuf)>,
     /// Extra environment for `wsl.exe` (tests).
     pub env: Vec<(String, String)>,
+    /// Start the agent in its explicit command-execution mode. Off unless the app's
+    /// development switch asks for it.
+    pub commands: bool,
 }
 
 impl WslLauncher {
@@ -245,12 +264,26 @@ impl crate::remote::AgentLauncher for WslLauncher {
             tracing::info!("deploying contextual-agent {version} to {}", self.distro);
             self.run(&install_script(&version), Some(&binary)).await?;
         }
-        crate::remote::RemoteHost::spawn(
-            self.command(&launch_script(&version), true),
+        let with_commands = self
+            .commands
+            .then(|| launch_script_with_commands(&version, &self.distro))
+            .flatten();
+        let host = crate::remote::RemoteHost::spawn(
+            self.command(
+                with_commands.as_deref().unwrap_or(&launch_script(&version)),
+                true,
+            ),
             &self.app_version,
             Vec::new(),
         )
-        .await
+        .await?;
+        if with_commands.is_some() {
+            // This connection's commands belong to exactly this distro.
+            return host.with_command_location(crate::location::Location::Wsl {
+                distro: self.distro.clone(),
+            });
+        }
+        Ok(host)
     }
 
     fn describe(&self) -> String {
@@ -302,6 +335,20 @@ mod tests {
         assert_ne!(v, agent_version("0.1.0", b"other"));
         assert!(probe_script(&v).contains(&format!("agent/{v}/contextual-agent")));
         assert!(install_script(&v).contains("chmod +x"));
+        // The default launch has no arguments: an agent started that way cannot run anything.
+        assert!(launch_script(&v).ends_with("/contextual-agent\""));
+        assert!(
+            launch_script_with_commands(&v, "Ubuntu-24.04")
+                .unwrap()
+                .ends_with("/contextual-agent\" --commands --location 'wsl:Ubuntu-24.04'")
+        );
+        // A name that could alter the shell command leaves execution off.
+        for distro in ["", "a b", "x'; rm -rf ~; '", "$(id)", "a/b"] {
+            assert!(
+                launch_script_with_commands(&v, distro).is_none(),
+                "{distro}"
+            );
+        }
         assert_eq!(
             parse_probe("x86_64\ninstalled\n"),
             Probe {

@@ -63,6 +63,10 @@ pub struct ChatPanel {
     settings_prompt_focus: FocusHandle,
     settings_cancel_focus: FocusHandle,
     settings_open_focus: FocusHandle,
+    /// The command proposal being edited, with its editor. View state only.
+    command_edit: Option<(contextual_core::commands::CallId, Entity<TextareaState>)>,
+    /// The open share preview of a finished command. View state only.
+    command_share: Option<crate::views::command_card::ShareEdit>,
     _subs: Vec<Subscription>,
 }
 
@@ -179,9 +183,18 @@ impl ChatPanel {
                 if replaced || chat.streaming() {
                     this.attachment_menu_open = false;
                 }
+                if replaced {
+                    this.command_edit = None;
+                    this.command_share = None;
+                }
                 if replaced || n != this.rendered {
                     this.list.reset(n);
                     this.list.scroll_to_end();
+                } else if n > 0 && !chat.thread.commands.is_empty() {
+                    // Command cards change height under any reply, not only the last one.
+                    let top = this.list.logical_scroll_top();
+                    this.list.splice(0..n, n);
+                    this.list.scroll_to(top);
                 } else if n > 0 {
                     // The last message grows while streaming: re-measure it.
                     this.list.splice(n - 1..n, 1);
@@ -243,8 +256,139 @@ impl ChatPanel {
             settings_prompt_focus: cx.focus_handle(),
             settings_cancel_focus: cx.focus_handle(),
             settings_open_focus: cx.focus_handle(),
+            command_edit: None,
+            command_share: None,
             _subs: subs,
         }
+    }
+
+    /// Opens the editor for a proposed command. Its approval is void from this moment.
+    pub(crate) fn begin_command_edit(
+        &mut self,
+        call: contextual_core::commands::CallId,
+        draft: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat
+            .update(cx, |chat, cx| chat.edit_command(&call, cx));
+        let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(6, 18));
+        input.update(cx, |state, cx| state.set_value(draft, window, cx));
+        window.focus(&input.read(cx).focus_handle(cx), cx);
+        self.command_edit = Some((call, input));
+        self.list.reset(self.rendered);
+        cx.notify();
+    }
+
+    /// Opens the share preview for a finished command, filled with what was captured.
+    /// Opening it shares nothing.
+    pub(crate) fn begin_command_share(
+        &mut self,
+        call: contextual_core::commands::CallId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(output) = self
+            .project
+            .read(cx)
+            .commands
+            .output(&call)
+            .map(|(_, result)| result.output.clone())
+        else {
+            return;
+        };
+        let stream = |captured: String, window: &mut Window, cx: &mut Context<Self>| {
+            let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 12));
+            input.update(cx, |state, cx| state.set_value(captured, window, cx));
+            input
+        };
+        let stdout = stream(output.stdout.text.clone(), window, cx);
+        let stderr = stream(output.stderr.text.clone(), window, cx);
+        // The preview shows what would be sent, so it follows every edit.
+        let subs = [&stdout, &stderr]
+            .into_iter()
+            .map(|input| {
+                cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.list.reset(this.rendered);
+                        cx.notify();
+                    }
+                })
+            })
+            .collect();
+        self.command_share = Some(crate::views::command_card::ShareEdit {
+            call,
+            stdout_on: !output.stdout.text.is_empty(),
+            stderr_on: !output.stderr.text.is_empty(),
+            stdout,
+            stderr,
+            _subs: subs,
+        });
+        self.list.reset(self.rendered);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_share_stream(&mut self, stdout: bool, cx: &mut Context<Self>) {
+        if let Some(share) = self.command_share.as_mut() {
+            if stdout {
+                share.stdout_on = !share.stdout_on;
+            } else {
+                share.stderr_on = !share.stderr_on;
+            }
+        }
+        self.list.reset(self.rendered);
+        cx.notify();
+    }
+
+    pub(crate) fn end_command_share(&mut self, cx: &mut Context<Self>) {
+        self.command_share = None;
+        self.list.reset(self.rendered);
+        cx.notify();
+    }
+
+    /// The user pressed Continue under the command cards: one request that tells the model
+    /// what was decided, with whatever results were chosen for sharing.
+    pub(crate) fn continue_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((env, rules)) = self.send_env(window, cx) else {
+            return;
+        };
+        self.command_share = None;
+        self.chat
+            .update(cx, |chat, cx| chat.continue_commands(env, rules, cx));
+    }
+
+    /// What a turn needs from the app right now. Opens the settings prompt and returns
+    /// `None` when Foundry is not configured.
+    fn send_env(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(SendEnv, Vec<contextual_core::logic::types::Rule>)> {
+        let a = self.app.read(cx);
+        let Some(config) = a.config.clone() else {
+            self.attachment_menu_open = false;
+            self.settings_prompt_open = true;
+            window.focus(&self.settings_open_focus, cx);
+            cx.notify();
+            return None;
+        };
+        let p = self.project.read(cx);
+        let env = SendEnv {
+            config,
+            deployment: a.deployment(),
+            output_prompt: a.settings.workspace.output_prompt.clone(),
+            auto: true,
+            skill_index: p.skill_index(),
+            commands: self.chat.read(cx).commands_enabled,
+        };
+        Some((env, p.rules_on()))
+    }
+
+    /// Closes the editor. The proposal stays under review; nothing was approved by editing.
+    pub(crate) fn end_command_edit(&mut self, cx: &mut Context<Self>) {
+        self.command_edit = None;
+        self.list.reset(self.rendered);
+        cx.notify();
     }
 
     pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -333,23 +477,9 @@ impl ChatPanel {
         {
             return;
         }
-        let a = self.app.read(cx);
-        let Some(config) = a.config.clone() else {
-            self.attachment_menu_open = false;
-            self.settings_prompt_open = true;
-            window.focus(&self.settings_open_focus, cx);
-            cx.notify();
+        let Some((env, rules)) = self.send_env(window, cx) else {
             return;
         };
-        let p = self.project.read(cx);
-        let env = SendEnv {
-            config,
-            deployment: a.deployment(),
-            output_prompt: a.settings.workspace.output_prompt.clone(),
-            auto: true,
-            skill_index: p.skill_index(),
-        };
-        let rules = p.rules_on();
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.composer_snapshot.clear();
         self.chat.update(cx, |c, cx| c.send(text, env, rules, cx));
@@ -881,9 +1011,19 @@ fn render_message(
                 cx,
             );
             let chat_entity = this.chat.clone();
+            let cards = crate::views::command_card::command_cards(
+                &this.chat,
+                &this.project,
+                entity,
+                this.command_edit.as_ref(),
+                this.command_share.as_ref(),
+                &m,
+                cx,
+            );
             column
                 .child(header(m.model.as_deref().unwrap_or("Assistant"), &m, cx))
                 .child(div().mt(sp(2)).children(body))
+                .children(cards)
                 .when_some(m.reads.clone(), |d, log| {
                     d.child(read_row(this, &m.id, &log, entity, cx))
                 })

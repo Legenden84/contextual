@@ -38,6 +38,9 @@ pub enum FoundryError {
     Failed(String),
     /// Refused locally before any HTTP request, retry or API fallback.
     ContextBudget(BudgetExceeded),
+    /// Refused locally because the request itself cannot be sent as it is, for example a
+    /// transcript whose calls and results do not match. Nothing reached the provider.
+    Rejected(String),
     /// Cancelled by the caller.
     Cancelled,
 }
@@ -54,7 +57,7 @@ impl FoundryError {
     pub fn raw_message(&self) -> String {
         match self {
             Self::Status { message, .. } => message.clone(),
-            Self::Connection(m) | Self::Failed(m) => m.clone(),
+            Self::Connection(m) | Self::Failed(m) | Self::Rejected(m) => m.clone(),
             Self::Timeout => "Request timed out.".into(),
             Self::ContextBudget(e) => e.to_string(),
             Self::Cancelled => "Request was aborted.".into(),
@@ -70,6 +73,7 @@ pub fn describe_error(err: &FoundryError) -> (u16, String) {
             (*status, format!("Foundry returned {status}: {message}"))
         }
         FoundryError::ContextBudget(e) => (400, e.to_string()),
+        FoundryError::Rejected(message) => (400, message.clone()),
         other => (
             502,
             format!("Could not reach Foundry: {}", other.raw_message()),
@@ -81,7 +85,7 @@ impl From<FoundryError> for Error {
     fn from(e: FoundryError) -> Self {
         let code = match &e {
             FoundryError::Cancelled => ErrorCode::Cancelled,
-            FoundryError::ContextBudget(_) => ErrorCode::InvalidInput,
+            FoundryError::ContextBudget(_) | FoundryError::Rejected(_) => ErrorCode::InvalidInput,
             _ => ErrorCode::Upstream,
         };
         Error::new(code, describe_error(&e).1)
@@ -126,6 +130,7 @@ pub(crate) fn truthy(v: &serde_json::Value) -> bool {
 /// Whether each endpoint+deployment supports the Responses API, learned on first use
 /// (process-wide, like the old module-level map).
 static RESPONSES_SUPPORT: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
+static TOOLS_SUPPORT: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Api {
@@ -213,6 +218,18 @@ impl FoundryClient {
 
     pub(crate) fn set_responses_supported(&self, value: bool) {
         if let Ok(mut m) = RESPONSES_SUPPORT.lock() {
+            m.insert(self.support_key(), value);
+        }
+    }
+
+    /// What has been learned about tool declarations for this endpoint+deployment. This is
+    /// tracked separately from Responses API support: one does not imply the other.
+    pub fn tools_supported(&self) -> Option<bool> {
+        TOOLS_SUPPORT.lock().ok()?.get(&self.support_key()).copied()
+    }
+
+    pub(crate) fn set_tools_supported(&self, value: bool) {
+        if let Ok(mut m) = TOOLS_SUPPORT.lock() {
             m.insert(self.support_key(), value);
         }
     }
