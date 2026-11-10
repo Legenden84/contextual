@@ -15,13 +15,15 @@ use contextual_core::logic::images::{
 };
 use contextual_theme::layout;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, ElementId, Entity,
     EntityInputHandler, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeyDownEvent, ListAlignment, ListState, MouseButton, ParentElement, PathPromptOptions, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, list,
+    KeyDownEvent, ListAlignment, ListState, MouseButton, ParentElement, PathPromptOptions, Pixels,
+    Render, SharedString, Size, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, canvas, div, list,
 };
 
 use crate::runtime;
@@ -31,7 +33,7 @@ use crate::theme::{ActiveTheme, ListZoom, TypeExt, control_height, hsla, px, sha
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark, completed_mark};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
-use crate::views::markdown::{ReplyCache, render_reply};
+use crate::views::markdown::{CodeViews, ReplyCache, render_reply};
 
 pub struct ChatPanel {
     app: Entity<AppModel>,
@@ -47,6 +49,8 @@ pub struct ChatPanel {
     rendered: usize,
     thread_generation: u64,
     replies: ReplyCache,
+    code_views: CodeViews,
+    thread_size: Option<Size<Pixels>>,
     context: ContextCache,
     diffs: DiffCache,
     image_loading: bool,
@@ -169,6 +173,7 @@ impl ChatPanel {
                     this.thread_generation = chat.thread_generation;
                     this.expanded.clear();
                     this.replies.clear();
+                    this.code_views.clear();
                     this.image_error = None;
                 }
                 if replaced || chat.streaming() {
@@ -224,6 +229,8 @@ impl ChatPanel {
             rendered: count,
             thread_generation,
             replies: ReplyCache::default(),
+            code_views: CodeViews::default(),
+            thread_size: None,
             context: ContextCache::default(),
             diffs,
             image_loading: false,
@@ -760,11 +767,12 @@ fn render_message(
     this: &ChatPanel,
     ix: usize,
     entity: &WeakEntity<ChatPanel>,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
     let c = &cx.tokens().colors;
     let chat = this.chat.read(cx);
-    let Some(m) = chat.messages.get(ix) else {
+    let Some(m) = chat.messages.get(ix).cloned() else {
         return div().into_any_element();
     };
     let row = div()
@@ -793,7 +801,7 @@ fn render_message(
                 .p(sp(4))
                 .rounded(px(contextual_theme::radius::LG))
                 .bg(hsla(c.surface_200))
-                .child(header("You", m, cx))
+                .child(header("You", &m, cx))
                 .child(
                     div()
                         .mt(sp(2))
@@ -823,7 +831,9 @@ fn render_message(
                 .filter(|(id, _)| id == &m.id)
                 .map(|(_, blocks)| blocks);
             let parsed = this.replies.get(&m.id, &m.text, prepared);
-            let diffs = this.diffs.read(cx).get(&message_key(chat, m));
+            let diffs = this.diffs.read(cx).get(&message_key(chat, &m));
+            let writing = m.streaming && chat.activity() == Some(ChatActivity::WritingResponse);
+            let reduce_motion = this.app.read(cx).settings.reduce_motion;
             let weak = entity.clone();
             let body = render_reply(
                 &m.id,
@@ -831,22 +841,28 @@ fn render_message(
                 changes,
                 diffs.as_ref().map(|diffs| diffs.as_slice()),
                 m.streaming,
-                m.streaming && chat.activity() == Some(ChatActivity::WritingResponse),
-                this.app.read(cx).settings.reduce_motion,
+                writing,
+                reduce_motion,
                 &this.expanded,
                 move |key, cx| {
                     weak.update(cx, |t, cx| {
-                        t.expanded.insert(key);
-                        t.list.reset(t.rendered);
+                        if !t.expanded.remove(&key) {
+                            t.expanded.insert(key);
+                        }
+                        let top = t.list.logical_scroll_top();
+                        t.list.splice(ix..ix + 1, 1);
+                        t.list.scroll_to(top);
                         cx.notify();
                     })
                     .ok();
                 },
+                &this.code_views,
+                window,
                 cx,
             );
             let chat_entity = this.chat.clone();
             column
-                .child(header(m.model.as_deref().unwrap_or("Assistant"), m, cx))
+                .child(header(m.model.as_deref().unwrap_or("Assistant"), &m, cx))
                 .child(div().mt(sp(2)).children(body))
                 .when_some(m.reads.clone(), |d, log| {
                     d.child(read_row(this, &m.id, &log, entity, cx))
@@ -1100,18 +1116,55 @@ impl Render for ChatPanel {
                 )
                 .into_any_element()
         } else {
-            list(self.list.clone(), move |ix, _, cx| {
-                let Some(this) = weak.upgrade() else {
-                    return div().into_any_element();
-                };
-                this.update(cx, |panel, cx| {
-                    ensure_message(&panel.diffs, &panel.chat, Some(ix), cx);
-                    render_message(panel, ix, &weak, cx)
-                })
-            })
-            .flex_1()
-            .min_h_0()
-            .into_any_element()
+            let measure = entity.clone();
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .overflow_hidden()
+                .child(
+                    canvas(
+                        move |bounds, _, cx| {
+                            let measure = measure.clone();
+                            cx.defer(move |cx| {
+                                let _ = measure.update(cx, |panel, cx| {
+                                    if panel.thread_size == Some(bounds.size) {
+                                        return;
+                                    }
+                                    panel.thread_size = Some(bounds.size);
+                                    panel.code_views.set_viewport_height(bounds.size.height);
+                                    let top = panel.list.logical_scroll_top();
+                                    panel.list.reset(panel.rendered);
+                                    panel.list.scroll_to(top);
+                                    cx.notify();
+                                });
+                            });
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_full(),
+                )
+                .child(
+                    list(self.list.clone(), move |ix, window, cx| {
+                        let Some(this) = weak.upgrade() else {
+                            return div().into_any_element();
+                        };
+                        this.update(cx, |panel, cx| {
+                            ensure_message(&panel.diffs, &panel.chat, Some(ix), cx);
+                            render_message(panel, ix, &weak, window, cx)
+                        })
+                    })
+                    .flex_1()
+                    .w_full()
+                    .min_w_0()
+                    .min_h_0(),
+                )
+                .child(Scrollbar::vertical(&self.list))
+                .into_any_element()
         };
 
         let chips = attachments
@@ -1156,6 +1209,7 @@ impl Render for ChatPanel {
 
         div()
             .id("chat-image-drop-target")
+            .relative()
             .on_mouse_down(MouseButton::Left, cx.listener(|t, _, _, cx| {
                 if t.attachment_menu_open {
                     t.attachment_menu_open = false;

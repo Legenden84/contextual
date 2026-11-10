@@ -12,9 +12,11 @@ use std::time::{Duration, Instant};
 use contextual_theme::{
     Appearance, FontFamily, Rgba, Shadow, Theme as Tokens, TypeStyle, radius, space,
 };
-use gpui_kit::base::text::CodeBlock;
+#[cfg(test)]
 use gpui_kit::component::Rope;
-use gpui_kit::component::highlighter::{HighlightTheme, SyntaxHighlighter};
+use gpui_kit::component::highlighter::HighlightTheme;
+#[cfg(test)]
+use gpui_kit::component::highlighter::SyntaxHighlighter;
 use gpui_kit::component::theme::{Theme as ComponentTheme, ThemeMode};
 use gpui_kit::{
     App, BoxShadow, FontFeatures, FontWeight, Global, Hsla, ListState, Pixels, Styled, Window,
@@ -190,17 +192,6 @@ pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) 
     // `change` reloads the component theme's colours, so edit them in a second update.
     ComponentTheme::change(mode, window, cx);
     ComponentTheme::update(cx, |t| configure_components(t, tokens));
-    let highlight = Arc::new(highlight_theme(tokens));
-    cx.set_global(CodeHighlighter(Arc::new(move |block: &CodeBlock| {
-        let Some(lang) = block.lang() else {
-            return Vec::new();
-        };
-        let code = block.code();
-        let rope = Rope::from_str(code.as_ref());
-        let mut h = SyntaxHighlighter::new(lang.as_ref());
-        h.update(None, &rope, None);
-        h.styles(&(0..code.len()), highlight.as_ref())
-    })));
     cx.refresh_windows();
 }
 
@@ -350,15 +341,6 @@ fn highlight_theme(tokens: &Tokens) -> HighlightTheme {
     });
     serde_json::from_value(value).expect("highlight theme JSON matches gpui-component's schema")
 }
-
-type HighlightFn =
-    dyn Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, gpui_kit::HighlightStyle)> + Send + Sync;
-
-/// Highlighter for code blocks in chat, in the `syn-*` colours. One shared `Arc` per theme, so
-/// code blocks keep their highlights between frames.
-pub struct CodeHighlighter(pub Arc<HighlightFn>);
-
-impl Global for CodeHighlighter {}
 
 /// Applies a token type style (size, line height, weight, tracking, family) to an element.
 pub trait TypeExt: Styled + Sized {

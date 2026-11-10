@@ -3,7 +3,7 @@
 //! views, including native keyboard copying. `### EDIT:` blocks show the rebuilt file,
 //! never the edit format (CLAUDE.md).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -13,13 +13,14 @@ use contextual_core::logic::markdown::{
 };
 use contextual_core::logic::types::{Change, ChangeStatus};
 use gpui_kit::base::text::TextView;
+use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClipboardItem, ElementId, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
+    AnyElement, App, AppContext, ClipboardItem, ElementId, Entity, FontWeight,
+    IntoElement, ParentElement, Pixels, SharedString, Styled, Window, div,
 };
 
-use crate::theme::{ActiveTheme, TypeExt, hsla, px, sp};
+use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, sp};
 use crate::ui::{
     Button, ButtonSize, ButtonVariant, Tag, TagTone, activity_mark, completed_mark, file_glyph,
 };
@@ -104,6 +105,107 @@ impl ReplyCache {
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
     }
+}
+
+const MAX_CACHED_CODE_VIEWS: usize = 32;
+
+struct CachedCodeView {
+    id: ElementId,
+    language: String,
+    source: String,
+    editor: Entity<EditorState>,
+}
+
+/// Editor entities survive conversation renders, preserving selection and scrollbar position.
+/// Like the parsed-reply cache, this is bounded rather than retaining the entire thread.
+#[derive(Default)]
+pub struct CodeViews {
+    entries: RefCell<VecDeque<CachedCodeView>>,
+    viewport_height: Cell<Pixels>,
+}
+
+impl CodeViews {
+    pub fn clear(&self) {
+        self.entries.borrow_mut().clear();
+    }
+
+    pub fn set_viewport_height(&self, height: Pixels) {
+        self.viewport_height.set(height);
+    }
+
+    fn editor(
+        &self,
+        id: ElementId,
+        source: &str,
+        language: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<EditorState> {
+        let mut entries = self.entries.borrow_mut();
+        if let Some(index) = entries
+            .iter()
+            .position(|entry| entry.id == id && entry.language == language)
+            && let Some(mut entry) = entries.remove(index)
+        {
+            if entry.source != source {
+                // Streaming appends should not move an existing selection or replace the
+                // whole buffer. Collapse and validated replacements do replace the buffer.
+                if let Some(suffix) = source.strip_prefix(&entry.source) {
+                    entry.editor.update(cx, |editor, cx| {
+                        let selection = editor.selected_range();
+                        let end = editor.value().len();
+                        editor.set_readonly(false, cx);
+                        editor.set_selected_range(end..end, cx);
+                        editor.replace(suffix.to_owned(), window, cx);
+                        editor.set_selected_range(selection, cx);
+                        editor.set_readonly(true, cx);
+                    });
+                } else {
+                    entry.editor.update(cx, |editor, cx| {
+                        editor.set_value(source.to_owned(), window, cx);
+                    });
+                }
+                entry.source = source.to_owned();
+            }
+            let editor = entry.editor.clone();
+            entries.push_back(entry);
+            return editor;
+        }
+
+        let editor = cx.new(|cx| {
+            let mut editor = EditorState::new(window, cx)
+                .language(language)
+                .line_number(true)
+                .soft_wrap(false)
+                .default_value(source.to_owned());
+            editor.set_readonly(true, cx);
+            editor
+        });
+        entries.push_back(CachedCodeView {
+            id,
+            language: language.to_owned(),
+            source: source.to_owned(),
+            editor: editor.clone(),
+        });
+        while entries.len() > MAX_CACHED_CODE_VIEWS {
+            entries.pop_front();
+        }
+        editor
+    }
+}
+
+/// Reserve both controls, borders and the block's bottom spacing within the thread viewport.
+/// Measurements are already logical pixels: do not apply UI zoom to them a second time.
+fn code_body_budget(viewport: Pixels) -> Pixels {
+    let chrome = (control_height() + sp(1)) * 2.0 + sp(3) + gpui_kit::px(2.0);
+    (viewport - chrome).max(gpui_kit::px(0.0))
+}
+
+fn preview_line_limit(max: usize, budget: Pixels) -> usize {
+    let rows = ((budget - sp(4)).max(gpui_kit::px(0.0))
+        / px(contextual_theme::type_style::CODE.line_height))
+    .floor() as usize;
+    max.min(rows.max(1))
 }
 
 type ChangeEntry<'a> = (&'a Change, Option<&'a Diff>);
@@ -245,8 +347,8 @@ fn code_excerpt(code: &str, max: usize, expanded: bool) -> (&str, usize) {
     (shown, hidden)
 }
 
-/// A code block: header with path or language, optional badge and Copy, then highlighted code,
-/// cut after `max` lines with "Show N more lines". Copy always includes the hidden lines.
+/// A numbered, read-only editor with fixed chrome outside its scrollable body.
+/// Copy always includes hidden lines; wheel routing belongs to the enclosing Chat panel.
 #[allow(clippy::too_many_arguments)]
 fn code_block<F: Fn(&mut App) + 'static>(
     id: ElementId,
@@ -257,14 +359,24 @@ fn code_block<F: Fn(&mut App) + 'static>(
     max: usize,
     expanded: bool,
     on_expand: F,
-    cx: &App,
+    code_views: &CodeViews,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement + use<F> {
     let c = &cx.tokens().colors;
+    let budget = code_body_budget(code_views.viewport_height.get());
+    let max = preview_line_limit(max, budget);
     let (shown, hidden) = code_excerpt(code, max, expanded);
-    let fence = format!("```{lang}\n{shown}\n```");
-    // Copy the source, not the truncated display or its synthetic Markdown fence.
+    let lines = shown.split('\n').count();
+    let height = (px(contextual_theme::type_style::CODE.line_height) * lines as f32
+        + sp(4))
+        .min(budget);
+    let editor = code_views.editor(id.clone(), shown, lang, window, cx);
+    // Copy the source, never the numbered gutter or the truncated preview.
     let copy_text = code.to_string();
     div()
+        .w_full()
+        .min_w_0()
         .mb(sp(3))
         .rounded(px(contextual_theme::radius::MD))
         .border_1()
@@ -275,7 +387,7 @@ fn code_block<F: Fn(&mut App) + 'static>(
                 .flex()
                 .items_center()
                 .gap(sp(2))
-                .h(px(28.0))
+                .h(control_height() + sp(1))
                 .px(sp(3))
                 .bg(hsla(c.surface_200))
                 .border_b_1()
@@ -303,33 +415,54 @@ fn code_block<F: Fn(&mut App) + 'static>(
                 ),
         )
         .child(
-            div().type_style(contextual_theme::type_style::CODE).child(
-                TextView::markdown(id.clone(), fence)
-                    .selectable(true)
-                    .shared_code_block_highlighter(
-                        cx.global::<crate::theme::CodeHighlighter>().0.clone(),
-                    ),
-            ),
+            div()
+                .w_full()
+                .min_w_0()
+                .h(height)
+                .overflow_hidden()
+                .type_style(contextual_theme::type_style::CODE)
+                .child(Editor::new(&editor).readonly(true).bordered(false).h_full()),
         )
-        .when(hidden > 0, |d| {
+        .when(hidden > 0 || expanded, |d| {
             d.child(
                 div()
-                    .id(ElementId::Name(format!("{id}-more").into()))
-                    .occlude()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .px(sp(3))
-                    .py(sp(1))
+                    .flex()
+                    .items_center()
+                    .gap(sp(2))
+                    .h(control_height() + sp(1))
+                    .px(sp(2))
                     .border_t_1()
                     .border_color(hsla(c.border))
                     .bg(hsla(c.surface_200))
-                    .type_style(contextual_theme::type_style::UI_SMALL)
-                    .text_color(hsla(c.accent_ink))
-                    .cursor_pointer()
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        on_expand(cx);
-                    })
-                    .child(SharedString::from(format!("Show {hidden} more lines"))),
+                    .child(
+                        Button::new(
+                            ElementId::Name(format!("{id}-more").into()),
+                            if expanded {
+                                "Show fewer lines".to_owned()
+                            } else {
+                                format!("Show {hidden} more lines")
+                            },
+                        )
+                        .size(ButtonSize::Xs)
+                        .variant(ButtonVariant::Ghost)
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            on_expand(cx);
+                        }),
+                    )
+                    .when(expanded, |d| {
+                        d.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child("Scroll within code to see more lines"),
+                        )
+                    }),
             )
         })
 }
@@ -497,7 +630,9 @@ pub fn render_reply(
     reduce_motion: bool,
     expanded: &HashSet<String>,
     on_expand: impl Fn(String, &mut App) + Clone + 'static,
-    cx: &App,
+    code_views: &CodeViews,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Vec<AnyElement> {
     let by_path: HashMap<&str, ChangeEntry<'_>> = changes
         .iter()
@@ -522,6 +657,8 @@ pub fn render_reply(
         expanded,
         &on_expand,
         &mut out,
+        code_views,
+        window,
         cx,
     );
     out
@@ -539,10 +676,12 @@ fn blocks(
     expanded: &HashSet<String>,
     on_expand: &(impl Fn(String, &mut App) + Clone + 'static),
     out: &mut Vec<AnyElement>,
-    cx: &App,
+    code_views: &CodeViews,
+    window: &mut Window,
+    cx: &mut App,
 ) {
     let c = &cx.tokens().colors;
-    let header = |id: &str, path: &str, deleting: bool| {
+    let header = |id: &str, path: &str, deleting: bool, cx: &App| {
         let change = by_path.get(path).map(|(change, _)| *change);
         let state = file_state(file_progress(blocks_in, path, streaming), change, writing);
         file_header(id, path, deleting, state, reduce_motion, cx)
@@ -591,6 +730,8 @@ fn blocks(
                     expanded,
                     on_expand,
                     &mut kids,
+                    code_views,
+                    window,
                     cx,
                 );
                 div()
@@ -649,15 +790,15 @@ fn blocks(
                 .h(px(1.0))
                 .bg(hsla(c.border))
                 .into_any_element(),
-            Block::File { path } => header(&key, path, false),
-            Block::Delete { path } => header(&key, path, true),
+            Block::File { path } => header(&key, path, false, cx),
+            Block::Delete { path } => header(&key, path, true, cx),
             Block::Edit { path, partial, .. } => {
                 if !shown_edits.insert(path.clone()) {
                     continue;
                 }
                 let entry = by_path.get(path.as_str()).copied();
                 let change = entry.map(|(change, _)| change);
-                out.push(header(&key, path, false));
+                out.push(header(&key, path, false, cx));
                 match change {
                     Some(ch)
                         if ch.status != ChangeStatus::D
@@ -672,6 +813,8 @@ fn blocks(
                             MAX_LINES_MODIFIED,
                             expanded.contains(&key),
                             expand,
+                            code_views,
+                            window,
                             cx,
                         )
                         .into_any_element()
@@ -706,6 +849,8 @@ fn blocks(
                     max,
                     expanded.contains(&key),
                     expand,
+                    code_views,
+                    window,
                     cx,
                 )
                 .into_any_element()
@@ -718,6 +863,30 @@ fn blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_body_and_chrome_fit_the_measured_viewport() {
+        let viewport = gpui_kit::px(600.0);
+        let chrome = (control_height() + sp(1)) * 2.0 + sp(3) + gpui_kit::px(2.0);
+        assert_eq!(code_body_budget(viewport) + chrome, viewport);
+    }
+
+    #[test]
+    fn tiny_viewports_never_produce_negative_editor_heights() {
+        assert_eq!(code_body_budget(gpui_kit::px(1.0)), gpui_kit::px(0.0));
+    }
+
+    #[test]
+    fn collapsed_previews_respect_the_available_code_rows() {
+        let budget = px(contextual_theme::type_style::CODE.line_height) * 5.0 + sp(4);
+        assert_eq!(preview_line_limit(MAX_LINES, budget), 5);
+    }
+
+    #[test]
+    fn modified_previews_keep_their_shorter_default() {
+        let budget = px(contextual_theme::type_style::CODE.line_height) * 40.0 + sp(4);
+        assert_eq!(preview_line_limit(MAX_LINES_MODIFIED, budget), MAX_LINES_MODIFIED);
+    }
 
     #[test]
     fn selectable_prose_escapes_literal_markup_and_preserves_unicode() {

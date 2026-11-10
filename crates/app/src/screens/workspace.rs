@@ -181,6 +181,11 @@ impl ChatGeometry {
         }
     }
 
+    /// Include both reading margins in Chat's native scroll surface, but not the docks.
+    fn chat_surface_width(self) -> f32 {
+        self.width + 2.0 * self.left_inset
+    }
+
     fn interpolate(self, target: Self, progress: f32) -> Self {
         let lerp = |from: f32, to: f32| from + (to - from) * progress;
         Self {
@@ -684,6 +689,9 @@ impl Render for WorkspaceScreen {
             && history_open
             && self.compact_panel == Some(DockPanel::History);
         let auxiliary_view = project_visible || compact_changes || compact_history;
+        // ChatPanel centres its own messages and composer. Its outer scroll surface must
+        // also own the empty reading margins so native wheel events reach the conversation.
+        let full_width_chat = active == Tab::Chat && !auxiliary_view;
         let panes = chat_layout(
             available,
             has_changes && self.docks.changes_open,
@@ -925,7 +933,7 @@ impl Render for WorkspaceScreen {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .when(!feature_view && !auxiliary_view, |d| {
+                    .when(!feature_view && !auxiliary_view && !full_width_chat, |d| {
                         d.child(div().flex_none().w(px(geometry.left_inset)))
                     })
                     .child(
@@ -939,7 +947,11 @@ impl Render for WorkspaceScreen {
                             .when(!feature_view && !auxiliary_view, |d| {
                                 d.flex_none()
                                     .min_w(px(layout::CHAT_MIN_WIDTH.min(available)))
-                                    .w(px(geometry.width))
+                                    .w(px(if full_width_chat {
+                                        geometry.chat_surface_width()
+                                    } else {
+                                        geometry.width
+                                    }))
                             })
                             .child(body),
                     )
@@ -953,6 +965,9 @@ impl Render for WorkspaceScreen {
                                 .min_h_0()
                                 .h_full()
                                 .justify_end()
+                                .when(full_width_chat, |d| {
+                                    d.flex_none().w(px(geometry.dock_width))
+                                })
                                 .when(panes.show_changes, |d| {
                                     d.child(
                                         div()
@@ -1164,6 +1179,31 @@ mod tests {
         assert_eq!(narrower.left_inset, 0.0);
         assert!(narrower.show_changes);
         assert!(!narrower.show_history);
+    }
+
+    #[test]
+    fn chat_scroll_surface_owns_both_margins_without_overlapping_docks() {
+        let available = full_chat_width() + 3.0 * layout::CHANGES_WIDTH;
+        let closed =
+            ChatGeometry::from_layout(&chat_layout(available, false, false, DockPanel::History));
+        let opened =
+            ChatGeometry::from_layout(&chat_layout(available, true, true, DockPanel::History));
+
+        for (from, target) in [(closed, opened), (opened, closed)] {
+            for step in 0..=10 {
+                let geometry = from.interpolate(target, step as f32 / 10.0);
+                let surface = geometry.chat_surface_width();
+                assert!(
+                    (surface + geometry.dock_width - available).abs() < 0.001,
+                    "Chat and docks must exactly share the available width: {geometry:?}"
+                );
+                assert!(
+                    (surface / 2.0 - (geometry.left_inset + geometry.width / 2.0)).abs()
+                        < 0.001,
+                    "Widening the scroll surface must not move the reading column"
+                );
+            }
+        }
     }
 
     #[test]
