@@ -22,7 +22,7 @@ use super::wire::{
     MAX_CANCEL_BYTES, MAX_DISPATCH_BYTES, decode_cancel, decode_dispatch, encode_progress,
     encode_result,
 };
-use super::{ExecutionBinding, InvocationId, ReviewPlan};
+use super::{ExecutionBinding, InvocationId};
 use crate::host::{LocalHost, WorkspaceHost};
 use crate::location::{Location, ProjectRoot};
 use crate::{Error, Result};
@@ -76,7 +76,10 @@ impl AgentOperation {
             if let Some(CommandObservation::Finished(result)) = current {
                 return result.ok_or_else(observation_lost);
             }
-            observations.changed().await.map_err(|_| observation_lost())?;
+            observations
+                .changed()
+                .await
+                .map_err(|_| observation_lost())?;
         }
     }
 }
@@ -151,11 +154,7 @@ impl AgentExecutionService {
     ///
     /// Admission never queues behind another invocation. A successful return means a worker
     /// owns this attempt; its final observation, not an RPC cancellation, determines cleanup.
-    pub fn dispatch(
-        &self,
-        bytes: &[u8],
-        scope: CancellationToken,
-    ) -> Result<Arc<AgentOperation>> {
+    pub fn dispatch(&self, bytes: &[u8], scope: CancellationToken) -> Result<Arc<AgentOperation>> {
         if bytes.len() > MAX_DISPATCH_BYTES {
             return Err(Error::invalid("Command dispatch exceeds the size limit."));
         }
@@ -171,10 +170,14 @@ impl AgentExecutionService {
         let project = state
             .projects
             .get(&envelope.execution.root)
-            .ok_or_else(|| Error::conflict("Prepare this project on this agent before dispatch."))?;
+            .ok_or_else(|| {
+                Error::conflict("Prepare this project on this agent before dispatch.")
+            })?;
         let dispatch = decode_dispatch(bytes, &project.binding)?;
         if dispatch.plan().directory.root().to_str() != Some(project.canonical_root.as_str()) {
-            return Err(Error::conflict("Command admission root differs from preparation."));
+            return Err(Error::conflict(
+                "Command admission root differs from preparation.",
+            ));
         }
         let canonical_root = project.canonical_root.clone();
         if state.seen.contains(&invocation) {
@@ -184,8 +187,7 @@ impl AgentExecutionService {
             return Err(Error::conflict("Agent command attempt limit reached."));
         }
         state.seen.insert(invocation);
-        if !state.operations.contains_key(&canonical_root)
-            && state.operations.len() >= MAX_PROJECTS
+        if !state.operations.contains_key(&canonical_root) && state.operations.len() >= MAX_PROJECTS
         {
             return Err(Error::conflict("Agent command operation limit reached."));
         }
@@ -200,9 +202,7 @@ impl AgentExecutionService {
             cancel,
             observations,
         });
-        state
-            .operations
-            .insert(canonical_root, operation.clone());
+        state.operations.insert(canonical_root, operation.clone());
         let identity = operation.identity.clone();
         tokio::spawn(relay(handle, identity, sender));
         Ok(operation)
@@ -214,8 +214,8 @@ impl AgentExecutionService {
         if bytes.len() > MAX_CANCEL_BYTES {
             return Err(Error::invalid("Command Stop exceeds the size limit."));
         }
-        let request: CancelCommand = serde_json::from_slice(bytes)
-            .map_err(|_| Error::invalid("Malformed command Stop."))?;
+        let request: CancelCommand =
+            serde_json::from_slice(bytes).map_err(|_| Error::invalid("Malformed command Stop."))?;
         let state = self
             .state
             .lock()

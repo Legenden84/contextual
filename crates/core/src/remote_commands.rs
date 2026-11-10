@@ -5,6 +5,7 @@
 //! This is not cross-process ownership or persisted app execution history.
 
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -30,8 +31,7 @@ const MAX_PROJECTS: usize = 32;
 const MAX_RESERVATIONS: usize = 256;
 
 type ProjectKey = (Location, String);
-static RESERVED: LazyLock<Mutex<HashMap<ProjectKey, InvocationId>>> =
-    LazyLock::new(Mutex::default);
+static RESERVED: LazyLock<Mutex<HashMap<ProjectKey, InvocationId>>> = LazyLock::new(Mutex::default);
 
 struct Observation {
     receiver: ObservationReceiver,
@@ -47,12 +47,11 @@ pub(super) struct CommandConnection {
 
 impl CommandConnection {
     pub(super) fn configure(&self, location: Location) -> Result<()> {
-        let mut current = self
-            .location
-            .lock()
-            .map_err(|_| unavailable())?;
+        let mut current = self.location.lock().map_err(|_| unavailable())?;
         if current.is_some() {
-            return Err(Error::conflict("Command connection location is already bound."));
+            return Err(Error::conflict(
+                "Command connection location is already bound.",
+            ));
         }
         *current = Some(location);
         Ok(())
@@ -80,7 +79,9 @@ impl CommandConnection {
 
     pub(super) fn progress(&self, bytes: &[u8]) -> Result<()> {
         if bytes.len() > MAX_OBSERVATION_BYTES {
-            return Err(Error::invalid("Remote command progress exceeds the size limit."));
+            return Err(Error::invalid(
+                "Remote command progress exceeds the size limit.",
+            ));
         }
         let message: CommandProgress = serde_json::from_slice(bytes)
             .map_err(|_| Error::invalid("Malformed remote command progress."))?;
@@ -117,14 +118,21 @@ fn begin(
     method: &str,
     params: &RawValue,
 ) -> Result<(u64, oneshot::Receiver<raw::Response>)> {
-    let id = host
-        .next_id
-        .fetch_update(
-            std::sync::atomic::Ordering::Relaxed,
-            std::sync::atomic::Ordering::Relaxed,
-            |id| id.checked_add(1),
-        )
-        .map_err(|_| Error::internal("Workspace request identities exhausted."))?;
+    let mut candidate = host.next_id.load(Ordering::Relaxed);
+    let id = loop {
+        let next = candidate
+            .checked_add(1)
+            .ok_or_else(|| Error::internal("Workspace request identities exhausted."))?;
+        match host.next_id.compare_exchange_weak(
+            candidate,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break candidate,
+            Err(current) => candidate = current,
+        }
+    };
     let (sender, receiver) = oneshot::channel();
     {
         let mut pending = host.pending.lock().map_err(|_| unavailable())?;
@@ -161,18 +169,24 @@ pub(super) fn start(
         .iter()
         .any(|capability| capability == EXECUTION_CAPABILITY)
     {
-        return Err(Error::tool("Command execution is unavailable on this workspace host."));
+        return Err(Error::tool(
+            "Command execution is unavailable on this workspace host.",
+        ));
     }
     if !host.is_alive() {
         return Err(agent_gone());
     }
     if scope.is_cancelled() {
-        return Err(Error::conflict("Command scope was cancelled before dispatch."));
+        return Err(Error::conflict(
+            "Command scope was cancelled before dispatch.",
+        ));
     }
     let plan = permit.plan();
     let location = host.commands.location.lock().map_err(|_| unavailable())?;
     if location.as_ref() != Some(&plan.binding.project.location) {
-        return Err(Error::forbidden("Command belongs to a different execution location."));
+        return Err(Error::forbidden(
+            "Command belongs to a different execution location.",
+        ));
     }
     drop(location);
     let snapshots = host.commands.prepared.lock().map_err(|_| unavailable())?;
@@ -271,7 +285,9 @@ pub(super) fn start(
         // Unknown, history failure, panic and dropped workers all leave RESERVED occupied.
         result
     });
-    Ok(ExecutionHandle::from_worker(invocation, task, cancel, progress))
+    Ok(ExecutionHandle::from_worker(
+        invocation, task, cancel, progress,
+    ))
 }
 
 fn release(key: &ProjectKey, invocation: &InvocationId) {
@@ -322,13 +338,18 @@ async fn observe(
         }
     };
     {
-        let mut pending = host.pending.lock().unwrap_or_else(|error| error.into_inner());
+        let mut pending = host
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         pending.remove(&id);
         if let Some((id, _)) = stop {
             pending.remove(&id);
         }
     }
-    let mut observation = observation.lock().unwrap_or_else(|error| error.into_inner());
+    let mut observation = observation
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     if let Some(response) = response
         && response.error.is_none()
         && let Some(result) = response.result

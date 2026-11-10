@@ -1,34 +1,163 @@
 # User-approved command execution
 
-## Status
+## Current status and next task
 
-Stages 1 and 2a add core approval policy and non-executing host preparation.
-LocalHost, RemoteHost and SupervisedHost expose `prepare_command`; protocol version 3 adds
-the `commandPrepare` capability. Preparation validates native project containment, resolves
-programs and supported interpreters, constructs the restricted environment, and reports a
-host-instance identity. It never launches a subprocess.
+**Next task: M1 — validate and freeze the existing implementation.**
+After M1 passes, start M2.1 — the Unix native process backend. Do not describe the next task
+as "return to Phase 2b" or "continue transport hardening."
 
-Command execution is still unavailable in the app. Stage 2b includes the backend-independent
-execution supervisor, fake managed-process tests, and an append-only file journal with
-app-generated invocation IDs. The journal implements durable no-clobber publication on Unix
-filesystems supporting hard links and directory synchronization. Windows journal initialization
-fails closed until its durable-publication adapter is implemented and inspected.
+Command execution is unavailable in the normal app. Core approval policy, non-executing host
+preparation, backend-independent supervision, Unix journaling, in-process admission and opt-in
+local/remote execution transport have implementations and tests. They are not yet a verified
+native execution feature.
 
-No native process-tree backend is implemented or selected. The in-process engine reserves
-process-wide local-host admission synchronously and checks journal recovery before writing a
-new intent. An explicitly configured LocalHost now exposes this engine through the
-permit-consuming `WorkspaceHost::start_command` entry point. Ordinary hosts still refuse it.
-Protocol version 4 supplies versioned execution envelopes and method names. An explicitly
-configured `serve_with_execution` connection now implements these endpoints around an
-agent-owned service. Ordinary agent startup still does not construct that service or advertise
-execution capability. RemoteHost additionally requires explicit trusted location binding.
+No native process-tree backend is implemented or selected. Windows durable journal publication,
+cross-process ownership/reconciliation, Foundry tools and the command-specific app workflow
+remain unfinished. Ordinary LocalHost and agent startup do not enable execution.
 
-Cross-process ownership, native process backends, native tools, chat persistence, Inspect and
-action cards remain to be implemented. These integrations do not enable execution in the app.
+The latest patches have not been compiled, formatted or tested in the read/edit-block workflow.
+Fake-process tests are not evidence of native Windows, macOS or Windows-to-WSL execution.
 
-The supplied tests have not been run in the read/edit-block workflow. The agent contract
-tests exercise an agent on the test machine, not an actual Windows-to-WSL deployment.
-No Windows, macOS or WSL execution behavior is verified by these patches.
+## Authoritative delivery sequence
+
+This checklist is the source of truth for remaining work and completion. Execute M1 through M7
+in order. The numbered stages below retain requirements and implementation history; they are
+not a second scheduling system. Historical "still pending" and "next work" statements describe
+their increment at the time and do not override this checklist.
+
+| Milestone | Status | Successor |
+| --- | --- | --- |
+| M1 — Validate existing implementation | Next; validation evidence pending | M2.1 |
+| M2 — Native execution backends and Windows journal | Not implemented | M3 |
+| M3 — Cross-process ownership and reconciliation | Not implemented | M4 |
+| M4 — Complete host-path verification | Blocked on M2 and M3 | M5; Phase 2 is closed |
+| M5 — Native Foundry proposals | Not implemented; original Stage 3 | M6 |
+| M6 — App workflow, history and Inspect | Not implemented; original Stage 4 | M7 |
+| M7 — Full acceptance and enablement | Blocked on preceding milestones; original Stage 5 | Feature enabled |
+
+### M1 — Validate and freeze the existing implementation
+
+Scope:
+- Run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo test --workspace`.
+- Perform the no-default-features core cross-checks and static-agent build described in
+  CLAUDE.md.
+- Fix concrete build, lint, test and review defects in the existing policy, supervisor,
+  journal and transport implementation. Do not add another general foundation layer.
+
+Exit evidence: record the revision, commands, targets and results below. Existing fake-process
+tests establish the baseline, not native process correctness. Unavailable checks remain blocked.
+
+After passing, freeze these interfaces except for defects tied to a specific requirement or
+failing test. The next task is M2.1.
+
+### M2 — Implement native execution and Windows journal durability
+
+Complete these substeps in order:
+1. **M2.1 — Unix backend:** implement safe process-group ownership on Linux/WSL and macOS,
+   preserving ownership through root exit and cleanup without signalling recycled process IDs.
+2. **M2.2 — Windows journal:** implement durable no-clobber publication and recovery behavior.
+3. **M2.3 — Windows backend:** establish job ownership before target code runs.
+
+Inspect dependency APIs before selecting adapters; preserve the workspace's unsafe-code
+prohibition. Backends must clear the environment, preserve exact arguments, use null stdin,
+refuse unsupported ownership before launch and initiate cleanup on Drop.
+
+Exit evidence: actual-process tests for each backend cover launch, failed start, argument
+boundaries, environment filtering, bounded output with continued draining, timeout, cancellation
+and descendant cleanup. Windows journal tests cover publication and recovery failures.
+
+Normal app and agent execution remain disabled. Next: M3, not another supervisor increment.
+
+### M3 — Finish cross-process ownership and reconciliation
+
+Scope:
+- Establish exclusive canonical-project execution ownership across separate app/agent processes.
+- Connect ownership to durable intent and recovery.
+- Implement explicit reconciliation that establishes termination before releasing unresolved
+  admission. If termination cannot be established, keep the project blocked.
+- Never resend commands, restore approval or treat reconnection as reconciliation.
+
+Exit evidence: multi-process tests demonstrate concurrent admission refusal, crash/restart
+without replay, unresolved-state blocking across reconnection, and a new separately approved
+attempt after confirmed reconciliation. Recovery UI belongs to M6.
+
+Next: M4.
+
+### M4 — Verify the complete host execution path; close Phase 2
+
+Wire native backends into the existing services in a test harness, not normal app startup.
+Verify:
+- Native Windows local execution.
+- Native macOS local execution.
+- Actual Windows-to-WSL agent execution.
+- Stop, timeout, disconnect, agent failure and orderly service shutdown.
+- Executable/cwd changes between review and launch.
+- Intent-write refusal, completion-write failure, no dispatch retry and no local fallback.
+
+Exit evidence: record platform-specific results for the complete approved host path. Missing
+hardware is a named blocker, not a reason to create more speculative hardening work.
+
+**Passing M4 closes Phase 2.** Foundry, UI, chat persistence and app lifecycle integration are
+M5/M6 work and cannot extend Phase 2. Next: M5.
+
+### M5 — Native Foundry proposals; original Stage 3
+
+Implement `propose_command`, native call/result transcript types, bounded assembly in both
+Responses and chat-completions streams, successful terminal-completion checks, tool-only
+responses, multiple calls, explicit unsupported-tool behavior and budget accounting.
+History reconstruction and chain resets must never dispatch commands.
+
+Exit evidence: mock-provider tests cover split, complete, malformed, incomplete and multiple
+calls, call/result correlation and history reconstruction. Parsing creates proposals only.
+
+Next: M6.
+
+### M6 — App workflow, persistence and Inspect; original Stage 4
+
+Deliver in this order:
+1. Project-owned execution state, bounded history, restore-without-authorization and Inspect.
+2. Exact review cards with Run, Edit, Reject and Stop.
+3. Separate output-sharing preview, secret warning, omission/redaction and explicit continuation.
+4. Chat/project/app cancellation and shutdown integration; post-command rescan, SCM refresh,
+   cache invalidation and revalidation of proposal/Save/Undo preconditions.
+5. Prompt, help and design-system safety copy.
+
+Follow the detailed Stage 4 requirements below. Test through explicitly configured integration
+paths; normal startup remains disabled until M7 passes.
+
+Exit evidence: end-to-end proposal, review, approval, execution, observation and optional sharing
+tests, including rejection and restored history that cannot launch anything.
+
+Next: M7.
+
+### M7 — Full acceptance and enablement; original Stage 5
+
+Run the complete user workflow on Windows, macOS and actual Windows-to-WSL connections.
+Cover edits, duplicate clicks, sibling proposals, rejection, cancellation, restart, output
+privacy and existing Save/Undo and Source Control behavior. Run contributor checks again.
+
+Exit evidence: recorded acceptance results for all supported execution locations and the
+verification requirements below. Only then enable normal app/agent execution.
+
+### Completion and scope rules
+
+- Close a milestone only with evidence, not because code or tests were added.
+- Record status as not started, in progress, blocked or passed. Name blockers precisely.
+- A failed check produces a specific corrective task within its milestone, not a new phase.
+- Later defects identify the failed requirement and affected milestone. They may block release,
+  but do not restart the entire sequence or waive safety requirements.
+- No automatic execution, always-allow mode, parallel command queue, action-block fallback or
+  unrelated refactoring is added to this delivery.
+- Native dependency/API decisions and unavailable platform testing are explicit blockers.
+  Do not substitute more abstractions for those decisions or tests.
+
+### Evidence ledger
+
+Append results here as milestones advance. Include revision, platform/target, command or manual
+scenario, result and any blocker. This ledger records verification, not implementation claims.
+
+No milestone has recorded passing verification evidence yet.
 
 ## Contract
 
@@ -63,7 +192,11 @@ Existing user-operated Source Control behavior is unchanged.
   handled without fabricating assistant prose.
 - Automatic read follow-ups must pause when a turn proposes executable actions.
 
-## Stages
+## Requirements and implementation history
+
+The original stage numbers below identify requirements, not the next task. Use the authoritative
+M1–M7 sequence above to schedule work. Increment notes are chronological and may contain statements
+superseded by later increments, especially within 2c.
 
 ### 1. Core policy
 
@@ -416,10 +549,10 @@ duplicate protection after journal reopen, old-review refusal on a replacement c
 and unresolved client admission after disconnection and agent cleanup.
 
 These patches have not been compiled, formatted or tested in the read/edit-block workflow.
-They are not evidence of actual WSL, Windows or macOS process-tree behavior. Next work returns
-to Phase 2b: inspected native ownership backends, cross-process admission/reconciliation and
-Windows durable publication. App enablement remains blocked on that work and lifecycle/UI
-integration.
+They are not evidence of actual WSL, Windows or macOS process-tree behavior. This increment is
+the implementation baseline for M1. Native ownership and Windows durability belong to M2;
+cross-process admission/reconciliation to M3; host-path verification to M4. App enablement
+remains gated by M7. Do not restart the earlier 2c increments as a new work sequence.
 
 ### 2. Runner and local/remote host lifecycle
 

@@ -172,9 +172,10 @@ where
                             enqueue(
                                 &out,
                                 &closed,
-                                error_response(id, RpcError::new(
-                                    RpcError::REQUEST_CANCELLED, "Cancelled",
-                                )),
+                                error_response(
+                                    id,
+                                    RpcError::new(RpcError::REQUEST_CANCELLED, "Cancelled"),
+                                ),
                             );
                         }
                     }
@@ -193,9 +194,13 @@ where
                     enqueue(
                         &out,
                         &closed,
-                        error_response(request.id, RpcError::new(
-                            RpcError::APPLICATION_ERROR, "Agent request limit reached.",
-                        )),
+                        error_response(
+                            request.id,
+                            RpcError::new(
+                                RpcError::APPLICATION_ERROR,
+                                "Agent request limit reached.",
+                            ),
+                        ),
                     );
                     continue;
                 }
@@ -211,14 +216,9 @@ where
                 let task_out = out.clone();
                 let task_closed = closed.clone();
                 let task = tasks.spawn(async move {
-                    let bytes = execute_request(
-                        task_service,
-                        request,
-                        cancel,
-                        &task_out,
-                        &task_closed,
-                    )
-                    .await;
+                    let bytes =
+                        execute_request(task_service, request, cancel, &task_out, &task_closed)
+                            .await;
                     complete(&task_running, id, bytes, &task_out, &task_closed);
                 });
                 map.insert(id, Active { task, cooperative });
@@ -235,7 +235,11 @@ where
     }
     while tasks.join_next().await.is_some() {}
     if let Some(id) = shutdown {
-        enqueue(&out, &closed, response_bytes(&Response::ok(id, Value::Null))?);
+        enqueue(
+            &out,
+            &closed,
+            response_bytes(&Response::ok(id, Value::Null))?,
+        );
     }
     drop(out);
     let written = writer_task.await.map_err(std::io::Error::other)?;
@@ -253,7 +257,10 @@ async fn execute_request(
     closed: &CancellationToken,
 ) -> Vec<u8> {
     let id = request.id;
-    let payload = request.params.as_deref().map_or("null", |value| value.get());
+    let payload = request
+        .params
+        .as_deref()
+        .map_or("null", |value| value.get());
     match request.method.as_str() {
         method::COMMAND_DISPATCH => {
             let operation = match service.dispatch(payload.as_bytes(), cancel) {
@@ -296,19 +303,21 @@ async fn execute_request(
                     }
                 }
             }
-            error_response(id, RpcError::new(
-                RpcError::APPLICATION_ERROR, "Command observation worker stopped.",
-            ))
+            error_response(
+                id,
+                RpcError::new(
+                    RpcError::APPLICATION_ERROR,
+                    "Command observation worker stopped.",
+                ),
+            )
         }
-        method::COMMAND_CANCEL => {
-            match service.stop(payload.as_bytes()) {
-                Ok(operation) => match operation.wait().await {
-                    Ok(payload) => final_response(id, &payload),
-                    Err(error) => error_response(id, core_error(error)),
-                },
+        method::COMMAND_CANCEL => match service.stop(payload.as_bytes()) {
+            Ok(operation) => match operation.wait().await {
+                Ok(payload) => final_response(id, &payload),
                 Err(error) => error_response(id, core_error(error)),
-            }
-        }
+            },
+            Err(error) => error_response(id, core_error(error)),
+        },
         method::COMMAND_PREPARE => {
             let result = match parse(request.params) {
                 Ok(request) => service.prepare(request).await.map_err(core_error),
@@ -317,9 +326,10 @@ async fn execute_request(
             match result {
                 Ok(prepared) => match serde_json::to_value(prepared) {
                     Ok(value) => response_bytes(&Response::ok(id, value)).unwrap_or_default(),
-                    Err(_) => error_response(id, RpcError::new(
-                        RpcError::INTERNAL_ERROR, "Could not encode preparation.",
-                    )),
+                    Err(_) => error_response(
+                        id,
+                        RpcError::new(RpcError::INTERNAL_ERROR, "Could not encode preparation."),
+                    ),
                 },
                 Err(error) => error_response(id, error),
             }
@@ -330,9 +340,10 @@ async fn execute_request(
                 Err(error) => return error_response(id, error),
             };
             if params.protocol_version != PROTOCOL_VERSION {
-                return error_response(id, RpcError::new(
-                    RpcError::INVALID_PARAMS, "Unsupported workspace protocol.",
-                ));
+                return error_response(
+                    id,
+                    RpcError::new(RpcError::INVALID_PARAMS, "Unsupported workspace protocol."),
+                );
             }
             use contextual_core::host::WorkspaceHost as _;
             for root in params.allowed_roots {
@@ -349,12 +360,12 @@ async fn execute_request(
                 capabilities,
             }) {
                 Ok(value) => response_bytes(&Response::ok(id, value)).unwrap_or_default(),
-                Err(_) => error_response(id, RpcError::new(
-                    RpcError::INTERNAL_ERROR, "Could not encode initialization.",
-                )),
+                Err(_) => error_response(
+                    id,
+                    RpcError::new(RpcError::INTERNAL_ERROR, "Could not encode initialization."),
+                ),
             }
         }
-        _ => response_bytes(&dispatch(service.host().as_ref(), request).await)
-            .unwrap_or_default(),
+        _ => response_bytes(&dispatch(service.host().as_ref(), request).await).unwrap_or_default(),
     }
 }

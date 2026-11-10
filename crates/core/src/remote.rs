@@ -411,7 +411,9 @@ impl WorkspaceHost for RemoteHost {
         }
         let prepared: PreparedCommand = self.request(method::COMMAND_PREPARE, &req).await?;
         if prepared.request != req {
-            return Err(Error::conflict("Agent preparation has a different request binding."));
+            return Err(Error::conflict(
+                "Agent preparation has a different request binding.",
+            ));
         }
         self.commands.remember(&prepared)?;
         Ok(prepared)

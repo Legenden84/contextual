@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use contextual_agent::serve_with_execution;
+use contextual_core::Result;
 use contextual_core::commands::execution::{
     ExecutionStatus, ManagedChild, ManagedCommandRunner, ManagedProcessTree, OUTPUT_LIMIT,
     ProcessExit,
@@ -20,7 +21,6 @@ use contextual_core::host::{LocalHost, WorkspaceHost};
 use contextual_core::location::{Location, ProjectRoot};
 use contextual_core::process::Cmd;
 use contextual_core::remote::RemoteHost;
-use contextual_core::Result;
 use contextual_protocol::commands::{
     CancelCommand, CommandExecutionIdentity, CommandPlatform, DispatchCommand, EXECUTION_VERSION,
     PrepareCommand,
@@ -55,7 +55,12 @@ impl ManagedCommandRunner for Runner {
     fn spawn(&self, command: Cmd) -> Result<ManagedChild> {
         assert_eq!(command.args, ["a b", "", "$HOME", "&"]);
         assert!(command.cwd.is_some());
-        assert!(!command.env.iter().any(|(name, _)| name == "AZURE_OPENAI_API_KEY"));
+        assert!(
+            !command
+                .env
+                .iter()
+                .any(|(name, _)| name == "AZURE_OPENAI_API_KEY")
+        );
         self.0.launches.fetch_add(1, Ordering::SeqCst);
         self.0.spawned.notify_one();
         Ok(ManagedChild {
@@ -120,7 +125,9 @@ impl Fixture {
         );
         let control = Arc::new(Control::default());
         let host = Arc::new(LocalHost::new());
-        host.allow_root(project.path().to_str().unwrap()).await.unwrap();
+        host.allow_root(project.path().to_str().unwrap())
+            .await
+            .unwrap();
         let service = Arc::new(AgentExecutionService::new(
             host,
             location(),
@@ -208,7 +215,9 @@ async fn approved_remote_dispatch_delivers_bounded_cumulative_output() {
         let (host, server) = fixture.connect().await;
         let plan = fixture.plan(&host).await;
         assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 0);
-        let handle = host.start_command(permit(&plan), CancellationToken::new()).unwrap();
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
         fixture.control.spawned.notified().await;
         let mut progress = handle.progress();
         while progress.borrow().stdout.bytes_seen < (OUTPUT_LIMIT * 2) as u64 {
@@ -217,7 +226,8 @@ async fn approved_remote_dispatch_delivers_bounded_cumulative_output() {
         assert_eq!(progress.borrow().stdout.text.len(), OUTPUT_LIMIT);
         assert!(progress.borrow().stdout.truncated);
         assert!(
-            host.start_command(permit(&plan), CancellationToken::new()).is_err(),
+            host.start_command(permit(&plan), CancellationToken::new())
+                .is_err(),
             "independent gates must not queue work"
         );
 
@@ -242,7 +252,9 @@ async fn stop_waits_for_cleanup_instead_of_aborting_the_dispatch_rpc() {
         let fixture = Fixture::new().await;
         let (host, server) = fixture.connect().await;
         let plan = fixture.plan(&host).await;
-        let handle = host.start_command(permit(&plan), CancellationToken::new()).unwrap();
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
         fixture.control.spawned.notified().await;
         handle.stop();
         let waiter = tokio::spawn(handle.wait());
@@ -303,7 +315,9 @@ async fn replacement_connection_cannot_dispatch_an_old_review() {
         // Even when a service happens to survive reconnection, the app must explicitly
         // prepare/review on the new connection. It cannot transplant its old cached review.
         assert!(
-            replacement.start_command(permit, CancellationToken::new()).is_err()
+            replacement
+                .start_command(permit, CancellationToken::new())
+                .is_err()
         );
         assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 0);
         replacement.close();
@@ -319,7 +333,9 @@ async fn disconnected_outcome_stays_blocked_after_reconnection_and_agent_cleanup
         let fixture = Fixture::new().await;
         let (host, server) = fixture.connect().await;
         let plan = fixture.plan(&host).await;
-        let handle = host.start_command(permit(&plan), CancellationToken::new()).unwrap();
+        let handle = host
+            .start_command(permit(&plan), CancellationToken::new())
+            .unwrap();
         fixture.control.spawned.notified().await;
         host.close();
         let result = handle.wait().await;
@@ -332,7 +348,9 @@ async fn disconnected_outcome_stays_blocked_after_reconnection_and_agent_cleanup
         let (replacement, server) = fixture.connect().await;
         let fresh = fixture.plan(&replacement).await;
         assert!(
-            replacement.start_command(permit(&fresh), CancellationToken::new()).is_err(),
+            replacement
+                .start_command(permit(&fresh), CancellationToken::new())
+                .is_err(),
             "reconnection is not reconciliation"
         );
         assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
@@ -355,9 +373,7 @@ async fn send(
 }
 
 async fn response(
-    lines: &mut tokio::io::Lines<
-        BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    >,
+    lines: &mut tokio::io::Lines<BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>,
 ) -> Response {
     loop {
         let line = lines.next_line().await.unwrap().unwrap();
@@ -393,12 +409,30 @@ async fn duplicate_invocations_are_refused_while_active_and_after_journal_reopen
         });
         let (client_read, mut client_write) = tokio::io::split(client);
         let mut lines = BufReader::new(client_read).lines();
-        send(&mut client_write, 1, method::COMMAND_DISPATCH, params.clone()).await;
+        send(
+            &mut client_write,
+            1,
+            method::COMMAND_DISPATCH,
+            params.clone(),
+        )
+        .await;
         fixture.control.spawned.notified().await;
 
         // Same active RPC ID is silent; another RPC ID with the same invocation is refused.
-        send(&mut client_write, 1, method::COMMAND_DISPATCH, params.clone()).await;
-        send(&mut client_write, 2, method::COMMAND_DISPATCH, params.clone()).await;
+        send(
+            &mut client_write,
+            1,
+            method::COMMAND_DISPATCH,
+            params.clone(),
+        )
+        .await;
+        send(
+            &mut client_write,
+            2,
+            method::COMMAND_DISPATCH,
+            params.clone(),
+        )
+        .await;
         let duplicate = response(&mut lines).await;
         assert_eq!(duplicate.id, 2);
         assert!(duplicate.error.is_some());
@@ -411,8 +445,10 @@ async fn duplicate_invocations_are_refused_while_active_and_after_journal_reopen
             serde_json::to_value(CancelCommand {
                 version: EXECUTION_VERSION,
                 execution: identity.clone(),
-            }).unwrap(),
-        ).await;
+            })
+            .unwrap(),
+        )
+        .await;
         fixture.control.cleanup_entered.notified().await;
         fixture.control.cleanup_release.cancel();
         let first = response(&mut lines).await;
@@ -434,7 +470,9 @@ async fn duplicate_invocations_are_refused_while_active_and_after_journal_reopen
 
         // A new service with a new host epoch cannot evade the immutable invocation intent.
         let journal = Arc::new(
-            FileExecutionJournal::open(fixture.journal.dir().to_path_buf()).await.unwrap()
+            FileExecutionJournal::open(fixture.journal.dir().to_path_buf())
+                .await
+                .unwrap(),
         );
         let native = Arc::new(LocalHost::new());
         native.allow_root(&fixture.request().root).await.unwrap();
@@ -451,7 +489,8 @@ async fn duplicate_invocations_are_refused_while_active_and_after_journal_reopen
                 path: fixture.request().root,
             },
             fresh,
-        ).unwrap();
+        )
+        .unwrap();
         let mut replay: DispatchCommand =
             serde_json::from_slice(&encode_dispatch(permit(&fresh_plan)).unwrap()).unwrap();
         replay.execution.invocation_id = envelope.execution.invocation_id;
@@ -467,12 +506,13 @@ async fn duplicate_invocations_are_refused_while_active_and_after_journal_reopen
             5,
             method::COMMAND_DISPATCH,
             serde_json::to_value(&replay).unwrap(),
-        ).await;
+        )
+        .await;
         let final_response = response(&mut lines).await;
         let mut receiver = ObservationReceiver::new(replay.execution).unwrap();
-        let result = receiver.finish(
-            &serde_json::to_vec(&final_response.result.unwrap()).unwrap()
-        ).unwrap();
+        let result = receiver
+            .finish(&serde_json::to_vec(&final_response.result.unwrap()).unwrap())
+            .unwrap();
         assert_eq!(result.status, ExecutionStatus::FailedToStart);
         assert!(result.history_error.is_some());
         assert_eq!(fixture.control.launches.load(Ordering::SeqCst), 1);
