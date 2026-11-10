@@ -26,8 +26,8 @@ use gpui_kit::{
 use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
-use crate::state::chat::ChatModel;
 use crate::state::AppModel;
+use crate::state::chat::ChatModel;
 use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonVariant, Checkbox, IconButton, LinkButton};
 use crate::views::diff_rows::{self, FileRows, Row};

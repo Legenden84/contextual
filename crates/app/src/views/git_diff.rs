@@ -75,7 +75,8 @@ impl GitDiffView {
 
     fn load(&mut self, cx: &mut Context<Self>) {
         let Some((root, path)) = &self.target else {
-            self.error = Some("No discovered repository owns this file. Rescan the workspace.".into());
+            self.error =
+                Some("No discovered repository owns this file. Rescan the workspace.".into());
             cx.notify();
             return;
         };
@@ -96,10 +97,9 @@ impl GitDiffView {
                 }
                 match result {
                     Ok(f) => {
-                        let changed = this
-                            .file
-                            .as_ref()
-                            .is_none_or(|old| old.old != f.old || old.new != f.new || old.skipped != f.skipped);
+                        let changed = this.file.as_ref().is_none_or(|old| {
+                            old.old != f.old || old.new != f.new || old.skipped != f.skipped
+                        });
                         if changed {
                             this.diff = Some(compute_diff(&f.old, &f.new));
                             this.file = Some(f);

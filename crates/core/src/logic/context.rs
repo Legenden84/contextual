@@ -239,7 +239,10 @@ pub fn totals_with_conversation_tokens(
         + conversation_tokens
         + new_tokens;
     let hint = if conversation_tokens > file_tok && conversation_tokens > rule_tokens {
-        Some(format!("Earlier conversation: {}", fmt_k(conversation_tokens)))
+        Some(format!(
+            "Earlier conversation: {}",
+            fmt_k(conversation_tokens)
+        ))
     } else {
         biggest_folder(input.tree, input.selected)
             .map(|b| format!("{}: {}", b.name, fmt_k(b.tokens)))

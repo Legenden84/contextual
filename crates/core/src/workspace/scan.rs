@@ -296,10 +296,12 @@ impl ScopedIgnores {
             if !parent.starts_with(&self.root) {
                 break;
             }
-            let scope = scopes.entry(parent.to_path_buf()).or_insert_with(|| IgnoreScope {
-                matcher: load_gitignore(parent),
-                repository: has_git_marker(parent),
-            });
+            let scope = scopes
+                .entry(parent.to_path_buf())
+                .or_insert_with(|| IgnoreScope {
+                    matcher: load_gitignore(parent),
+                    repository: has_git_marker(parent),
+                });
             if let Some(matcher) = &scope.matcher {
                 let matched = matcher.matched(&abs, is_dir);
                 if !matched.is_none() {
@@ -510,8 +512,7 @@ fn first_utf16_units(s: &str, n: usize) -> String {
 /// Git metadata itself may be a directory or a worktree/submodule pointer file.
 /// Do not traverse a symlink masquerading as metadata.
 fn has_git_marker(root: &Path) -> bool {
-    fs::symlink_metadata(root.join(".git"))
-        .is_ok_and(|m| m.is_dir() || m.is_file())
+    fs::symlink_metadata(root.join(".git")).is_ok_and(|m| m.is_dir() || m.is_file())
 }
 
 /// The checked-out branch, or the first 7 characters of a detached HEAD.
@@ -645,8 +646,7 @@ impl Discovery<'_> {
             let abs = dir.join(&e.name);
             let rel = to_rel(self.root, &abs);
             if AGENT_STATE.iter().any(|s| {
-                rel.eq_ignore_ascii_case(s)
-                    || rel.to_ascii_lowercase().ends_with(&format!("/{s}"))
+                rel.eq_ignore_ascii_case(s) || rel.to_ascii_lowercase().ends_with(&format!("/{s}"))
             }) {
                 continue;
             }
@@ -1103,7 +1103,10 @@ mod tests {
 
         let scan = scan_project(&root.to_string_lossy(), &ScanOptions::default()).unwrap();
         assert_eq!(
-            scan.repositories.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            scan.repositories
+                .iter()
+                .map(|r| r.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["backend", "frontend"]
         );
         assert_eq!(scan.branch, None);
@@ -1125,7 +1128,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(find(&scan.tree, "frontend/cache.tmp").unwrap().excluded, None);
+        assert_eq!(
+            find(&scan.tree, "frontend/cache.tmp").unwrap().excluded,
+            None
+        );
         assert!(find(&scan.tree, "frontend/generated/out.js").is_some());
     }
 
@@ -1159,7 +1165,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            scan.repositories.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            scan.repositories
+                .iter()
+                .map(|r| r.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["", "linked"]
         );
         assert_eq!(scan.repositories[1].branch.as_deref(), Some("linked"));
@@ -1176,7 +1185,10 @@ mod tests {
 
         let scan = scan_project(&dir.path().to_string_lossy(), &ScanOptions::default()).unwrap();
         assert!(scan.repositories.is_empty());
-        assert_eq!(find(&scan.tree, "linked").unwrap().excluded.as_deref(), Some("symlink"));
+        assert_eq!(
+            find(&scan.tree, "linked").unwrap().excluded.as_deref(),
+            Some("symlink")
+        );
     }
 
     #[test]

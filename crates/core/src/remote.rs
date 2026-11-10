@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use contextual_protocol::commands::{PrepareCommand, PreparedCommand};
 use contextual_protocol::fs::{
     Apply, ApplyResult, DirListing, ListDirs, ReadFiles, ReadFilesResult, Scan, ScanResult, Undo,
     UndoResult,
@@ -283,6 +284,19 @@ impl WorkspaceHost for RemoteHost {
     async fn undo(&self, req: Undo) -> Result<UndoResult> {
         self.request(method::UNDO, req).await
     }
+    async fn prepare_command(&self, req: PrepareCommand) -> Result<PreparedCommand> {
+        if !self
+            .info
+            .capabilities
+            .iter()
+            .any(|capability| capability == "commandPrepare")
+        {
+            return Err(Error::tool(
+                "The workspace agent does not support command preparation. Redeploy it.",
+            ));
+        }
+        self.request(method::COMMAND_PREPARE, req).await
+    }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         self.request(method::GIT, call).await
     }
@@ -450,6 +464,15 @@ impl WorkspaceHost for SupervisedHost {
         self.call(false, |h| {
             let req = req.clone();
             async move { h.undo(req).await }
+        })
+        .await
+    }
+    async fn prepare_command(&self, req: PrepareCommand) -> Result<PreparedCommand> {
+        // Preparation is non-executing, but do not hide a connection failure by repeating it
+        // on a different agent instance. A subsequent explicit preparation gets a new epoch.
+        self.call(false, |h| {
+            let req = req.clone();
+            async move { h.prepare_command(req).await }
         })
         .await
     }

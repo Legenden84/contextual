@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// Bumped whenever a method, a parameter or a result changes shape. The app redeploys the agent
 /// when the agent reports a different version.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub const JSONRPC: &str = "2.0";
 
@@ -26,6 +26,8 @@ pub mod method {
     pub const UNDO: &str = "workspace/undo";
     /// Source Control and pull requests: params `git::GitCall`, result `git::GitReply`.
     pub const GIT: &str = "workspace/git";
+    /// Non-executing preparation: `commands::PrepareCommand` → `commands::PreparedCommand`.
+    pub const COMMAND_PREPARE: &str = "workspace/commandPrepare";
     /// Notification, app → agent: `{ id }` of the request to cancel.
     pub const CANCEL: &str = "$/cancel";
     /// Notification, agent → app: `{ id, message }` for long operations.

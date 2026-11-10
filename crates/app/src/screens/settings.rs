@@ -398,12 +398,7 @@ impl SettingsScreen {
         cx.notify();
     }
 
-    fn select_group(
-        &mut self,
-        group: SettingsGroup,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn select_group(&mut self, group: SettingsGroup, window: &mut Window, cx: &mut Context<Self>) {
         self.active_group = group;
         // Move focus off any input that is about to be unmounted.
         self.group_focus[group as usize].focus(window, cx);
@@ -445,11 +440,7 @@ impl SettingsScreen {
                         a: 0.0,
                         ..c.focus_ring
                     }))
-                    .bg(hsla(if active {
-                        c.surface_100
-                    } else {
-                        c.surface_000
-                    }))
+                    .bg(hsla(if active { c.surface_100 } else { c.surface_000 }))
                     .text_color(hsla(if active { c.ink_strong } else { c.ink_muted }))
                     .cursor_pointer()
                     .when(!active, |d| {

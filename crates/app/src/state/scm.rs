@@ -97,7 +97,9 @@ impl ScmModel {
     }
 
     pub fn active_repository(&self) -> Option<&Repository> {
-        self.repositories.iter().find(|r| Some(&r.root) == self.active_root.as_ref())
+        self.repositories
+            .iter()
+            .find(|r| Some(&r.root) == self.active_root.as_ref())
     }
 
     pub fn repository_name(&self, cx: &gpui_kit::App) -> String {
@@ -135,19 +137,32 @@ impl ScmModel {
 
     fn sync_repositories(&mut self, cx: &Context<Self>) {
         self.repositories = self.project.read(cx).repositories.clone();
-        if !self.repositories.iter().any(|r| Some(&r.root) == self.active_root.as_ref()) {
+        if !self
+            .repositories
+            .iter()
+            .any(|r| Some(&r.root) == self.active_root.as_ref())
+        {
             self.reset_scope();
             self.active_root = self.repositories.first().map(|r| r.root.clone());
         }
         self.not_repo = self.repositories.is_empty();
-        self.repository_statuses.retain(|root, _| self.repositories.iter().any(|r| &r.root == root));
-        self.repository_errors.retain(|root, _| self.repositories.iter().any(|r| &r.root == root));
-        self.status = self.active_root.as_ref().and_then(|root| self.repository_statuses.get(root)).cloned();
+        self.repository_statuses
+            .retain(|root, _| self.repositories.iter().any(|r| &r.root == root));
+        self.repository_errors
+            .retain(|root, _| self.repositories.iter().any(|r| &r.root == root));
+        self.status = self
+            .active_root
+            .as_ref()
+            .and_then(|root| self.repository_statuses.get(root))
+            .cloned();
     }
 
     /// Files with changes across all repositories, for the sidebar badge.
     pub fn change_count(&self) -> usize {
-        self.repository_statuses.values().map(status_change_count).sum()
+        self.repository_statuses
+            .values()
+            .map(status_change_count)
+            .sum()
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -168,7 +183,11 @@ impl ScmModel {
         let job = runtime::spawn(cx, async move {
             let mut results = Vec::with_capacity(repositories.len());
             for repository in repositories {
-                let result = host.git_status(RootRequest { root: repository.root.clone() }).await;
+                let result = host
+                    .git_status(RootRequest {
+                        root: repository.root.clone(),
+                    })
+                    .await;
                 results.push((repository.root, result));
             }
             Ok(results)
@@ -200,8 +219,11 @@ impl ScmModel {
                                 }
                             }
                         }
-                        this.status = this.active_root.as_ref()
-                            .and_then(|root| this.repository_statuses.get(root)).cloned();
+                        this.status = this
+                            .active_root
+                            .as_ref()
+                            .and_then(|root| this.repository_statuses.get(root))
+                            .cloned();
                     }
                     Err(error) => {
                         this.status = None;
@@ -249,7 +271,10 @@ impl ScmModel {
 
     /// Stages rows in their own repository without changing the commit/push selection.
     pub fn stage_in(&mut self, root: &str, paths: Vec<String>, cx: &mut Context<Self>) {
-        if !self.repositories.iter().any(|repository| repository.root == root)
+        if !self
+            .repositories
+            .iter()
+            .any(|repository| repository.root == root)
             || !self.repository_statuses.contains_key(root)
         {
             return;
@@ -273,7 +298,10 @@ impl ScmModel {
 
     /// Unstages only the named repository's rows.
     pub fn unstage_in(&mut self, root: &str, paths: Vec<String>, cx: &mut Context<Self>) {
-        if !self.repositories.iter().any(|repository| repository.root == root)
+        if !self
+            .repositories
+            .iter()
+            .any(|repository| repository.root == root)
             || !self.repository_statuses.contains_key(root)
         {
             return;
@@ -463,7 +491,9 @@ impl ScmModel {
 }
 
 pub fn status_change_count(status: &GitStatus) -> usize {
-    status.staged.iter()
+    status
+        .staged
+        .iter()
         .chain(&status.changes)
         .chain(&status.conflicts)
         .map(|entry| entry.path.as_str())
@@ -493,6 +523,12 @@ mod tests {
             ..GitStatus::default()
         };
         assert_eq!(status_change_count(&frontend), 1);
-        assert_eq!([frontend, backend].iter().map(status_change_count).sum::<usize>(), 2);
+        assert_eq!(
+            [frontend, backend]
+                .iter()
+                .map(status_change_count)
+                .sum::<usize>(),
+            2
+        );
     }
 }

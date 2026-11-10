@@ -20,6 +20,29 @@ user didn't open (`allow_root`).
 | `undo` | `POST /api/project/undo` | Restore a snapshot; refused if a saved file was edited since. |
 | `git(GitCall::…)` | `/api/git/*`, `/api/pr/*` | Status (VS Code letters), stage/unstage, file diff, commit (smart commit), push/publish, branches, switch, create (parent recorded), PR compare, diff for drafts, create via `gh`. |
 
+## Assistant-proposed commands (in development)
+
+`commands` contains transport-independent request validation and an in-memory approval gate.
+`WorkspaceHost::prepare_command` performs non-executing preparation on the local or remote
+project host: native directory validation, executable/interpreter resolution, restricted
+environment construction and host-instance identification. Remote preparation requires the
+protocol-v3 `commandPrepare` capability and is not automatically retried.
+
+`commands::execution` adds an execution supervisor with write-ahead journal requirements,
+fresh preparation checks, bounded output/progress, cancellation and timeout handling.
+It requires an explicit managed process-tree backend; the existing Git runner is not one.
+Only fake backends are currently supplied for tests.
+
+There is still no native approved-command runner or executable chat action.
+See the [staged implementation plan](../../docs/plans/approved-command-execution.md).
+
+Approval applies to one exact prepared invocation, including its project/host instance,
+working directory, resolved executable, arguments and complete environment. It cannot be
+serialized or reused after reopening. The existing Git runner is unchanged.
+
+A working-directory containment check is not a subprocess sandbox. Approved commands may
+access other files and the network; their side effects will not be covered by Save/Undo.
+
 ## App-side modules
 
 - `llm` — Foundry client: Responses API (`store: true`, `previous_response_id`, chain-reset

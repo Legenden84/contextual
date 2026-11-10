@@ -12,8 +12,8 @@ use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ListAlignment,
-    ListOffset, ListState, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, canvas, div, list,
+    ListOffset, ListState, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, canvas, div, list,
 };
 
 use crate::state::chat::{CenterView, ChatModel};
@@ -51,16 +51,10 @@ fn chunk_end(text: &str, start: usize, lines: usize, bytes: usize) -> usize {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    if let Some((offset, _)) = text[start..end]
-        .match_indices('\n')
-        .nth(lines.max(1) - 1)
-    {
+    if let Some((offset, _)) = text[start..end].match_indices('\n').nth(lines.max(1) - 1) {
         end = start + offset + 1;
     }
-    if end < text.len()
-        && text.as_bytes()[end - 1] == b'\r'
-        && text.as_bytes()[end] == b'\n'
-    {
+    if end < text.len() && text.as_bytes()[end - 1] == b'\r' && text.as_bytes()[end] == b'\n' {
         end -= 1;
     }
     end
@@ -403,9 +397,8 @@ impl InspectScreen {
     fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(i) = self.current() else {
             self.load_queue.cancel();
-            let changed = self.shown.take().is_some()
-                || self.input_loaded > 0
-                || self.output_loaded > 0;
+            let changed =
+                self.shown.take().is_some() || self.input_loaded > 0 || self.output_loaded > 0;
             if changed {
                 self.input.update(cx, |e, cx| e.set_value("", window, cx));
                 self.output.update(cx, |e, cx| e.set_value("", window, cx));

@@ -98,11 +98,17 @@ impl SourceControl {
             return;
         }
         if let Some(previous) = self.message_root.take() {
-            self.messages.insert(previous, self.message.read(cx).value().to_string());
+            self.messages
+                .insert(previous, self.message.read(cx).value().to_string());
         }
-        let text = root.as_ref().and_then(|root| self.messages.get(root)).cloned().unwrap_or_default();
+        let text = root
+            .as_ref()
+            .and_then(|root| self.messages.get(root))
+            .cloned()
+            .unwrap_or_default();
         self.message_root = root;
-        self.message.update(cx, |message, cx| message.set_value(text, window, cx));
+        self.message
+            .update(cx, |message, cx| message.set_value(text, window, cx));
     }
 
     fn repositories(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -111,34 +117,42 @@ impl SourceControl {
         let visible = scm.repositories.len() > 1
             || scm.repositories.first().is_some_and(|r| !r.path.is_empty());
         let disabled = scm.busy.is_some() || scm.branch_picker_open;
-        let rows: Vec<_> = scm.repositories.iter().enumerate().map(|(index, repository)| {
-            let name = if repository.path.is_empty() {
-                self.project.read(cx).name.clone()
-            } else {
-                repository.path.clone()
-            };
-            let status = scm.repository_statuses.get(&repository.root);
-            let label = match status {
-                Some(status) => format!(
-                    "{} · {} · {}",
-                    name,
-                    status.branch.as_deref().unwrap_or("detached"),
-                    status_change_count(status),
-                ),
-                None if scm.repository_errors.contains_key(&repository.root) => format!("{name} · unavailable"),
-                None => format!("{name} · loading"),
-            };
-            let root = repository.root.clone();
-            Button::new(("scm-repository", index), label)
-                .variant(ButtonVariant::Ghost)
-                .selected(scm.repository_root() == Some(repository.root.as_str()))
-                .disabled(disabled)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.scm.update(cx, |scm, cx| scm.select_repository(&root, cx));
-                    this.sync_message_scope(window, cx);
-                }))
-                .into_any_element()
-        }).collect();
+        let rows: Vec<_> = scm
+            .repositories
+            .iter()
+            .enumerate()
+            .map(|(index, repository)| {
+                let name = if repository.path.is_empty() {
+                    self.project.read(cx).name.clone()
+                } else {
+                    repository.path.clone()
+                };
+                let status = scm.repository_statuses.get(&repository.root);
+                let label = match status {
+                    Some(status) => format!(
+                        "{} · {} · {}",
+                        name,
+                        status.branch.as_deref().unwrap_or("detached"),
+                        status_change_count(status),
+                    ),
+                    None if scm.repository_errors.contains_key(&repository.root) => {
+                        format!("{name} · unavailable")
+                    }
+                    None => format!("{name} · loading"),
+                };
+                let root = repository.root.clone();
+                Button::new(("scm-repository", index), label)
+                    .variant(ButtonVariant::Ghost)
+                    .selected(scm.repository_root() == Some(repository.root.as_str()))
+                    .disabled(disabled)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.scm
+                            .update(cx, |scm, cx| scm.select_repository(&root, cx));
+                        this.sync_message_scope(window, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
         div().when(visible, |d| {
             d.flex()
                 .flex_col()
@@ -299,76 +313,77 @@ impl SourceControl {
             entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| {
-                    self.row(i, e, staged, repository, cx)
-                        .into_any_element()
-                })
+                .map(|(i, e)| self.row(i, e, staged, repository, cx).into_any_element())
                 .collect()
         } else {
             Vec::new()
         };
-        div().id(SharedString::from(section_id.clone())).when(!entries.is_empty(), |d| {
-            d.child(
-                div()
-                    .id(title)
-                    .flex()
-                    .items_center()
-                    .gap(sp(1))
-                    .h(row_height())
-                    .pl(sp(1))
-                    .pr(sp(2))
-                    .cursor_pointer()
-                    .bg(hsla(c.surface_100))
-                    .hover(|s| s.bg(hsla(c.surface_hover)))
-                    .type_style(contextual_theme::type_style::UI_SMALL)
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .text_color(hsla(c.ink))
-                    .on_click(cx.listener(move |t, _, _, cx| {
-                        if !t.closed_sections.remove(&section_id) {
-                            t.closed_sections.insert(section_id.clone());
-                        }
-                        cx.notify();
-                    }))
-                    .child(
-                        Icon::new(if open {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(sp(4)),
-                    )
-                    .child(div().flex_1().child(title))
-                    .child(
-                        IconButton::new(
-                            if staged { "unstage-all" } else { "stage-all" },
-                            if staged {
-                                IconName::Minus
-                            } else {
-                                IconName::Plus
-                            },
-                            if staged {
-                                "Unstage all changes"
-                            } else {
-                                "Stage all changes"
-                            },
-                        )
-                        .disabled(busy)
+        div()
+            .id(SharedString::from(section_id.clone()))
+            .when(!entries.is_empty(), |d| {
+                d.child(
+                    div()
+                        .id(title)
+                        .flex()
+                        .items_center()
+                        .gap(sp(1))
+                        .h(row_height())
+                        .pl(sp(1))
+                        .pr(sp(2))
+                        .cursor_pointer()
+                        .bg(hsla(c.surface_100))
+                        .hover(|s| s.bg(hsla(c.surface_hover)))
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(hsla(c.ink))
                         .on_click(cx.listener(move |t, _, _, cx| {
-                            cx.stop_propagation();
-                            let p = paths.clone();
-                            t.scm.update(cx, |s, cx| {
-                                if staged {
-                                    s.unstage_in(&repository_root, p, cx)
-                                } else {
-                                    s.stage_in(&repository_root, p, cx)
-                                }
+                            if !t.closed_sections.remove(&section_id) {
+                                t.closed_sections.insert(section_id.clone());
+                            }
+                            cx.notify();
+                        }))
+                        .child(
+                            Icon::new(if open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
                             })
-                        })),
-                    )
-                    .child(count(entries.len(), cx)),
-            )
-            .children(rows)
-        })
+                            .size(sp(4)),
+                        )
+                        .child(div().flex_1().child(title))
+                        .child(
+                            IconButton::new(
+                                if staged { "unstage-all" } else { "stage-all" },
+                                if staged {
+                                    IconName::Minus
+                                } else {
+                                    IconName::Plus
+                                },
+                                if staged {
+                                    "Unstage all changes"
+                                } else {
+                                    "Stage all changes"
+                                },
+                            )
+                            .disabled(busy)
+                            .on_click(cx.listener(
+                                move |t, _, _, cx| {
+                                    cx.stop_propagation();
+                                    let p = paths.clone();
+                                    t.scm.update(cx, |s, cx| {
+                                        if staged {
+                                            s.unstage_in(&repository_root, p, cx)
+                                        } else {
+                                            s.stage_in(&repository_root, p, cx)
+                                        }
+                                    })
+                                },
+                            )),
+                        )
+                        .child(count(entries.len(), cx)),
+                )
+                .children(rows)
+            })
     }
 
     fn grouped_changes(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -376,7 +391,9 @@ impl SourceControl {
         let scm = self.scm.read(cx);
         let repositories = scm.repositories.clone();
         let grouped = repositories.len() > 1
-            || repositories.first().is_some_and(|repository| !repository.path.is_empty());
+            || repositories
+                .first()
+                .is_some_and(|repository| !repository.path.is_empty());
         let active_root = scm.repository_root().map(str::to_owned);
         let statuses = scm.repository_statuses.clone();
         let errors = scm.repository_errors.clone();
@@ -407,10 +424,7 @@ impl SourceControl {
                             .border_color(hsla(c.border))
                             .bg(hsla(c.surface_100))
                             .when(selected, |d| d.bg(hsla(c.surface_selected)))
-                            .child(
-                                Icon::new(gpui_kit::assets::IconName::GitBranch)
-                                    .size(sp(4)),
-                            )
+                            .child(Icon::new(gpui_kit::assets::IconName::GitBranch).size(sp(4)))
                             .child(
                                 div()
                                     .flex_1()
@@ -438,7 +452,9 @@ impl SourceControl {
                                     c.ink_muted
                                 }))
                                 .child(SharedString::from(
-                                    errors.get(&repository.root).cloned()
+                                    errors
+                                        .get(&repository.root)
+                                        .cloned()
                                         .unwrap_or_else(|| "Loading changes…".into()),
                                 )),
                         );

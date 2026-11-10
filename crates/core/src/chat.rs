@@ -595,15 +595,7 @@ pub fn pending_context_tokens(
     if paths.is_empty() {
         return (paths, 0);
     }
-    let prepared = prepare_turn(
-        thread,
-        &[],
-        selected,
-        "",
-        &[],
-        0,
-        TurnOptions::default(),
-    );
+    let prepared = prepare_turn(thread, &[], selected, "", &[], 0, TurnOptions::default());
     (
         paths,
         crate::logic::context::content_tokens(&prepared.input),

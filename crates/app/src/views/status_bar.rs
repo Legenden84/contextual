@@ -60,7 +60,12 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
         let mut label = name
             .or_else(|| repository.and_then(|r| r.branch.clone()))
             .unwrap_or_else(|| {
-                if repository.is_some() { "loading" } else { "no git" }.into()
+                if repository.is_some() {
+                    "loading"
+                } else {
+                    "no git"
+                }
+                .into()
             });
         if let Some(repository) = repository.filter(|r| !r.path.is_empty()) {
             label = format!("{} · {label}", repository.path);

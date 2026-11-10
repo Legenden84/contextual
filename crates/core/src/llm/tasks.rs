@@ -3,9 +3,7 @@
 //! old `foundry.ts`.
 
 use super::client::{FoundryClient, FoundryError};
-use super::types::{
-    ChatMessage, MESSAGE_OVERHEAD_TOKENS, PrDraftInput, RepairInput, RepairResult,
-};
+use super::types::{ChatMessage, MESSAGE_OVERHEAD_TOKENS, PrDraftInput, RepairInput, RepairResult};
 use contextual_protocol::git::PrDraft;
 use regex::Regex;
 use serde_json::{Value, json};

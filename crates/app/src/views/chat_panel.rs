@@ -22,8 +22,8 @@ use gpui_kit::{
     AnyElement, App, AppContext, ClipboardEntry, ClipboardItem, Context, ElementId, Entity,
     EntityInputHandler, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, ListAlignment, ListState, MouseButton, ParentElement, PathPromptOptions, Pixels,
-    Render, SharedString, Size, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, canvas, div, list,
+    Render, SharedString, Size, StatefulInteractiveElement, Styled, Subscription, WeakEntity,
+    Window, canvas, div, list,
 };
 
 use crate::runtime;
@@ -302,12 +302,7 @@ impl ChatPanel {
         }
     }
 
-    fn composer_indent(
-        &mut self,
-        outdent: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn composer_indent(&mut self, outdent: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_prompt_open
             || !self.input.read(cx).focus_handle(cx).is_focused(window)
             || self.composer_is_composing(window, cx)

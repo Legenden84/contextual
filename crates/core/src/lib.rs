@@ -11,6 +11,7 @@
 
 #[cfg(feature = "llm")]
 pub mod chat;
+pub mod commands;
 pub mod error;
 pub mod host;
 #[cfg(feature = "llm")]

@@ -177,11 +177,7 @@ fn keymap(cx: &mut App) {
     // Match the focused Input inside the composer, rather than competing with
     // its bindings at an ancestor node. Register after the toolkit's keymap.
     cx.bind_keys([
-        KeyBinding::new(
-            "tab",
-            ComposerIndent,
-            Some("ContextualComposer > Input"),
-        ),
+        KeyBinding::new("tab", ComposerIndent, Some("ContextualComposer > Input")),
         KeyBinding::new(
             "shift-tab",
             ComposerOutdent,

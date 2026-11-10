@@ -181,11 +181,7 @@ pub fn indent_on_space(
 /// preserving the marker. Numbering and checkbox state are never changed.
 /// Selections, non-list lines and fenced code are left to the native input.
 /// An already unindented item returns `None` on outdent, allowing focus traversal.
-pub fn indent_list(
-    text: &str,
-    selection: Range<usize>,
-    outdent: bool,
-) -> Option<ComposerEdit> {
+pub fn indent_list(text: &str, selection: Range<usize>, outdent: bool) -> Option<ComposerEdit> {
     if !valid_range(text, &selection) || !selection.is_empty() {
         return None;
     }
@@ -298,10 +294,7 @@ mod tests {
         draft = enter(&draft);
         draft.push_str("third");
 
-        assert_eq!(
-            text_for_send(&draft),
-            "  * first\n  * second\n  * third"
-        );
+        assert_eq!(text_for_send(&draft), "  * first\n  * second\n  * third");
     }
 
     #[test]
@@ -451,8 +444,10 @@ mod tests {
     #[test]
     fn tab_leaves_selections_and_invalid_ranges_untouched() {
         let text = "  * café 🦀";
-        for selection in [0..text.len(), 9..9, 0..text.len() + 1] {
-            assert!(indent_list(text, selection, false).is_none());
+        // Byte 8 is inside the two-byte UTF-8 encoding of é.
+        for selection in [0..text.len(), 8..8, 0..text.len() + 1] {
+            let edit = indent_list(text, selection.clone(), false);
+            assert!(edit.is_none(), "selection={selection:?}, edit={edit:?}");
         }
     }
 

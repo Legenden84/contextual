@@ -16,8 +16,8 @@ use gpui_kit::base::text::TextView;
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext, ClipboardItem, ElementId, Entity, FontWeight,
-    IntoElement, ParentElement, Pixels, SharedString, Styled, Window, div,
+    AnyElement, App, AppContext, ClipboardItem, ElementId, Entity, FontWeight, IntoElement,
+    ParentElement, Pixels, SharedString, Styled, Window, div,
 };
 
 use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, sp};
@@ -368,9 +368,8 @@ fn code_block<F: Fn(&mut App) + 'static>(
     let max = preview_line_limit(max, budget);
     let (shown, hidden) = code_excerpt(code, max, expanded);
     let lines = shown.split('\n').count();
-    let height = (px(contextual_theme::type_style::CODE.line_height) * lines as f32
-        + sp(4))
-        .min(budget);
+    let height =
+        (px(contextual_theme::type_style::CODE.line_height) * lines as f32 + sp(4)).min(budget);
     let editor = code_views.editor(id.clone(), shown, lang, window, cx);
     // Copy the source, never the numbered gutter or the truncated preview.
     let copy_text = code.to_string();
@@ -885,7 +884,10 @@ mod tests {
     #[test]
     fn modified_previews_keep_their_shorter_default() {
         let budget = px(contextual_theme::type_style::CODE.line_height) * 40.0 + sp(4);
-        assert_eq!(preview_line_limit(MAX_LINES_MODIFIED, budget), MAX_LINES_MODIFIED);
+        assert_eq!(
+            preview_line_limit(MAX_LINES_MODIFIED, budget),
+            MAX_LINES_MODIFIED
+        );
     }
 
     #[test]

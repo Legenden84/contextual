@@ -30,6 +30,7 @@ pub const CAPABILITIES: &[&str] = &[
     "apply",
     "undo",
     "git",
+    "commandPrepare",
 ];
 
 /// Reads requests from `reader` until EOF or `shutdown`, writing responses to `writer`.
@@ -136,6 +137,7 @@ async fn dispatch(host: &dyn WorkspaceHost, req: Request) -> Response {
         method::APPLY => call(req.params, |p| host.apply(p)).await,
         method::UNDO => call(req.params, |p| host.undo(p)).await,
         method::GIT => call(req.params, |p| host.git(p)).await,
+        method::COMMAND_PREPARE => call(req.params, |p| host.prepare_command(p)).await,
         other => Err(RpcError::new(
             RpcError::METHOD_NOT_FOUND,
             format!("Unknown method: {other}"),

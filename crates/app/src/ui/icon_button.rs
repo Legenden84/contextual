@@ -80,7 +80,9 @@ impl RenderOnce for IconButton {
             .child(self.icon)
             .on_click(move |e, w, cx| {
                 cx.stop_propagation();
-                if !self.disabled && let Some(f) = &self.on_click {
+                if !self.disabled
+                    && let Some(f) = &self.on_click
+                {
                     f(e, w, cx);
                 }
             })

@@ -297,7 +297,11 @@ impl Git {
         // Git otherwise walks upwards and can commit or switch a repository outside the
         // opened folder. Every caller must name an actual discovered repository root.
         let prefix = self
-            .must(&["rev-parse", "--show-prefix"], &root, "Reading repository root")
+            .must(
+                &["rev-parse", "--show-prefix"],
+                &root,
+                "Reading repository root",
+            )
             .await?;
         if !prefix.is_empty() {
             return Err(Error::conflict(

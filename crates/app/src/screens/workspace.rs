@@ -1198,8 +1198,7 @@ mod tests {
                     "Chat and docks must exactly share the available width: {geometry:?}"
                 );
                 assert!(
-                    (surface / 2.0 - (geometry.left_inset + geometry.width / 2.0)).abs()
-                        < 0.001,
+                    (surface / 2.0 - (geometry.left_inset + geometry.width / 2.0)).abs() < 0.001,
                     "Widening the scroll surface must not move the reading column"
                 );
             }

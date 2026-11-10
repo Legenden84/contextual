@@ -50,9 +50,7 @@ pub fn repository_file<'a>(
     repositories: &'a [Repository],
     path: &'a str,
 ) -> Option<(&'a Repository, &'a str)> {
-    if path.contains('\0')
-        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
-    {
+    if path.contains('\0') || path.split('/').any(|part| matches!(part, "" | "." | "..")) {
         return None;
     }
     repositories
@@ -89,7 +87,10 @@ mod tests {
         let (repository, relative) = repository_file(&repositories, "backend/src/main.py").unwrap();
         assert_eq!(repository.root, "/workspace/backend");
         assert_eq!(relative, "src/main.py");
-        assert_eq!(workspace_git_path(repository, relative), "backend/src/main.py");
+        assert_eq!(
+            workspace_git_path(repository, relative),
+            "backend/src/main.py"
+        );
         assert!(repository_file(&repositories, "backend-other/src/main.py").is_none());
         assert!(repository_file(&repositories, "backend/../frontend/main.py").is_none());
         assert_ne!(
@@ -101,11 +102,22 @@ mod tests {
     #[test]
     fn nested_files_use_the_child_but_gitlinks_use_the_parent() {
         let repositories = vec![
-            Repository { root: "/workspace".into(), path: String::new(), branch: None },
-            Repository { root: "/workspace/backend".into(), path: "backend".into(), branch: None },
+            Repository {
+                root: "/workspace".into(),
+                path: String::new(),
+                branch: None,
+            },
+            Repository {
+                root: "/workspace/backend".into(),
+                path: "backend".into(),
+                branch: None,
+            },
         ];
         assert_eq!(
-            repository_file(&repositories, "backend/main.py").unwrap().0.root,
+            repository_file(&repositories, "backend/main.py")
+                .unwrap()
+                .0
+                .root,
             "/workspace/backend"
         );
         assert_eq!(

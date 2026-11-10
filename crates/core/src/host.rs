@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use contextual_protocol::commands::{PrepareCommand, PreparedCommand};
 use contextual_protocol::fs::{
     Apply, ApplyResult, DirListing, ListDirs, ReadFiles, ReadFilesResult, ReadOptions, Scan,
     ScanResult, Undo, UndoResult,
@@ -31,6 +32,13 @@ pub trait WorkspaceHost: Send + Sync {
     async fn read(&self, req: ReadFiles) -> Result<ReadFilesResult>;
     async fn apply(&self, req: Apply) -> Result<ApplyResult>;
     async fn undo(&self, req: Undo) -> Result<UndoResult>;
+    /// Inspects an invocation on this host without executing it or granting approval.
+    /// Hosts without command preparation fail closed rather than falling back to the app.
+    async fn prepare_command(&self, _req: PrepareCommand) -> Result<PreparedCommand> {
+        Err(Error::tool(
+            "This workspace host does not support command preparation.",
+        ))
+    }
     /// Source Control and pull requests. Use the typed helpers on `dyn WorkspaceHost` (`git_status`, `pr_compare`…).
     async fn git(&self, call: GitCall) -> Result<GitReply>;
 }
@@ -119,6 +127,33 @@ impl RootAllowlist {
             .insert(root);
     }
 
+    /// Command roots use native absolute paths without trimming, expansion or WSL translation.
+    /// Canonical containment also rejects a symlink inside an allowed root that leads outside.
+    pub fn check_command_root(&self, root: &str) -> Result<PathBuf> {
+        let requested = std::path::Path::new(root);
+        if root.contains('\0') || !requested.is_absolute() {
+            return Err(Error::invalid(
+                "Command project root must be a native absolute path.",
+            ));
+        }
+        let real = dunce::canonicalize(requested)?;
+        if !real.is_dir() {
+            return Err(Error::invalid(
+                "Command project root must be an existing directory.",
+            ));
+        }
+        let roots = self.roots.read().unwrap_or_else(|e| e.into_inner());
+        if roots.iter().any(|allowed| {
+            dunce::canonicalize(allowed).is_ok_and(|allowed| real.starts_with(allowed))
+        }) {
+            Ok(real)
+        } else {
+            Err(Error::forbidden(
+                "Command project root is not inside an open project.",
+            ))
+        }
+    }
+
     /// The normalised root if it is, or is inside, an allowed root.
     pub fn check(&self, root: &str) -> Result<PathBuf> {
         let root = paths::normalize_input_path(Some(root));
@@ -140,6 +175,8 @@ impl RootAllowlist {
 pub struct LocalHost {
     allowlist: RootAllowlist,
     git: Arc<Git>,
+    /// Shared across clones; replaced when a new host/agent instance is created.
+    command_preparer: Arc<crate::commands::prepare::CommandPreparer>,
     /// Undo snapshots; `None` means the OS cache dir (`files::default_undo_dir`).
     undo_dir: Option<PathBuf>,
 }
@@ -230,6 +267,16 @@ impl WorkspaceHost for LocalHost {
         self.allowlist.check(&req.root)?;
         let dir = self.undo_dir();
         blocking(move || files::undo_apply_in(&dir, &req.root, &req.backup_id)).await
+    }
+
+    async fn prepare_command(&self, req: PrepareCommand) -> Result<PreparedCommand> {
+        let allowlist = self.allowlist.clone();
+        let preparer = self.command_preparer.clone();
+        blocking(move || {
+            let root = allowlist.check_command_root(&req.root)?;
+            preparer.prepare(&root, req)
+        })
+        .await
     }
 
     async fn git(&self, call: GitCall) -> Result<GitReply> {
