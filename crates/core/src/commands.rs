@@ -499,6 +499,11 @@ impl ApprovalGate {
                 "Command belongs to a different project or host instance.",
             ));
         }
+        if self.entries.iter().any(|(id, entry)| {
+            id != call && id.turn == call.turn && entry.plan.same_invocation(&plan)
+        }) {
+            return Err(Error::conflict("Duplicate invocation in this model turn."));
+        }
         self.editable(call)?.plan = plan;
         Ok(())
     }
@@ -578,11 +583,20 @@ impl ApprovalGate {
             ));
         }
         entry.state = CommandState::Running;
-        Ok(LaunchPermit {
+        let permit = LaunchPermit {
             invocation: InvocationId::new(),
             call: approval.call,
             plan: entry.plan.clone(),
-        })
+        };
+        // Unused sibling approvals must not become a queue behind this invocation.
+        // Its side effects require a new explicit review, even if preparation is unchanged.
+        for entry in self.entries.values_mut() {
+            if entry.state == CommandState::Approved {
+                entry.revision = Uuid::new_v4();
+                entry.state = CommandState::NeedsReview;
+            }
+        }
+        Ok(permit)
     }
 
     /// Records an observation; completion never starts a pending command.
@@ -787,6 +801,56 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_edit_invalidates_approval_and_keeps_the_original_plan() {
+        let (mut gate, first, plan) = proposed();
+        let second = call("turn-1", "call-2");
+        let mut distinct = plan.clone();
+        distinct.request.timeout_seconds += 1;
+        gate.propose(second.clone(), distinct.clone()).unwrap();
+        let approval = gate.approve(&second, &distinct).unwrap();
+
+        let mut duplicate = plan;
+        duplicate.request.purpose = "A different explanation of the same invocation.".into();
+        assert!(gate.edit(&second, duplicate).is_err());
+        assert_eq!(gate.state(&second), Some(CommandState::NeedsReview));
+        assert!(gate.begin(approval, &distinct).is_err());
+
+        // The failed edit did not replace the plan or disturb the sibling.
+        let approval = gate.approve(&second, &distinct).unwrap();
+        let permit = gate.begin(approval, &distinct).unwrap();
+        assert!(permit.plan() == &distinct);
+        assert_eq!(gate.state(&first), Some(CommandState::NeedsReview));
+    }
+
+    #[test]
+    fn unchanged_edit_does_not_count_itself_as_a_duplicate() {
+        let (mut gate, id, plan) = proposed();
+        let approval = gate.approve(&id, &plan).unwrap();
+
+        gate.edit(&id, plan.clone()).unwrap();
+
+        assert!(gate.begin(approval, &plan).is_err());
+        let approval = gate.approve(&id, &plan).unwrap();
+        assert!(gate.begin(approval, &plan).is_ok());
+    }
+
+    #[test]
+    fn editing_to_an_invocation_from_another_turn_still_requires_fresh_approval() {
+        let (mut gate, _first, plan) = proposed();
+        let second = call("turn-2", "call-2");
+        let mut distinct = plan.clone();
+        distinct.request.timeout_seconds += 1;
+        gate.propose(second.clone(), distinct.clone()).unwrap();
+        let approval = gate.approve(&second, &distinct).unwrap();
+
+        gate.edit(&second, plan.clone()).unwrap();
+
+        assert!(gate.begin(approval, &plan).is_err());
+        let approval = gate.approve(&second, &plan).unwrap();
+        assert!(gate.begin(approval, &plan).is_ok());
+    }
+
+    #[test]
     fn duplicate_clicks_cannot_produce_two_launch_permits() {
         let (mut gate, id, plan) = proposed();
         let earlier = gate.approve(&id, &plan).unwrap();
@@ -826,6 +890,28 @@ mod tests {
         assert!(gate.approve(&second, &plan).is_err());
         gate.finish(&id, Outcome::TimedOut).unwrap();
         assert_eq!(gate.state(&second), Some(CommandState::NeedsReview));
+    }
+
+    #[test]
+    fn starting_a_command_invalidates_unused_sibling_approval() {
+        let (mut gate, first, plan) = proposed();
+        let second = call("turn-2", "call-2");
+        gate.propose(second.clone(), plan.clone()).unwrap();
+        let first_approval = gate.approve(&first, &plan).unwrap();
+        let sibling_approval = gate.approve(&second, &plan).unwrap();
+
+        let _first_permit = gate.begin(first_approval, &plan).unwrap();
+        assert_eq!(gate.state(&second), Some(CommandState::NeedsReview));
+        assert!(gate.approve(&second, &plan).is_err());
+
+        gate.finish(&first, Outcome::Success).unwrap();
+        assert!(gate.begin(sibling_approval, &plan).is_err());
+        assert_eq!(gate.state(&second), Some(CommandState::NeedsReview));
+
+        // Completion does not resurrect approval, even when the exact plan is unchanged.
+        let fresh_approval = gate.approve(&second, &plan).unwrap();
+        let permit = gate.begin(fresh_approval, &plan).unwrap();
+        assert_eq!(permit.call(), &second);
     }
 
     #[test]

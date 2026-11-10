@@ -673,6 +673,18 @@ enum End {
     TimedOut,
 }
 
+/// Own each join separately: timing out a join of both streams loses which task's result
+/// was already consumed. Awaiting that completed JoinHandle again would panic.
+async fn finish_drain(mut task: JoinHandle<()>) {
+    if tokio::time::timeout(DRAIN_TIMEOUT, &mut task)
+        .await
+        .is_err()
+    {
+        task.abort();
+        let _ = task.await;
+    }
+}
+
 async fn run_child(
     child: ManagedChild,
     timeout: Duration,
@@ -686,8 +698,8 @@ async fn run_child(
     } = child;
     let out: SharedCapture = Arc::default();
     let err: SharedCapture = Arc::default();
-    let mut out_task = tokio::spawn(drain(stdout, out.clone()));
-    let mut err_task = tokio::spawn(drain(stderr, err.clone()));
+    let out_task = tokio::spawn(drain(stdout, out.clone()));
+    let err_task = tokio::spawn(drain(stderr, err.clone()));
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
     let mut interval = tokio::time::interval(PROGRESS_INTERVAL);
@@ -723,17 +735,9 @@ async fn run_child(
     };
     drop(tree);
 
-    // Never let a descendant holding a pipe open keep execution supervision alive forever.
-    if tokio::time::timeout(DRAIN_TIMEOUT, async {
-        let _ = tokio::join!(&mut out_task, &mut err_task);
-    })
-    .await
-    .is_err()
-    {
-        out_task.abort();
-        err_task.abort();
-        let _ = tokio::join!(out_task, err_task);
-    }
+    // Drain concurrently within the same bounded interval. Each helper consumes its task
+    // result once and aborts/awaits only its own timed-out task.
+    tokio::join!(finish_drain(out_task), finish_drain(err_task));
 
     let output = snapshot(&out, &err);
     progress.send_replace(output.clone());
@@ -761,6 +765,415 @@ async fn run_child(
                 .into()
         }),
         history_error: None,
+    }
+}
+
+/// Linux process-group ownership for the native execution adapter.
+///
+/// This component does not authorize or launch commands. The production launch adapter is
+/// still required; ordinary app and agent startup do not construct this type.
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+pub mod linux {
+    use std::process::Child;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use nix::errno::Errno;
+    use nix::sys::signal::{Signal, killpg};
+    use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+    use nix::unistd::Pid;
+
+    use super::{ManagedProcessTree, ProcessExit};
+    use crate::{Error, Result};
+
+    const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+    /// Exclusively owned, unreaped process-group leader.
+    ///
+    /// The trusted launch adapter must establish `process_group(0)` before target code runs,
+    /// take the output handles, and transfer the Child here without ever waiting on it.
+    /// The host must not use automatic child reaping or competing process-wide waiters.
+    /// These are integration preconditions, not properties granted by model arguments.
+    ///
+    /// Root exit is observed with WNOWAIT. SIGKILL is sent while the unreaped root reserves
+    /// the group's identity. After reaping, only signal-zero existence checks are allowed.
+    /// An absent group confirms cleanup; permissions errors or a group that persists leave
+    /// cleanup unconfirmed. A recycled group can delay confirmation but is never killed.
+    ///
+    /// This is process-group containment, not a sandbox. Descendants that deliberately
+    /// leave the group are outside its guarantee. Unreaped orphan zombies may conservatively
+    /// prevent confirmation even though they can no longer execute.
+    pub struct LinuxProcessTree {
+        child: Option<Child>,
+        group: Pid,
+        exit: Option<ProcessExit>,
+        kill_requested: bool,
+        ownership_lost: bool,
+        cleanup_confirmed: bool,
+    }
+
+    impl LinuxProcessTree {
+        /// Takes exclusive ownership immediately, including cleanup responsibility on Drop.
+        ///
+        /// `child` must be a never-reaped group leader created with `process_group(0)`.
+        /// This adoption API is for trusted native launch code, not an executable host endpoint.
+        pub fn from_unreaped_group(child: Child) -> Self {
+            // Linux Child IDs originate as positive pid_t values, which fit in i32.
+            let group = Pid::from_raw(child.id() as i32);
+            Self {
+                child: Some(child),
+                group,
+                exit: None,
+                kill_requested: false,
+                ownership_lost: false,
+                cleanup_confirmed: false,
+            }
+        }
+
+        fn ownership_error() -> Error {
+            Error::tool("Native command process ownership could not be verified.")
+        }
+
+        /// Always queries the kernel while the Child is retained, even if exit was observed
+        /// earlier. In particular, ECHILD must invalidate further destructive signalling.
+        fn poll_root(&mut self) -> Result<Option<ProcessExit>> {
+            if self.ownership_lost || self.group.as_raw() <= 1 {
+                return Err(Self::ownership_error());
+            }
+            if self.child.is_none() {
+                return self.exit.map(Some).ok_or_else(Self::ownership_error);
+            }
+
+            let status = waitid(
+                Id::Pid(self.group),
+                WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT | WaitPidFlag::WNOHANG,
+            );
+            let exit = match status {
+                Ok(WaitStatus::StillAlive) | Err(Errno::EINTR) => return Ok(None),
+                Ok(WaitStatus::Exited(pid, code)) if pid == self.group => ProcessExit {
+                    success: code == 0,
+                    code: Some(code),
+                },
+                Ok(WaitStatus::Signaled(pid, _, _)) if pid == self.group => ProcessExit {
+                    success: false,
+                    code: None,
+                },
+                _ => {
+                    self.ownership_lost = true;
+                    return Err(Self::ownership_error());
+                }
+            };
+            self.exit = Some(exit);
+            Ok(Some(exit))
+        }
+
+        fn signal_owned_group(&mut self) -> Result<()> {
+            if self.child.is_none() {
+                return Err(Self::ownership_error());
+            }
+            self.poll_root()?;
+            match killpg(self.group, Signal::SIGKILL) {
+                Ok(()) | Err(Errno::ESRCH) => {
+                    self.kill_requested = true;
+                    Ok(())
+                }
+                Err(_) => Err(Error::tool(
+                    "Native command process-group termination could not be requested.",
+                )),
+            }
+        }
+
+        fn reap_observed_root(&mut self) -> Result<ProcessExit> {
+            // Remove signalling authority BEFORE calling wait. Even an error must not leave
+            // a Drop path that could signal a numeric group whose root may have been reaped.
+            let mut child = self.child.take().ok_or_else(Self::ownership_error)?;
+            match child.wait() {
+                Ok(status) => {
+                    let exit = ProcessExit {
+                        success: status.success(),
+                        code: status.code(),
+                    };
+                    self.exit = Some(exit);
+                    Ok(exit)
+                }
+                Err(_) => {
+                    self.ownership_lost = true;
+                    Err(Self::ownership_error())
+                }
+            }
+        }
+    }
+
+    /// Signal zero checks existence/permissions without delivering a signal.
+    ///
+    /// This remains safe after root reaping: a reused numeric group cannot receive SIGKILL
+    /// from this path. ESRCH establishes that the original group no longer exists; any other
+    /// error refuses confirmation.
+    fn group_is_absent(group: Pid) -> Result<bool> {
+        if group.as_raw() <= 1 {
+            return Err(LinuxProcessTree::ownership_error());
+        }
+        match killpg(group, None::<Signal>) {
+            Err(Errno::ESRCH) => Ok(true),
+            Ok(()) | Err(Errno::EINTR) => Ok(false),
+            Err(_) => Err(Error::tool(
+                "Native command process-group disappearance could not be verified.",
+            )),
+        }
+    }
+
+    #[async_trait]
+    impl ManagedProcessTree for LinuxProcessTree {
+        async fn wait_root(&mut self) -> Result<ProcessExit> {
+            loop {
+                if let Some(exit) = self.poll_root()? {
+                    return Ok(exit);
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+
+        async fn terminate_and_wait(&mut self) -> Result<ProcessExit> {
+            if self.ownership_lost {
+                return Err(Self::ownership_error());
+            }
+            if self.cleanup_confirmed {
+                return self.exit.ok_or_else(Self::ownership_error);
+            }
+            if !self.kill_requested {
+                self.signal_owned_group()?;
+            }
+
+            while self.child.is_some() {
+                if self.poll_root()?.is_some() {
+                    self.reap_observed_root()?;
+                    break;
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+
+            // No destructive signal is permitted below this point, including on Drop.
+            // A supervisor deadline can interrupt this loop without releasing an unresolved
+            // project slot or authorizing another invocation.
+            loop {
+                if group_is_absent(self.group)? {
+                    self.cleanup_confirmed = true;
+                    return self.exit.ok_or_else(Self::ownership_error);
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+    }
+
+    impl Drop for LinuxProcessTree {
+        fn drop(&mut self) {
+            if self.child.is_none() {
+                return;
+            }
+
+            // The root is still retained, so another cleanup request is safe under exclusive
+            // reaping ownership. If that ownership was lost, never signal or wait by stale PID.
+            let _ = self.signal_owned_group();
+            let Some(mut child) = self.child.take() else {
+                return;
+            };
+            if self.ownership_lost {
+                return;
+            }
+
+            // An OS thread, rather than a Tokio task, lets reaping continue after runtime
+            // shutdown. It never sends another signal. Drop initiates cleanup; it does not
+            // establish a terminal observation or release execution admission.
+            //
+            // If thread creation fails, dropping std::process::Child does not reap it.
+            // No subsequent path uses its numeric identity to send a destructive signal.
+            let _ = std::thread::Builder::new()
+                .name("contextual-command-reaper".into())
+                .spawn(move || {
+                    let _ = child.wait();
+                });
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::unix::process::CommandExt as _;
+        use std::process::{Command, Stdio};
+
+        use tokio::sync::watch;
+        use tokio_util::sync::CancellationToken;
+
+        use super::*;
+        use crate::commands::execution::{
+            ExecutionProgress, ExecutionStatus, ManagedChild, OUTPUT_LIMIT, run_child,
+        };
+
+        /// Fixed test scripts only. This is not the production ManagedCommandRunner:
+        /// executable resolution and exact approved launch remain separate implementation work.
+        fn fixture(script: &str) -> (ManagedChild, Pid) {
+            let mut child = Command::new("/bin/sh")
+                .args(["-c", script])
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let stdout = child.stdout.take().unwrap();
+            let stderr = child.stderr.take().unwrap();
+            let tree = LinuxProcessTree::from_unreaped_group(child);
+            let group = tree.group;
+            // The tree owns cleanup before either fallible I/O conversion.
+            let stdout = tokio::process::ChildStdout::from_std(stdout).unwrap();
+            let stderr = tokio::process::ChildStderr::from_std(stderr).unwrap();
+            (
+                ManagedChild {
+                    tree: Box::new(tree),
+                    stdout: Box::new(stdout),
+                    stderr: Box::new(stderr),
+                },
+                group,
+            )
+        }
+
+        #[tokio::test]
+        async fn repeated_root_observation_does_not_reap_before_cleanup() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let (mut child, group) = fixture("exit 23");
+                let expected = ProcessExit {
+                    success: false,
+                    code: Some(23),
+                };
+
+                assert_eq!(child.tree.wait_root().await.unwrap(), expected);
+                assert_eq!(child.tree.wait_root().await.unwrap(), expected);
+                assert!(matches!(
+                    waitid(
+                        Id::Pid(group),
+                        WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT | WaitPidFlag::WNOHANG,
+                    ),
+                    Ok(WaitStatus::Exited(pid, 23)) if pid == group
+                ));
+
+                assert_eq!(child.tree.terminate_and_wait().await.unwrap(), expected);
+                assert_eq!(child.tree.terminate_and_wait().await.unwrap(), expected);
+                assert!(group_is_absent(group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn native_tree_runs_through_bounded_supervisor_capture() {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                let (child, group) = fixture(
+                    "i=0; while [ \"$i\" -lt 8192 ]; do \
+                     printf '0123456789abcdef'; \
+                     printf 'fedcba9876543210' >&2; \
+                     i=$((i + 1)); done",
+                );
+                let (progress, _) = watch::channel(ExecutionProgress::default());
+                let result = run_child(
+                    child,
+                    Duration::from_secs(10),
+                    &CancellationToken::new(),
+                    &progress,
+                )
+                .await;
+
+                assert_eq!(result.status, ExecutionStatus::Success);
+                for output in [&result.output.stdout, &result.output.stderr] {
+                    assert_eq!(output.bytes_seen, 8192 * 16);
+                    assert_eq!(output.bytes_retained, OUTPUT_LIMIT);
+                    assert!(output.truncated && output.complete);
+                    assert!(!output.read_failed);
+                }
+                assert!(group_is_absent(group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn native_timeout_terminates_the_root() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let (child, group) = fixture("exec sleep 30");
+                let (progress, _) = watch::channel(ExecutionProgress::default());
+                let result = run_child(
+                    child,
+                    Duration::from_millis(50),
+                    &CancellationToken::new(),
+                    &progress,
+                )
+                .await;
+
+                assert_eq!(result.status, ExecutionStatus::TimedOut);
+                assert!(result.spawned && result.timed_out);
+                assert!(group_is_absent(group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn native_cancellation_terminates_an_already_spawned_root() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let (child, group) = fixture("exec sleep 30");
+                let cancel = CancellationToken::new();
+                cancel.cancel();
+                let (progress, _) = watch::channel(ExecutionProgress::default());
+                let result =
+                    run_child(child, Duration::from_secs(30), &cancel, &progress).await;
+
+                assert_eq!(result.status, ExecutionStatus::Cancelled);
+                assert!(result.spawned && result.cancelled);
+                assert!(group_is_absent(group).unwrap());
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn early_root_exit_never_reports_completion_while_group_remains() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let (child, group) = fixture("sleep 30 & exit 23");
+                let (progress, _) = watch::channel(ExecutionProgress::default());
+                let result = run_child(
+                    child,
+                    Duration::from_secs(30),
+                    &CancellationToken::new(),
+                    &progress,
+                )
+                .await;
+
+                assert_eq!(result.exit_code, Some(23));
+                match result.status {
+                    ExecutionStatus::Failure => assert!(group_is_absent(group).unwrap()),
+                    // Some test hosts do not promptly reap orphan zombies. Their continued
+                    // group existence must remain Unknown, not a fabricated cleanup success.
+                    ExecutionStatus::Unknown => assert!(result.detail.is_some()),
+                    other => panic!("unexpected native cleanup result: {other:?}"),
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        #[tokio::test]
+        async fn dropping_owned_tree_initiates_cleanup() {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let (child, group) = fixture("exec sleep 30");
+                drop(child);
+
+                while !group_is_absent(group).unwrap() {
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
     }
 }
 
@@ -1549,6 +1962,51 @@ mod tests {
         assert!(gate.busy());
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn drain_timeout_does_not_repoll_the_other_completed_stream() {
+        // Exercise both orderings: stdout reaches EOF first, then stderr reaches EOF first.
+        for stdout_finishes in [true, false] {
+            let (held_reader, mut held_writer) = tokio::io::duplex(64);
+            let eof: OutputPipe = Box::new(std::io::Cursor::new(b"complete".to_vec()));
+            let held: OutputPipe = Box::new(held_reader);
+            let (stdout, stderr) = if stdout_finishes {
+                (eof, held)
+            } else {
+                (held, eof)
+            };
+            let child = ManagedChild {
+                tree: Box::new(Tree {
+                    writer: None,
+                    delay: Duration::ZERO,
+                    fail_cleanup: false,
+                }),
+                stdout,
+                stderr,
+            };
+            let cancel = CancellationToken::new();
+            let (progress, observed) = watch::channel(ExecutionProgress::default());
+            let started = tokio::time::Instant::now();
+
+            let result = run_child(child, Duration::from_secs(60), &cancel, &progress).await;
+
+            assert_eq!(result.status, ExecutionStatus::Success);
+            let (finished, incomplete) = if stdout_finishes {
+                (&result.output.stdout, &result.output.stderr)
+            } else {
+                (&result.output.stderr, &result.output.stdout)
+            };
+            assert_eq!(finished.text, "complete");
+            assert!(finished.complete);
+            assert!(!incomplete.complete);
+            assert!(!incomplete.read_failed);
+            assert_eq!(*observed.borrow(), result.output);
+            assert!(started.elapsed() >= DRAIN_TIMEOUT);
+            assert!(started.elapsed() < DRAIN_TIMEOUT + Duration::from_secs(1));
+            // The timed-out reader was aborted and awaited, not detached.
+            assert!(held_writer.write_all(b"x").await.is_err());
+        }
+    }
+
     #[test]
     fn controls_are_visible_not_interpreted() {
         assert_eq!(
@@ -1564,5 +2022,318 @@ mod tests {
         capture.push(&bytes[..1]);
         capture.push(&bytes[1..]);
         assert_eq!(capture.snapshot().text, "雪");
+    }
+}
+
+/// Actual-process probes for M2.1's ownership strategy, not a production launch adapter.
+/// Fixtures use piped stdin solely to hold the root until observation is installed.
+/// They do not change the managed backend's requirement to launch commands with null stdin.
+#[cfg(all(
+    test,
+    any(
+        all(target_os = "linux", not(target_env = "uclibc")),
+        target_os = "macos"
+    )
+))]
+mod unix_ownership_tests {
+    use std::io::Write as _;
+    use std::os::unix::process::CommandExt as _;
+    use std::process::{Child, Command, ExitStatus, Stdio};
+    use std::time::Duration;
+
+    use nix::sys::signal::{Signal, killpg};
+    use nix::unistd::Pid;
+    use tokio::io::{AsyncBufReadExt as _, BufReader};
+
+    const DEADLINE: Duration = Duration::from_secs(5);
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+    const EXIT_WITH_DESCENDANT: &str = "\
+        IFS= read -r start || exit 90
+        sleep 30 &
+        printf '%s\\n' \"$!\"
+        exit 23
+    ";
+
+    const WAIT_WITH_DESCENDANT: &str = "\
+        IFS= read -r start || exit 90
+        sleep 30 &
+        printf '%s\\n' \"$!\"
+        wait
+    ";
+
+    /// This fixture exclusively owns reaping. No Tokio Child or competing waiter receives
+    /// the root, and group signalling stops permanently before the root is reaped.
+    struct Group {
+        child: Option<Child>,
+        pid: Pid,
+    }
+
+    impl Group {
+        fn spawn(script: &str) -> Self {
+            let child = Command::new("/bin/sh")
+                .args(["-c", script])
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+            assert!(pid.as_raw() > 1);
+            Self {
+                child: Some(child),
+                pid,
+            }
+        }
+
+        async fn release(&mut self) -> Pid {
+            let child = self.child.as_mut().unwrap();
+            let stdout = child.stdout.take().unwrap();
+            let mut output = BufReader::new(tokio::process::ChildStdout::from_std(stdout).unwrap());
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(b"go\n").unwrap();
+            drop(stdin);
+
+            let mut line = String::new();
+            assert!(output.read_line(&mut line).await.unwrap() > 0);
+            let descendant = Pid::from_raw(line.trim().parse().unwrap());
+            assert!(descendant.as_raw() > 1);
+            assert_ne!(descendant, self.pid);
+            descendant
+        }
+
+        fn stop(&self) {
+            assert!(self.child.is_some(), "never signal after reaping");
+            killpg(self.pid, Signal::SIGKILL).unwrap();
+        }
+
+        fn reap(&mut self) -> ExitStatus {
+            // Taking the child disables all subsequent Drop signalling, including if wait
+            // fails. These tests call this only after non-reaping root-exit observation.
+            self.child.take().unwrap().wait().unwrap()
+        }
+    }
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            if let Some(mut child) = self.child.take() {
+                // Test failures/timeouts must also initiate cleanup. Signal while the root
+                // is still owned, then hand off reaping without any further numeric signals.
+                let _ = killpg(self.pid, Signal::SIGKILL);
+                let _ = std::thread::Builder::new()
+                    .name("command-ownership-test-reaper".into())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn root_observation(pid: Pid) -> nix::sys::wait::WaitStatus {
+        use nix::sys::wait::{Id, WaitPidFlag, waitid};
+
+        waitid(
+            Id::Pid(pid),
+            WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT | WaitPidFlag::WNOHANG,
+        )
+        .unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn wait_root_without_reaping(pid: Pid) -> nix::sys::wait::WaitStatus {
+        loop {
+            let status = root_observation(pid);
+            if status != nix::sys::wait::WaitStatus::StillAlive {
+                return status;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn descendant_is_terminal(pid: Pid) -> bool {
+        let stat = match std::fs::read_to_string(format!("/proc/{}/stat", pid.as_raw())) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(error) => panic!("could not observe test descendant: {error}"),
+        };
+        // comm is parenthesized and may itself contain spaces or parentheses.
+        let fields = stat.rsplit_once(')').unwrap().1;
+        matches!(fields.split_whitespace().next(), Some("Z" | "X"))
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn wait_descendant_terminal(pid: Pid) {
+        while !descendant_is_terminal(pid) {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn linux_root_exit_keeps_ownership_until_descendant_cleanup() {
+        use nix::sys::wait::WaitStatus;
+
+        tokio::time::timeout(DEADLINE, async {
+            let mut group = Group::spawn(EXIT_WITH_DESCENDANT);
+            let descendant = group.release().await;
+
+            let expected = WaitStatus::Exited(group.pid, 23);
+            assert_eq!(wait_root_without_reaping(group.pid).await, expected);
+            // A second observation must still find the same unreaped child.
+            assert_eq!(root_observation(group.pid), expected);
+            assert!(!descendant_is_terminal(descendant));
+
+            group.stop();
+            // Successful signal delivery alone is not our termination assertion.
+            wait_descendant_terminal(descendant).await;
+            assert_eq!(root_observation(group.pid), expected);
+            assert_eq!(group.reap().code(), Some(23));
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn linux_cancellation_terminates_running_root_and_known_descendant() {
+        use nix::sys::wait::WaitStatus;
+
+        tokio::time::timeout(DEADLINE, async {
+            let mut group = Group::spawn(WAIT_WITH_DESCENDANT);
+            let descendant = group.release().await;
+            assert_eq!(root_observation(group.pid), WaitStatus::StillAlive);
+
+            group.stop();
+
+            assert!(matches!(
+                wait_root_without_reaping(group.pid).await,
+                WaitStatus::Signaled(pid, Signal::SIGKILL, _) if pid == group.pid
+            ));
+            wait_descendant_terminal(descendant).await;
+            assert!(!group.reap().success());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    struct ExitWatch {
+        queue: nix::sys::event::Kqueue,
+        event: nix::sys::event::KEvent,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl ExitWatch {
+        fn new(pid: Pid, notes: nix::sys::event::FilterFlag) -> Self {
+            use nix::sys::event::{EvFlags, EventFilter, KEvent, Kqueue};
+
+            let queue = Kqueue::new().unwrap();
+            let event = KEvent::new(
+                usize::try_from(pid.as_raw()).unwrap(),
+                EventFilter::EVFILT_PROC,
+                EvFlags::EV_ADD | EvFlags::EV_ONESHOT | EvFlags::EV_RECEIPT,
+                notes,
+                0,
+                0,
+            );
+            let mut receipt = [event];
+            let count = queue
+                .kevent(
+                    &[event],
+                    &mut receipt,
+                    Some(nix::libc::timespec {
+                        tv_sec: 0,
+                        tv_nsec: 0,
+                    }),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+            assert!(receipt[0].flags().contains(EvFlags::EV_ERROR));
+            assert_eq!(receipt[0].data(), 0, "exit-watch registration failed");
+            Self { queue, event }
+        }
+
+        async fn wait(&self) -> isize {
+            use nix::sys::event::{EvFlags, EventFilter, FilterFlag};
+
+            loop {
+                let mut events = [self.event];
+                let count = self
+                    .queue
+                    .kevent(
+                        &[],
+                        &mut events,
+                        Some(nix::libc::timespec {
+                            tv_sec: 0,
+                            tv_nsec: 0,
+                        }),
+                    )
+                    .unwrap();
+                if count != 0 {
+                    let event = events[0];
+                    assert_eq!(event.ident(), self.event.ident());
+                    assert_eq!(event.filter().unwrap(), EventFilter::EVFILT_PROC);
+                    assert!(!event.flags().contains(EvFlags::EV_ERROR));
+                    assert!(event.fflags().contains(FilterFlag::NOTE_EXIT));
+                    return event.data();
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_root_exit_keeps_ownership_until_descendant_cleanup() {
+        use nix::sys::event::FilterFlag;
+
+        tokio::time::timeout(DEADLINE, async {
+            let mut group = Group::spawn(EXIT_WITH_DESCENDANT);
+            // The fixture's stdin handshake prevents root exit before registration.
+            let root = ExitWatch::new(
+                group.pid,
+                FilterFlag::NOTE_EXIT | FilterFlag::NOTE_EXITSTATUS,
+            );
+            let descendant = group.release().await;
+            let descendant_exit = ExitWatch::new(descendant, FilterFlag::NOTE_EXIT);
+
+            assert_eq!(root.wait().await & 0xffff, 23 << 8);
+
+            group.stop();
+            // Observe the known descendant's exit, rather than treating killpg as an ack.
+            descendant_exit.wait().await;
+            // kqueue observation did not reap the root: its original status is available.
+            assert_eq!(group.reap().code(), Some(23));
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_cancellation_terminates_running_root_and_known_descendant() {
+        use std::os::unix::process::ExitStatusExt as _;
+
+        use nix::sys::event::FilterFlag;
+
+        tokio::time::timeout(DEADLINE, async {
+            let mut group = Group::spawn(WAIT_WITH_DESCENDANT);
+            let root = ExitWatch::new(group.pid, FilterFlag::NOTE_EXIT);
+            let descendant = group.release().await;
+            let descendant_exit = ExitWatch::new(descendant, FilterFlag::NOTE_EXIT);
+
+            group.stop();
+
+            root.wait().await;
+            descendant_exit.wait().await;
+            assert_eq!(group.reap().signal(), Some(Signal::SIGKILL as i32));
+        })
+        .await
+        .unwrap();
     }
 }

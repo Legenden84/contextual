@@ -13,7 +13,8 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
-contextual-core = { path = "crates/core" }
+# Consumers opt into app-only features; the standalone agent must not inherit HTTP/TLS.
+contextual-core = { path = "crates/core", default-features = false }
 contextual-protocol = { path = "crates/protocol" }
 contextual-theme = { path = "crates/theme" }
 

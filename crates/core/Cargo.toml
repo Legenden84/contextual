@@ -49,3 +49,11 @@ workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+
+# M2.1 Linux process-tree implementation; normal startup still selects no backend.
+[target.'cfg(all(target_os = "linux", not(target_env = "uclibc")))'.dependencies]
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
+
+# Darwin currently has ownership probes, not a production backend.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal", "event"] }

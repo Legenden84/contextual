@@ -2,33 +2,46 @@
 
 ## Current status and next task
 
-**Next task: M1 — validate and freeze the existing implementation.**
-After M1 passes, start M2.1 — the Unix native process backend. Do not describe the next task
-as "return to Phase 2b" or "continue transport hardening."
+**Current implementation task: M2.1 — the Unix native process backend.**
+The user has explicitly directed implementation to continue here. M1 verification evidence
+is still missing; do not mark it passed or describe the existing interfaces as verified/frozen.
+Do not redirect this task into another policy, supervisor or transport increment.
+
+**Next concrete steps:** integrate the Linux process-tree component with an inspected exact-launch
+adapter, then implement the macOS counterpart. The user reports running the ownership probes;
+do not keep restarting that prerequisite. Record the platform, revision and results when available.
+
+The current increment adds the Linux `ManagedProcessTree` implementation and actual-process
+supervisor tests. It does not yet supply a production `ManagedCommandRunner`. Missing hardware
+or API support is a named blocker, not passing evidence.
 
 Command execution is unavailable in the normal app. Core approval policy, non-executing host
 preparation, backend-independent supervision, Unix journaling, in-process admission and opt-in
 local/remote execution transport have implementations and tests. They are not yet a verified
 native execution feature.
 
-No native process-tree backend is implemented or selected. Windows durable journal publication,
-cross-process ownership/reconciliation, Foundry tools and the command-specific app workflow
-remain unfinished. Ordinary LocalHost and agent startup do not enable execution.
+A Linux process-tree component is now proposed in `commands::execution::linux`. No production
+native launch adapter is implemented or selected. The macOS process-tree implementation,
+Windows durable journal publication, cross-process ownership/reconciliation, Foundry tools and
+the command-specific app workflow remain unfinished. Ordinary LocalHost and agent startup
+do not enable execution.
 
 The latest patches have not been compiled, formatted or tested in the read/edit-block workflow.
 Fake-process tests are not evidence of native Windows, macOS or Windows-to-WSL execution.
 
 ## Authoritative delivery sequence
 
-This checklist is the source of truth for remaining work and completion. Execute M1 through M7
-in order. The numbered stages below retain requirements and implementation history; they are
-not a second scheduling system. Historical "still pending" and "next work" statements describe
-their increment at the time and do not override this checklist.
+This checklist is the source of truth for remaining work and completion. Current authorized
+implementation work is M2.1 while M1's validation remains outstanding. This does not waive M1:
+its checks and defect corrections are required before accepting the native implementation.
+Complete M2's substeps in order, then M3 through M7. The numbered stages below retain
+requirements and implementation history; they are not a second scheduling system. Historical
+"still pending" and "next work" statements do not override this checklist.
 
 | Milestone | Status | Successor |
 | --- | --- | --- |
-| M1 — Validate existing implementation | Next; validation evidence pending | M2.1 |
-| M2 — Native execution backends and Windows journal | Not implemented | M3 |
+| M1 — Validate existing implementation | Blocked: no recorded build/test/cross-target results | Required for M2 acceptance |
+| M2 — Native execution backends and Windows journal | In progress: M2.1 Linux process-tree component and native supervisor tests proposed; production launch and macOS still pending | M3 |
 | M3 — Cross-process ownership and reconciliation | Not implemented | M4 |
 | M4 — Complete host-path verification | Blocked on M2 and M3 | M5; Phase 2 is closed |
 | M5 — Native Foundry proposals | Not implemented; original Stage 3 | M6 |
@@ -49,7 +62,13 @@ Exit evidence: record the revision, commands, targets and results below. Existin
 tests establish the baseline, not native process correctness. Unavailable checks remain blocked.
 
 After passing, freeze these interfaces except for defects tied to a specific requirement or
-failing test. The next task is M2.1.
+failing test. M2.1 implementation is the current user-directed work; missing validation must
+not be interpreted as a reason to expand the existing foundations.
+
+Pending policy corrections from this editing session:
+- Editing a proposal checks same-turn duplicate invocation policy while invalidating old approval.
+- Beginning an invocation invalidates unused sibling approvals so they cannot form a queue.
+- Regression tests are proposed. These changes are in memory and have not been verified here.
 
 ### M2 — Implement native execution and Windows journal durability
 
@@ -67,7 +86,106 @@ Exit evidence: actual-process tests for each backend cover launch, failed start,
 boundaries, environment filtering, bounded output with continued draining, timeout, cancellation
 and descendant cleanup. Windows journal tests cover publication and recovery failures.
 
-Normal app and agent execution remain disabled. Next: M3, not another supervisor increment.
+Normal app and agent execution remain disabled. Next after all of M2 passes: M3, not another
+supervisor increment.
+
+#### M2.1 implementation checklist and handoff
+
+**Status: in progress. Linux process-tree component proposed; production launch adapter and
+macOS counterpart still pending. No normal-startup backend selected.**
+
+The user reports running the ownership probes. The transcript does not supply their platform,
+saved revision, exit status or output, so the ledger records the run as reported rather than
+inventing platform-specific passing evidence. Implementation proceeds; the next task is not
+another ownership-probe increment.
+
+| Deliverable | Implementation state | Verification state |
+| --- | --- | --- |
+| Inspect concrete Unix dependency APIs | Inspected supplied Nix 0.29.0/0.31.3 and shared_child 1.1.2 sources | Static source review only |
+| Linux/WSL non-reaping root observation | Proposed actual-process probes using Nix `waitid` with `WEXITED | WNOWAIT | WNOHANG` | Not run |
+| macOS non-reaping root observation | Proposed actual-process probes using Nix kqueue `EVFILT_PROC` / `NOTE_EXIT`, with `NOTE_EXITSTATUS` for root status | Not run on macOS |
+| Group cleanup after early root exit | Probes retain an unreaped root and separately observe one known descendant's termination | Not a general descendant-discovery or cleanup implementation |
+| Cancellation while root is running | Proposed native probes for root plus one known descendant | Not run |
+| Linux `ManagedProcessTree` | Proposed in `commands::execution::linux::LinuxProcessTree` | New actual-process tests not run here |
+| Production `ManagedCommandRunner` and macOS `ManagedProcessTree` | Not implemented | No native service integration |
+| Exact launch: environment, argv, cwd, null stdin, no implicit shell | Production adapter pending; fixed test fixtures are not that adapter | Native launch acceptance tests pending |
+| Linux group-cleanup confirmation | Proposed conservative group-disappearance check after the last destructive signal and root reaping | Unreaped orphan zombies can retain Unknown; platform acceptance pending |
+| Linux Drop cleanup and interrupted-cleanup ownership | Proposed owned-root signalling followed by an OS-thread reaper; no destructive signals after reaping | Drop test added; broader lifecycle verification pending |
+| Bounded output, continued draining, cancellation and timeout | New tests exercise the Linux tree through the actual supervisor | Not run here; failed-launch coverage awaits the launch adapter |
+| Normal app/agent enablement | Disabled intentionally | Remains gated by M7 |
+
+Dependency findings and decisions:
+- Pin Nix `=0.31.3`. The Linux process-tree component now uses it as a target-specific normal
+  dependency with `process` and `signal`; macOS retains a dev dependency for kqueue probes.
+  This does not select a runner at startup. Its inspected safe wait, signal and kqueue
+  interfaces require no unsafe code in this workspace.
+- Both inspected Nix versions expose non-reaping `waitid` on Linux, but not on macOS.
+  Do not assume the Linux observer compiles for Darwin.
+- Nix 0.31.3 supplies safe kqueue wrappers on macOS. The probes install root observation before
+  releasing a fixture-only stdin handshake, avoiding a short-lived-root registration race.
+  That handshake is not a production launch protocol or an exception to null stdin.
+- Do not select `shared_child` for group lifetime ownership: its public wait methods ultimately
+  reap the root, and its non-reaping helpers are private.
+- Neither `killpg(SIGKILL)` success nor root exit alone confirms descendant termination.
+  The probes observe one known descendant independently: `/proc` terminal state on Linux,
+  a registered exit event on macOS. They do not establish complete descendant coverage.
+- Exclusive reaping ownership is essential. Never reap the root and then signal its old numeric
+  PID/PGID. The production design must also address incompatible process-wide reapers or
+  automatic child reaping before enabling launch.
+
+Linux implementation in this increment:
+- `LinuxProcessTree` adopts a never-reaped, exclusively owned group leader. The future launch
+  adapter must establish `process_group(0)` before target code runs and transfer ownership
+  without calling `wait` or `try_wait`.
+- `wait_root` polls `waitid` with WNOWAIT and never reaps. Cancellation of that future does not
+  consume exit status or release the root identity.
+- Cleanup sends SIGKILL while the root is still unreaped. Once root exit is observed, it removes
+  destructive signalling authority before reaping.
+- After reaping, only `killpg(group, None)` is used. Signal zero delivers no signal: ESRCH confirms
+  group disappearance, while a persistent group or a permissions error refuses confirmation.
+  Even if the numeric group is reused, this phase cannot send SIGKILL to it.
+- Group disappearance is deliberately conservative. Orphan zombies can prevent confirmation on
+  hosts that do not promptly reap them. A timeout therefore remains Unknown rather than treating
+  signal delivery, pipe EOF, or root exit as proof of cleanup.
+- Drop signals only while it still owns the unreaped root, then transfers root reaping to an OS
+  thread that sends no further signals. Drop is cleanup initiation, not a terminal observation.
+- Observation errors that invalidate ownership prevent further destructive signals. Integration
+  still must exclude automatic child reaping and competing waiters; a pre-signal ownership check
+  alone cannot make an incompatible process-wide reaper safe.
+- New tests exercise repeated non-reaping observation, idempotent cleanup, actual bounded
+  stdout/stderr draining through the supervisor, timeout, cancellation, early root exit and Drop.
+  The early-root test accepts honest Unknown when group disappearance cannot be confirmed; that
+  branch is not passing evidence of complete native descendant cleanup.
+
+Remaining work, in order:
+1. Implement the Linux production launch adapter using inspected exact-launch and pipe APIs:
+   clear/set the environment, preserve argv/cwd, null stdin, no implicit shell, pre-launch support
+   checks, and honest handling of any post-launch setup failure. Do not substitute the Git runner.
+2. Implement the macOS process-tree/launch counterpart, including observation setup for a root
+   that can exit immediately. Do not substitute the test fixture's stdin handshake for production.
+3. Validate the new Linux implementation and complete native adapter tests for exact arguments,
+   environment, null stdin, cwd, failed start, output limits, timeout, cancellation, descendants
+   and interrupted cleanup. Resolve concrete failures, including conservative Unknown outcomes
+   that prevent platform acceptance.
+4. Record Linux, macOS and Linux/WSL results separately, including the already reported probe run.
+   Complete outstanding M1 checks before accepting M2.1. Then start M2.2, not M3.
+
+Linux component/supervisor test command:
+`cargo test -p contextual-core --no-default-features commands::execution::linux::tests -- --nocapture`
+
+Probe command, to run on each applicable native host:
+`cargo test -p contextual-core --no-default-features unix_ownership_tests -- --nocapture`
+
+A Linux run does not execute the macOS tests. A Linux/WSL run does not verify the complete
+Windows-to-WSL connection; that host-path verification remains M4.
+
+#### M2.2 / M2.3 handoff
+
+- **M2.2 Windows journal: not started.** Windows journal initialization still refuses execution.
+  Durable no-clobber publication and recovery-failure tests remain required.
+- **M2.3 Windows backend: not started.** Safe job ownership before target code runs remains required.
+  No spawn-then-assign race is accepted.
+- Do not mark M2 passed until all substeps have their required platform-specific evidence.
 
 ### M3 — Finish cross-process ownership and reconciliation
 
@@ -158,6 +276,16 @@ Append results here as milestones advance. Include revision, platform/target, co
 scenario, result and any blocker. This ledger records verification, not implementation claims.
 
 No milestone has recorded passing verification evidence yet.
+
+| Scope | Revision / platform | Work or check | Result / blocker |
+| --- | --- | --- | --- |
+| M2.1 API inspection | Supplied dependency source snapshots; no project commit supplied | Reviewed Nix wait/signal/kqueue APIs and shared_child public/private waiting behavior | Static review completed; findings recorded above, not native execution evidence |
+| M2.1 native ownership probes | User reports running the tests; revision/platform not supplied | Root exit without reaping, group cleanup of a known descendant, cancellation while root runs | Run reported; exit status/output and per-platform evidence not supplied |
+| M2.1 Linux process-tree component | Current proposed patch; Linux excluding uClibc | Concrete managed tree plus actual-process supervisor/cancellation/Drop tests | Implementation proposed; new tests not compiled or run here; production launch adapter still pending |
+| M1 contributor / cross-target checks | Revision and execution environment not supplied | Format, workspace Clippy/tests, core cross-checks, static agent | No results available; still blocked on execution and recorded evidence |
+
+Replace pending check entries or append results only after running the checks. Include the saved
+revision and any local modifications; an unsaved proposal is not the revision tested by Cargo.
 
 ## Contract
 
