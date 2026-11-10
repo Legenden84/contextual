@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::runtime;
 use crate::state::chat::ChatModel;
-use crate::state::{AppModel, Project};
+use crate::state::AppModel;
 use crate::theme::{ActiveTheme, ListZoom, TypeExt, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonVariant, Checkbox, IconButton, LinkButton};
 use crate::views::diff_rows::{self, FileRows, Row};
@@ -39,7 +39,8 @@ type BranchSelect = SelectState<SearchableVec<SharedString>>;
 
 pub struct PrDialog {
     app: Entity<AppModel>,
-    project: Entity<Project>,
+    /// Fixed for the lifetime of this review, independently of Source Control selection.
+    repository_root: String,
     chat: Entity<ChatModel>,
     host: Arc<dyn WorkspaceHost>,
     cmp: Option<Comparison>,
@@ -73,7 +74,7 @@ pub struct PrDialog {
 impl PrDialog {
     pub fn new(
         app: Entity<AppModel>,
-        project: Entity<Project>,
+        repository_root: String,
         chat: Entity<ChatModel>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -139,7 +140,7 @@ impl PrDialog {
         ];
         let mut this = Self {
             app,
-            project,
+            repository_root,
             chat,
             host,
             cmp: None,
@@ -171,8 +172,8 @@ impl PrDialog {
         this
     }
 
-    fn root(&self, cx: &Context<Self>) -> String {
-        self.project.read(cx).root.clone()
+    fn root(&self, _cx: &Context<Self>) -> String {
+        self.repository_root.clone()
     }
 
     fn config(&self, cx: &Context<Self>) -> Option<FoundryConfig> {
@@ -635,6 +636,14 @@ impl Render for PrDialog {
                                 )),
                             )
                             .child(IconButton::new("pr-close", gpui_kit::component::IconName::Close, "Close").on_click(cx.listener(|t, _, _, cx| t.close(cx)))),
+                    )
+                    .child(
+                        div()
+                            .px(sp(4))
+                            .pb(sp(2))
+                            .type_style(contextual_theme::type_style::CODE_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(SharedString::from(self.repository_root.clone())),
                     )
                     .child(
                         div()

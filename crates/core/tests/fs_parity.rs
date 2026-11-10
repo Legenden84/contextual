@@ -172,7 +172,12 @@ fn scan_matches_node() {
     for case in load("scan.json").as_array().unwrap() {
         let input = tmp.sub(case["input"].as_str().unwrap());
         let options: ScanOptions = serde_json::from_value(case["options"].clone()).unwrap();
-        let got = tmp.outcome(scan::scan_project(&input, &options));
+        let mut got = tmp.outcome(scan::scan_project(&input, &options));
+        // Additive workspace metadata did not exist in the Node recordings.
+        // Repository discovery and nested ignores have their own regression tests.
+        if let Some(result) = got.get_mut("result").and_then(Value::as_object_mut) {
+            result.remove("repositories");
+        }
         assert_eq!(got, expected_outcome(case), "scan {}", case["input"]);
     }
 }

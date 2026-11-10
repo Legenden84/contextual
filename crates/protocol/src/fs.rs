@@ -174,6 +174,17 @@ pub struct RuleFile {
     pub content: String,
 }
 
+/// A repository discovered inside the opened workspace, including worktrees and submodules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Repository {
+    /// Absolute root, spelled by the workspace host (never joined by the client OS).
+    pub root: String,
+    /// Workspace-relative directory with forward slashes; empty for the workspace root.
+    pub path: String,
+    pub branch: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
@@ -188,6 +199,10 @@ pub struct ScanResult {
     /// Labels of the framework presets detected and applied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frameworks: Vec<String>,
+    /// Repositories found in traversed directories. Discovery shares the scan's exclusions
+    /// and entry cap; `truncated` also means this list may be incomplete.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repositories: Vec<Repository>,
 }
 
 // ---------------------------------------------------------------------------------------------

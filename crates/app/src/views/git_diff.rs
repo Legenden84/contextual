@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use contextual_core::host::WorkspaceHost;
 use contextual_core::logic::diff::{Diff, compute_diff};
+use contextual_core::logic::git_tabs::repository_file;
 use contextual_protocol::git::{DiffRequest, FileDiff};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -24,7 +25,9 @@ use crate::views::diff_rows::{self, FileRows, Row};
 pub struct GitDiffView {
     path: String,
     staged: bool,
-    project: Entity<Project>,
+    /// Captured when the tab opens; switching the Source Control selection cannot retarget it.
+    target: Option<(String, String)>,
+    load_generation: u64,
     host: Arc<dyn WorkspaceHost>,
     file: Option<FileDiff>,
     diff: Option<Diff>,
@@ -48,10 +51,13 @@ impl GitDiffView {
     ) -> Self {
         // Reload whenever git status changes (stage, commit, save…).
         let sub = cx.observe(&scm, |this: &mut Self, _, cx| this.load(cx));
+        let target = repository_file(&project.read(cx).repositories, &path)
+            .map(|(repository, path)| (repository.root.clone(), path.to_string()));
         let mut this = Self {
             path,
             staged,
-            project,
+            target,
+            load_generation: 0,
             host,
             file: None,
             diff: None,
@@ -68,9 +74,16 @@ impl GitDiffView {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
+        let Some((root, path)) = &self.target else {
+            self.error = Some("No discovered repository owns this file. Rescan the workspace.".into());
+            cx.notify();
+            return;
+        };
+        self.load_generation += 1;
+        let generation = self.load_generation;
         let req = DiffRequest {
-            root: self.project.read(cx).root.clone(),
-            path: self.path.clone(),
+            root: root.clone(),
+            path: path.clone(),
             staged: self.staged,
         };
         let host = self.host.clone();
@@ -78,12 +91,15 @@ impl GitDiffView {
         cx.spawn(async move |this, cx| {
             let result = job.await;
             this.update(cx, |this, cx| {
+                if this.load_generation != generation {
+                    return;
+                }
                 match result {
                     Ok(f) => {
                         let changed = this
                             .file
                             .as_ref()
-                            .is_none_or(|old| old.old != f.old || old.new != f.new);
+                            .is_none_or(|old| old.old != f.old || old.new != f.new || old.skipped != f.skipped);
                         if changed {
                             this.diff = Some(compute_diff(&f.old, &f.new));
                             this.file = Some(f);

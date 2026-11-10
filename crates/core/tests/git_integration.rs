@@ -459,6 +459,19 @@ async fn repo_without_origin_or_commits() {
 }
 
 #[tokio::test]
+async fn git_actions_do_not_fall_back_to_an_ancestor_repository() {
+    let (_guard, _tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    let before = git_cmd(&root, &["rev-parse", "HEAD"]);
+    let error = git
+        .commit(&format!("{root}/src"), "Must not commit the parent", true)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("Open its repository root"));
+    assert_eq!(git_cmd(&root, &["rev-parse", "HEAD"]), before);
+}
+
+#[tokio::test]
 async fn stage_rejects_paths_outside_the_project() {
     let (_guard, _tmp, root) = scripted_repo();
     let git = Git::new(FakeGh::new(GhMode::Script));

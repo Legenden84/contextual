@@ -67,6 +67,23 @@ The main workspace with a project open, files selected and a finished assistant 
 ## Native Source Control workflow
 
 - Pull requests belong in the Source Control sidebar, not the centre tab bar.
+- The opened folder is always the workspace. Discover repositories during scanning;
+  there is no workspace-mode setting or setup dialog.
+- With nested repositories, show their workspace-relative names, branches and pending
+  file counts above the Git controls. Select the first discovered repository initially
+  and retain the selection across rescans while it exists.
+- Repository selection scopes commit, push, branch and PR actions only. Chat, file
+  selection and Save/Undo remain workspace-wide. Commit-message drafts are retained
+  separately per repository.
+- List pending files from all discovered repositories, grouped under repository names
+  and file counts. Each group has independently collapsible Staged changes and Changes
+  sections, its own conflict notice, and a clean-state message when empty.
+- Row and section staging actions always target their containing repository without
+  changing the selected commit/push scope. One repository's status error must not hide
+  the other groups.
+- A diff tab keeps its original repository even after another repository is selected.
+  Branch and pull-request reviews name their repository; a PR review keeps that scope
+  until closed. Never combine commits or pushes across repositories.
 - Keep branch selection, commit, push/publish and pull-request comparison together.
 - Give the next action emphasis: commit with pending changes, push/publish with a clean
   working tree, or compare once the branch is pushed. Comparison remains available before

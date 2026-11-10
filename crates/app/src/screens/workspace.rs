@@ -356,10 +356,12 @@ impl WorkspaceScreen {
                 let pr = chat_state.pr_open;
                 if pr && this.pr_dialog.is_none() {
                     this.sidebar.update(cx, |sidebar, cx| sidebar.show_scm(cx));
-                    let (app, project, chat) =
-                        (this.app.clone(), this.project.clone(), chat.clone());
-                    this.pr_dialog =
-                        Some(cx.new(|cx| PrDialog::new(app, project, chat, window, cx)));
+                    let root = this.scm.read(cx).repository_root().map(str::to_owned);
+                    if let Some(root) = root {
+                        let (app, chat) = (this.app.clone(), chat.clone());
+                        this.pr_dialog =
+                            Some(cx.new(|cx| PrDialog::new(app, root, chat, window, cx)));
+                    }
                 } else if !pr {
                     this.pr_dialog = None;
                 }

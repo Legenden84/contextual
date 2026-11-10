@@ -1,22 +1,23 @@
 //! Scans an opened project folder into the explorer tree (port of `fs/scan.ts`): token
-//! estimates, exclusions (globs, root `.gitignore`, binaries, size, hidden, secrets), the git
-//! branch and instruction files (rules and skills).
+//! estimates, exclusions (globs, nested `.gitignore`, binaries, size, hidden, secrets), git
+//! repositories and instruction files (rules and skills).
 //!
 //! Exclusion globs follow picomatch's options as the old server used them
 //! (`{ dot: true, basename: !glob.includes('/') }`): `*` never crosses `/`, dot files match,
 //! slash-less globs match the base name, `a/**` also matches `a`, and a leading `!` negates.
-//! Globs `globset` can't parse (e.g. extglobs) are ignored. The root `.gitignore` is matched
-//! case-insensitively, like the npm `ignore` package's default.
+//! Globs `globset` can't parse (e.g. extglobs) are ignored. `.gitignore` files are matched
+//! case-insensitively, preserving the old npm `ignore` package's default.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, DirEntry, File, Metadata};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use contextual_protocol::fs::{
-    ExclusionPreset, NodeKind, RuleFile, RuleType, ScanNode, ScanOptions, ScanResult,
+    ExclusionPreset, NodeKind, Repository, RuleFile, RuleType, ScanNode, ScanOptions, ScanResult,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -265,13 +266,65 @@ impl ExclusionGlob {
     }
 }
 
+#[derive(Clone)]
+struct IgnoreScope {
+    matcher: Option<Gitignore>,
+    repository: bool,
+}
+
+/// Match nearest rules first, without rereading each ancestor for every file.
+/// A separate repository starts a new ignore scope; sibling rules never leak.
+#[derive(Clone)]
+struct ScopedIgnores {
+    root: PathBuf,
+    scopes: RefCell<HashMap<PathBuf, IgnoreScope>>,
+}
+
+impl ScopedIgnores {
+    fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            scopes: RefCell::new(HashMap::new()),
+        }
+    }
+
+    fn is_ignored(&self, rel: &str, is_dir: bool) -> bool {
+        let abs = self.root.join(rel);
+        let mut dir = abs.parent();
+        let mut scopes = self.scopes.borrow_mut();
+        while let Some(parent) = dir {
+            if !parent.starts_with(&self.root) {
+                break;
+            }
+            let scope = scopes.entry(parent.to_path_buf()).or_insert_with(|| IgnoreScope {
+                matcher: load_gitignore(parent),
+                repository: has_git_marker(parent),
+            });
+            if let Some(matcher) = &scope.matcher {
+                let matched = matcher.matched(&abs, is_dir);
+                if !matched.is_none() {
+                    return matched.is_ignore();
+                }
+            }
+            if scope.repository || parent == self.root {
+                break;
+            }
+            dir = parent.parent();
+        }
+        false
+    }
+}
+
 struct Exclusions {
     globs: Vec<ExclusionGlob>,
-    gitignore: Option<Gitignore>,
+    gitignore: Option<ScopedIgnores>,
 }
 
 impl Exclusions {
-    fn new<'a>(globs: impl IntoIterator<Item = &'a String>, gitignore: Option<Gitignore>) -> Self {
+    fn new<'a>(
+        globs: impl IntoIterator<Item = &'a String>,
+        gitignore: Option<ScopedIgnores>,
+    ) -> Self {
         let globs = globs
             .into_iter()
             .map(|g| js_trim(g))
@@ -306,7 +359,7 @@ impl Exclusions {
         if self
             .gitignore
             .as_ref()
-            .is_some_and(|gi| gi.matched_path_or_any_parents(rel, is_dir).is_ignore())
+            .is_some_and(|gi| gi.is_ignored(rel, is_dir))
         {
             return Some(".gitignore".to_string());
         }
@@ -335,7 +388,7 @@ const DETECT_MAX_ENTRIES: usize = 5_000;
 fn detect_presets<'a>(
     root: &Path,
     opts: &'a ScanOptions,
-    gitignore: Option<&Gitignore>,
+    gitignore: Option<&ScopedIgnores>,
 ) -> Vec<&'a ExclusionPreset> {
     let enabled: Vec<&ExclusionPreset> = opts.presets.iter().filter(|p| p.enabled).collect();
     let mut active = vec![false; enabled.len()];
@@ -411,7 +464,12 @@ fn detect_presets<'a>(
 }
 
 fn load_gitignore(root: &Path) -> Option<Gitignore> {
-    let bytes = fs::read(root.join(".gitignore")).ok()?;
+    let path = root.join(".gitignore");
+    // Git does not follow symlinked ignore files.
+    if !fs::symlink_metadata(&path).ok()?.is_file() {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
     let text = String::from_utf8_lossy(&bytes);
     let mut builder = GitignoreBuilder::new(root);
     builder.case_insensitive(true).ok()?;
@@ -449,8 +507,18 @@ fn first_utf16_units(s: &str, n: usize) -> String {
         .collect()
 }
 
+/// Git metadata itself may be a directory or a worktree/submodule pointer file.
+/// Do not traverse a symlink masquerading as metadata.
+fn has_git_marker(root: &Path) -> bool {
+    fs::symlink_metadata(root.join(".git"))
+        .is_ok_and(|m| m.is_dir() || m.is_file())
+}
+
 /// The checked-out branch, or the first 7 characters of a detached HEAD.
 fn git_branch(root: &Path) -> Option<String> {
+    if !has_git_marker(root) {
+        return None;
+    }
     let mut git_dir = root.join(".git");
     if fs::metadata(&git_dir).ok()?.is_file() {
         // Worktree or submodule: ".git" is a file pointing at the real git dir.
@@ -576,7 +644,10 @@ impl Discovery<'_> {
             }
             let abs = dir.join(&e.name);
             let rel = to_rel(self.root, &abs);
-            if AGENT_STATE.iter().any(|s| rel.eq_ignore_ascii_case(s)) {
+            if AGENT_STATE.iter().any(|s| {
+                rel.eq_ignore_ascii_case(s)
+                    || rel.to_ascii_lowercase().ends_with(&format!("/{s}"))
+            }) {
                 continue;
             }
             if !(self.skip_directory)(&rel, &e.name) {
@@ -642,10 +713,22 @@ struct Walker<'a> {
     count: usize,
     files: u64,
     truncated: bool,
+    repositories: Vec<Repository>,
 }
 
 impl Walker<'_> {
     fn walk(&mut self, dir: &Path) -> Vec<ScanNode> {
+        if self.count >= MAX_ENTRIES {
+            self.truncated = true;
+            return Vec::new();
+        }
+        if has_git_marker(dir) {
+            self.repositories.push(Repository {
+                root: path_string(dir),
+                path: to_rel(&self.root, dir),
+                branch: git_branch(dir),
+            });
+        }
         let Some(mut entries) = read_entries(dir) else {
             return Vec::new();
         };
@@ -802,11 +885,7 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
             path_string(&root)
         )));
     }
-    let gitignore = if opts.respect_gitignore {
-        load_gitignore(&root)
-    } else {
-        None
-    };
+    let gitignore = opts.respect_gitignore.then(|| ScopedIgnores::new(&root));
     let presets = detect_presets(&root, opts, gitignore.as_ref());
     let exclusions = Exclusions::new(
         opts.exclusions
@@ -844,6 +923,7 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
         count: 0,
         files: 0,
         truncated: discovered.truncated,
+        repositories: Vec::new(),
     };
     let tree = walker.walk(&root);
     let root_str = path_string(&root);
@@ -859,6 +939,7 @@ pub fn scan_project(input: &str, opts: &ScanOptions) -> Result<ScanResult> {
         rules: discovered.rules,
         files: walker.files,
         truncated: walker.truncated,
+        repositories: walker.repositories,
         frameworks: presets
             .iter()
             .filter(|p| !p.markers.is_empty())
@@ -995,6 +1076,107 @@ mod tests {
         );
         assert!(!scan.truncated);
         assert!(is_agent_dir(".Claude") && !is_agent_dir(".github"));
+    }
+
+    #[test]
+    fn sibling_repositories_have_independent_nested_ignore_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str, text: &str| {
+            let path = root.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        write(".gitignore", "*.workspace\n");
+        write("frontend/.git/HEAD", "ref: refs/heads/ui\n");
+        write("backend/.git/HEAD", "ref: refs/heads/api\n");
+        write("frontend/.gitignore", "/generated/\n*.tmp\n*.txt\n");
+        write("frontend/src/.gitignore", "!keep.txt\n");
+        write("frontend/src/keep.txt", "keep\n");
+        write("frontend/src/drop.txt", "drop\n");
+        write("frontend/cache.tmp", "cache\n");
+        write("frontend/generated/out.js", "generated\n");
+        write("frontend/local.workspace", "independent repository\n");
+        write("backend/cache.tmp", "source\n");
+        write("backend/generated/main.py", "source\n");
+        write("loose.workspace", "ignored\n");
+
+        let scan = scan_project(&root.to_string_lossy(), &ScanOptions::default()).unwrap();
+        assert_eq!(
+            scan.repositories.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            vec!["backend", "frontend"]
+        );
+        assert_eq!(scan.branch, None);
+        let reason = |p| find(&scan.tree, p).unwrap().excluded.as_deref();
+        assert_eq!(reason("frontend/cache.tmp"), Some(".gitignore"));
+        assert_eq!(reason("frontend/generated"), Some(".gitignore"));
+        assert_eq!(reason("frontend/src/drop.txt"), Some(".gitignore"));
+        assert_eq!(reason("frontend/src/keep.txt"), None);
+        assert_eq!(reason("frontend/local.workspace"), None);
+        assert_eq!(reason("backend/cache.tmp"), None);
+        assert_eq!(reason("backend/generated/main.py"), None);
+        assert_eq!(reason("loose.workspace"), Some(".gitignore"));
+
+        let scan = scan_project(
+            &root.to_string_lossy(),
+            &ScanOptions {
+                respect_gitignore: false,
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(find(&scan.tree, "frontend/cache.tmp").unwrap().excluded, None);
+        assert!(find(&scan.tree, "frontend/generated/out.js").is_some());
+    }
+
+    #[test]
+    fn repository_discovery_recognizes_git_files_and_skips_excluded_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::create_dir_all(root.join(".git/worktrees/linked")).unwrap();
+        fs::write(
+            root.join(".git/worktrees/linked/HEAD"),
+            "ref: refs/heads/linked\n",
+        )
+        .unwrap();
+        fs::create_dir(root.join("linked")).unwrap();
+        fs::write(
+            root.join("linked/.git"),
+            "gitdir: ../.git/worktrees/linked\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("node_modules/dep/.git")).unwrap();
+        fs::create_dir_all(root.join(".claude/worktrees/copy/.git")).unwrap();
+
+        let scan = scan_project(
+            &root.to_string_lossy(),
+            &ScanOptions {
+                exclusions: vec!["**/node_modules/**".into()],
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            scan.repositories.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            vec!["", "linked"]
+        );
+        assert_eq!(scan.repositories[1].branch.as_deref(), Some("linked"));
+        assert_eq!(scan.repositories[1].root, path_string(&root.join("linked")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_discovery_does_not_follow_directory_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir(outside.path().join(".git")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("linked")).unwrap();
+
+        let scan = scan_project(&dir.path().to_string_lossy(), &ScanOptions::default()).unwrap();
+        assert!(scan.repositories.is_empty());
+        assert_eq!(find(&scan.tree, "linked").unwrap().excluded.as_deref(), Some("symlink"));
     }
 
     #[test]

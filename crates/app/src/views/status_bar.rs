@@ -56,9 +56,17 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
         let name = status
             .as_ref()
             .map(|st| st.branch.clone().unwrap_or_else(|| "detached".into()));
+        let repository = scm.as_ref().and_then(|s| s.read(cx).active_repository());
         let mut label = name
-            .or_else(|| p.read(cx).branch.clone())
-            .unwrap_or_else(|| "no git".into());
+            .or_else(|| repository.and_then(|r| r.branch.clone()))
+            .unwrap_or_else(|| {
+                if repository.is_some() { "loading" } else { "no git" }.into()
+            });
+        if let Some(repository) = repository.filter(|r| !r.path.is_empty()) {
+            label = format!("{} · {label}", repository.path);
+        } else if scm.is_none() {
+            label = p.read(cx).branch.clone().unwrap_or(label);
+        }
         if let Some(st) = status.as_ref().filter(|st| st.upstream.is_some()) {
             if st.behind > 0 {
                 label.push_str(&format!(" {}↓", st.behind));

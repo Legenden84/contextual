@@ -293,6 +293,14 @@ impl Render for BranchPicker {
                             .shadow(vec![shadow(cx.tokens().shadows.modal)])
                             .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .type_style(contextual_theme::type_style::UI_BODY)
+                            .child(
+                                div()
+                                    .px(sp(3))
+                                    .pt(sp(2))
+                                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                                    .text_color(hsla(c.ink_muted))
+                                    .child(SharedString::from(self.scm.read(cx).repository_name(cx))),
+                            )
                             .child(div().p(px(6.0)).child(Input::new(&self.input)))
                             .map(|d| {
                                 if self.creating {

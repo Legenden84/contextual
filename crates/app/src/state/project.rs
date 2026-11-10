@@ -10,7 +10,7 @@ use contextual_core::logic::tree::{
     selectable_files,
 };
 use contextual_core::logic::types::{NodeKind, Rule, RuleType, TreeNode};
-use contextual_protocol::fs::ScanResult;
+use contextual_protocol::fs::{Repository, ScanResult};
 
 pub use contextual_core::logic::tree::CheckState;
 
@@ -35,6 +35,8 @@ pub struct Project {
     pub location: Location,
     pub name: String,
     pub branch: Option<String>,
+    /// Automatically discovered repositories; the opened folder remains the file/chat root.
+    pub repositories: Vec<Repository>,
     /// The scan stopped at the entry cap.
     pub truncated: bool,
     /// Framework presets the scan detected and applied (labels).
@@ -120,6 +122,7 @@ impl Project {
             root: scan.root,
             name: scan.name,
             branch: scan.branch,
+            repositories: scan.repositories,
             truncated: scan.truncated,
             frameworks: scan.frameworks,
             tree,
@@ -173,6 +176,7 @@ impl Project {
         self.tree = fresh.tree;
         self.index = fresh.index;
         self.branch = fresh.branch;
+        self.repositories = fresh.repositories;
         self.truncated = fresh.truncated;
         self.frameworks = fresh.frameworks;
         self.rules = fresh.rules;

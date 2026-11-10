@@ -294,6 +294,16 @@ impl Git {
         {
             return Err(Error::conflict("This folder is not a git repository."));
         }
+        // Git otherwise walks upwards and can commit or switch a repository outside the
+        // opened folder. Every caller must name an actual discovered repository root.
+        let prefix = self
+            .must(&["rev-parse", "--show-prefix"], &root, "Reading repository root")
+            .await?;
+        if !prefix.is_empty() {
+            return Err(Error::conflict(
+                "This folder is inside a git repository. Open its repository root to use Source Control.",
+            ));
+        }
         Ok(root)
     }
 

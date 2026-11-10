@@ -118,6 +118,7 @@ contract!(
     apply_then_undo,
     conflict_round_trips_exactly,
     git_stage_commit,
+    sibling_repositories,
     list_dirs
 );
 
@@ -268,6 +269,112 @@ async fn git_stage_commit<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(ma
         .await
         .unwrap();
     assert!(st.staged.is_empty() && st.changes.is_empty());
+}
+
+async fn sibling_repositories<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(make: F) {
+    let f = Fixture::new();
+    let workspace = f.project.path();
+    std::fs::remove_dir_all(workspace.join(".git")).unwrap();
+    for name in ["frontend", "backend"] {
+        let dir = workspace.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        git(&dir, &["config", "user.name", "t"]);
+        git(&dir, &["config", "user.email", "t@t"]);
+        std::fs::write(dir.join("README.md"), format!("{name}\n")).unwrap();
+        std::fs::write(dir.join(".gitignore"), "/generated/\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "init"]);
+        std::fs::create_dir(dir.join("generated")).unwrap();
+        std::fs::write(dir.join("generated/output.txt"), "ignored\n").unwrap();
+    }
+    let host = make(&f).await;
+    let scan = host.scan(Scan {
+        root: f.root(),
+        options: ScanOptions::default(),
+    }).await.unwrap();
+    assert_eq!(scan.branch, None);
+    assert_eq!(
+        scan.repositories.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+        vec!["backend", "frontend"],
+    );
+    assert!(host.git_status(RootRequest { root: f.root() }).await.is_err());
+    let backend = scan.repositories[0].root.clone();
+    let frontend = scan.repositories[1].root.clone();
+    let read = host.read(ReadFiles {
+        root: f.root(),
+        paths: vec!["frontend/README.md".into(), "backend/README.md".into()],
+        condense: false,
+    }).await.unwrap();
+    assert_eq!(read.files[0].content.as_deref(), Some("frontend\n"));
+    assert_eq!(read.files[1].content.as_deref(), Some("backend\n"));
+
+    let saved = host.apply(Apply {
+        root: f.root(),
+        changes: vec![
+            ApplyChange {
+                path: "frontend/README.md".into(),
+                status: ChangeStatus::M,
+                content: Some("new frontend\n".into()),
+                expected: Some("frontend\n".into()),
+            },
+            ApplyChange {
+                path: "backend/README.md".into(),
+                status: ChangeStatus::M,
+                content: Some("new backend\n".into()),
+                expected: Some("backend\n".into()),
+            },
+        ],
+        backup: true,
+    }).await.unwrap();
+    assert_eq!(saved.overwritten, 2);
+    let status = host.git_stage(PathsRequest {
+        root: frontend.clone(),
+        paths: vec!["README.md".into()],
+    }).await.unwrap();
+    assert_eq!(status.staged.len(), 1);
+    let status = host.git_status(RootRequest { root: backend.clone() }).await.unwrap();
+    assert!(status.staged.is_empty());
+    assert_eq!(status.changes.len(), 1, "generated files must stay ignored");
+
+    let diff = host.git_diff(contextual_protocol::git::DiffRequest {
+        root: frontend.clone(),
+        path: "README.md".into(),
+        staged: true,
+    }).await.unwrap();
+    assert_eq!(diff.old, "frontend\n");
+    assert_eq!(diff.new, "new frontend\n");
+
+    host.git_unstage(PathsRequest {
+        root: frontend.clone(),
+        paths: vec!["README.md".into()],
+    }).await.unwrap();
+    let undone = host.undo(Undo {
+        root: f.root(),
+        backup_id: saved.backup_id.unwrap(),
+    }).await.unwrap();
+    assert_eq!(undone.restored, 2);
+    assert_eq!(std::fs::read_to_string(workspace.join("frontend/README.md")).unwrap(), "frontend\n");
+    assert_eq!(std::fs::read_to_string(workspace.join("backend/README.md")).unwrap(), "backend\n");
+
+    std::fs::write(workspace.join("frontend/README.md"), "commit frontend\n").unwrap();
+    std::fs::write(workspace.join("backend/README.md"), "leave backend\n").unwrap();
+    host.git_commit(CommitRequest {
+        root: frontend.clone(),
+        message: "Frontend only".into(),
+        all: true,
+    }).await.unwrap();
+    assert!(host.git_status(RootRequest { root: frontend.clone() }).await.unwrap().changes.is_empty());
+    assert_eq!(host.git_status(RootRequest { root: backend.clone() }).await.unwrap().changes.len(), 1);
+    host.git_create_branch(contextual_protocol::git::CreateBranchRequest {
+        root: frontend,
+        name: "frontend-change".into(),
+        from: None,
+    }).await.unwrap();
+    assert_eq!(
+        host.git_status(RootRequest { root: backend }).await.unwrap().branch.as_deref(),
+        Some("main"),
+    );
 }
 
 async fn list_dirs<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(make: F) {

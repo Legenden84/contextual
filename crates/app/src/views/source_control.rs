@@ -2,7 +2,10 @@
 //! Commit / Commit all, Push / Publish, and comparison before opening a pull request.
 //! Clicking a staged or unstaged file opens its diff in a tab.
 
-use contextual_core::logic::git_tabs::git_tab_id;
+use std::collections::{HashMap, HashSet};
+
+use contextual_core::logic::git_tabs::{git_tab_id, workspace_git_path};
+use contextual_protocol::fs::Repository;
 use contextual_protocol::git::{ChangeLetter, StatusEntry};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
@@ -12,7 +15,7 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
-use crate::state::scm::ScmModel;
+use crate::state::scm::{ScmModel, status_change_count};
 use crate::state::{AppModel, Project, Tab};
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, row_height, sp};
 use crate::ui::{Button, ButtonVariant, IconButton, count, file_glyph};
@@ -41,8 +44,10 @@ pub struct SourceControl {
     project: Entity<Project>,
     scm: Entity<ScmModel>,
     message: Entity<TextareaState>,
-    staged_open: bool,
-    changes_open: bool,
+    message_root: Option<String>,
+    messages: HashMap<String, String>,
+    /// Repository-qualified section ids; collapsing one group leaves the others alone.
+    closed_sections: HashSet<String>,
     _subs: Vec<Subscription>,
 }
 
@@ -74,18 +79,94 @@ impl SourceControl {
                 },
             ),
         ];
+        let message_root = scm.read(cx).repository_root().map(str::to_owned);
         Self {
             app,
             project,
             scm,
             message,
-            staged_open: true,
-            changes_open: true,
+            message_root,
+            messages: HashMap::new(),
+            closed_sections: HashSet::new(),
             _subs: subs,
         }
     }
 
+    fn sync_message_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.scm.read(cx).repository_root().map(str::to_owned);
+        if self.message_root == root {
+            return;
+        }
+        if let Some(previous) = self.message_root.take() {
+            self.messages.insert(previous, self.message.read(cx).value().to_string());
+        }
+        let text = root.as_ref().and_then(|root| self.messages.get(root)).cloned().unwrap_or_default();
+        self.message_root = root;
+        self.message.update(cx, |message, cx| message.set_value(text, window, cx));
+    }
+
+    fn repositories(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let c = &cx.tokens().colors;
+        let scm = self.scm.read(cx);
+        let visible = scm.repositories.len() > 1
+            || scm.repositories.first().is_some_and(|r| !r.path.is_empty());
+        let disabled = scm.busy.is_some() || scm.branch_picker_open;
+        let rows: Vec<_> = scm.repositories.iter().enumerate().map(|(index, repository)| {
+            let name = if repository.path.is_empty() {
+                self.project.read(cx).name.clone()
+            } else {
+                repository.path.clone()
+            };
+            let status = scm.repository_statuses.get(&repository.root);
+            let label = match status {
+                Some(status) => format!(
+                    "{} · {} · {}",
+                    name,
+                    status.branch.as_deref().unwrap_or("detached"),
+                    status_change_count(status),
+                ),
+                None if scm.repository_errors.contains_key(&repository.root) => format!("{name} · unavailable"),
+                None => format!("{name} · loading"),
+            };
+            let root = repository.root.clone();
+            Button::new(("scm-repository", index), label)
+                .variant(ButtonVariant::Ghost)
+                .selected(scm.repository_root() == Some(repository.root.as_str()))
+                .disabled(disabled)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.scm.update(cx, |scm, cx| scm.select_repository(&root, cx));
+                    this.sync_message_scope(window, cx);
+                }))
+                .into_any_element()
+        }).collect();
+        div().when(visible, |d| {
+            d.flex()
+                .flex_col()
+                .flex_none()
+                .gap(sp(1))
+                .px(sp(3))
+                .pb(sp(2))
+                .child(
+                    div()
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(c.ink_muted))
+                        .child("Repositories · pending files"),
+                )
+                .child(
+                    div()
+                        .id("scm-repositories")
+                        .flex()
+                        .flex_col()
+                        .gap(sp(1))
+                        .max_h(sp(8) * 4.0)
+                        .overflow_y_scroll()
+                        .children(rows),
+                )
+        })
+    }
+
     fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_message_scope(window, cx);
         let text = self.message.read(cx).value().trim().to_string();
         let s = self.scm.read(cx);
         let has = s
@@ -104,17 +185,21 @@ impl SourceControl {
         i: usize,
         e: &StatusEntry,
         staged: bool,
-        active: bool,
-        busy: bool,
+        repository: &Repository,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let c = &cx.tokens().colors;
+        let busy = self.scm.read(cx).busy.is_some();
+        let workspace_path = workspace_git_path(repository, &e.path);
+        let tab = git_tab_id(&workspace_path, staged);
+        let active = self.project.read(cx).active == Tab::Preview(tab);
+        let repository_root = repository.root.clone();
         let (dir, name) = match e.path.rsplit_once('/') {
             Some((d, n)) => (d.to_string(), n.to_string()),
             None => (String::new(), e.path.clone()),
         };
-        let (open_path, act_path) = (e.path.clone(), e.path.clone());
-        let full_path = SharedString::from(e.path.clone());
+        let (open_path, act_path) = (workspace_path, e.path.clone());
+        let full_path = SharedString::from(open_path.clone());
         div()
             .id((if staged { "staged" } else { "change" }, i))
             .flex()
@@ -178,9 +263,9 @@ impl SourceControl {
                     let p = vec![act_path.clone()];
                     t.scm.update(cx, |s, cx| {
                         if staged {
-                            s.unstage(p, cx)
+                            s.unstage_in(&repository_root, p, cx)
                         } else {
-                            s.stage(p, cx)
+                            s.stage_in(&repository_root, p, cx)
                         }
                     })
                 })),
@@ -201,34 +286,28 @@ impl SourceControl {
         title: &'static str,
         staged: bool,
         entries: &[StatusEntry],
+        repository: &Repository,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let c = &cx.tokens().colors;
-        let open = if staged {
-            self.staged_open
-        } else {
-            self.changes_open
-        };
+        let section_id = format!("{}:{title}", repository.root);
+        let open = !self.closed_sections.contains(&section_id);
         let busy = self.scm.read(cx).busy.is_some();
-        let active = match &self.project.read(cx).active {
-            Tab::Preview(t) => Some(t.clone()),
-            _ => None,
-        };
+        let repository_root = repository.root.clone();
         let paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
         let rows: Vec<_> = if open {
             entries
                 .iter()
                 .enumerate()
                 .map(|(i, e)| {
-                    let is_active = active.as_deref() == Some(git_tab_id(&e.path, staged).as_str());
-                    self.row(i, e, staged, is_active, busy, cx)
+                    self.row(i, e, staged, repository, cx)
                         .into_any_element()
                 })
                 .collect()
         } else {
             Vec::new()
         };
-        div().when(!entries.is_empty(), |d| {
+        div().id(SharedString::from(section_id.clone())).when(!entries.is_empty(), |d| {
             d.child(
                 div()
                     .id(title)
@@ -245,10 +324,8 @@ impl SourceControl {
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .text_color(hsla(c.ink))
                     .on_click(cx.listener(move |t, _, _, cx| {
-                        if staged {
-                            t.staged_open = !t.staged_open
-                        } else {
-                            t.changes_open = !t.changes_open
+                        if !t.closed_sections.remove(&section_id) {
+                            t.closed_sections.insert(section_id.clone());
                         }
                         cx.notify();
                     }))
@@ -281,9 +358,9 @@ impl SourceControl {
                             let p = paths.clone();
                             t.scm.update(cx, |s, cx| {
                                 if staged {
-                                    s.unstage(p, cx)
+                                    s.unstage_in(&repository_root, p, cx)
                                 } else {
-                                    s.stage(p, cx)
+                                    s.stage_in(&repository_root, p, cx)
                                 }
                             })
                         })),
@@ -293,14 +370,143 @@ impl SourceControl {
             .children(rows)
         })
     }
+
+    fn grouped_changes(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let c = &cx.tokens().colors;
+        let scm = self.scm.read(cx);
+        let repositories = scm.repositories.clone();
+        let grouped = repositories.len() > 1
+            || repositories.first().is_some_and(|repository| !repository.path.is_empty());
+        let active_root = scm.repository_root().map(str::to_owned);
+        let statuses = scm.repository_statuses.clone();
+        let errors = scm.repository_errors.clone();
+        let mut groups = Vec::with_capacity(repositories.len());
+
+        for repository in &repositories {
+            let status = statuses.get(&repository.root);
+            let pending = status.map(status_change_count).unwrap_or_default();
+            let name = if repository.path.is_empty() {
+                self.project.read(cx).name.clone()
+            } else {
+                repository.path.clone()
+            };
+            let selected = active_root.as_deref() == Some(repository.root.as_str());
+            let group = div()
+                .id(SharedString::from(format!("scm-group:{}", repository.root)))
+                .flex()
+                .flex_col()
+                .when(grouped, |d| {
+                    d.mb(sp(2)).child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(sp(2))
+                            .px(sp(3))
+                            .py(sp(2))
+                            .border_b_1()
+                            .border_color(hsla(c.border))
+                            .bg(hsla(c.surface_100))
+                            .when(selected, |d| d.bg(hsla(c.surface_selected)))
+                            .child(
+                                Icon::new(gpui_kit::assets::IconName::GitBranch)
+                                    .size(sp(4)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                                    .text_color(hsla(c.ink))
+                                    .child(SharedString::from(name)),
+                            )
+                            .child(count(pending, cx)),
+                    )
+                })
+                .map(|d| {
+                    let Some(status) = status else {
+                        return d.child(
+                            div()
+                                .px(sp(3))
+                                .py(sp(2))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(if errors.contains_key(&repository.root) {
+                                    c.danger
+                                } else {
+                                    c.ink_muted
+                                }))
+                                .child(SharedString::from(
+                                    errors.get(&repository.root).cloned()
+                                        .unwrap_or_else(|| "Loading changes…".into()),
+                                )),
+                        );
+                    };
+                    d.when(!status.conflicts.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .mx(sp(3))
+                                .my(sp(1))
+                                .px(sp(2))
+                                .py(sp(1))
+                                .rounded(px(contextual_theme::radius::SM))
+                                .border_1()
+                                .border_color(hsla(c.warning_border))
+                                .bg(hsla(c.warning_bg))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .child(SharedString::from(format!(
+                                    "{} merge {}: resolve in your editor first.",
+                                    status.conflicts.len(),
+                                    if status.conflicts.len() == 1 {
+                                        "conflict"
+                                    } else {
+                                        "conflicts"
+                                    }
+                                ))),
+                        )
+                    })
+                    .child(self.section("Staged changes", true, &status.staged, repository, cx))
+                    .child(self.section("Changes", false, &status.changes, repository, cx))
+                    .when(pending == 0, |d| {
+                        d.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(sp(2))
+                                .px(sp(3))
+                                .py(sp(3))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child(Icon::new(IconName::Check).size(sp(4)))
+                                .child("No pending changes."),
+                        )
+                    })
+                });
+            groups.push(group.into_any_element());
+        }
+
+        div()
+            .id("scm-lists")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .pt(sp(1))
+            .pb(sp(2))
+            .border_t_1()
+            .border_color(hsla(c.border))
+            .children(groups)
+    }
 }
 
 impl Render for SourceControl {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_message_scope(window, cx);
         if let Some(text) = self.scm.update(cx, |s, _| s.drafted.take()) {
             self.message
                 .update(cx, |m, cx| m.set_value(text, window, cx));
         }
+        let repositories = self.repositories(cx);
         let c = &cx.tokens().colors;
         let s = self.scm.read(cx);
         let configured = self.app.read(cx).config.is_some();
@@ -353,17 +559,27 @@ impl Render for SourceControl {
                 .flex_1()
                 .min_h_0()
                 .child(header)
+                .child(repositories)
                 .child(
                     div()
                         .px(sp(3))
                         .type_style(contextual_theme::type_style::UI_SMALL)
                         .text_color(hsla(c.ink_muted))
-                        .child(if s.not_repo {
-                            "This folder is not a git repository."
-                        } else {
-                            "Loading…"
-                        }),
+                        .child(SharedString::from(
+                            s.error.clone()
+                                .or_else(|| s.repository_root().and_then(|root| s.repository_errors.get(root)).cloned())
+                                .unwrap_or_else(|| if s.not_repo {
+                                    if self.project.read(cx).truncated {
+                                        "No repositories found in the scanned portion. Narrow the opened folder or adjust exclusions."
+                                    } else {
+                                        "No repositories found in this workspace."
+                                    }
+                                } else {
+                                    "Loading…"
+                                }.to_string()),
+                        )),
                 )
+                .child(self.grouped_changes(cx))
                 .into_any_element();
         };
         let busy = s.busy;
@@ -417,6 +633,17 @@ impl Render for SourceControl {
             .type_style(contextual_theme::type_style::UI_BODY)
             .text_color(hsla(c.ink))
             .child(header)
+            .child(repositories)
+            .when(self.project.read(cx).truncated, |d| {
+                d.child(
+                    div()
+                        .px(sp(3))
+                        .pb(sp(2))
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(c.warning))
+                        .child("Scan limit reached. More repositories may exist."),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -495,7 +722,7 @@ impl Render for SourceControl {
                             div()
                                 .type_style(contextual_theme::type_style::UI_SMALL)
                                 .text_color(hsla(c.ink_muted))
-                                .child("Nothing staged. Commit all includes every change."),
+                                .child("Nothing staged. Commit all includes every change in this repository."),
                         )
                     })
                     .when(show_push, |d| {
@@ -570,56 +797,7 @@ impl Render for SourceControl {
                             })),
                     ),
             )
-            .child(
-                div()
-                    .id("scm-lists")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .pt(sp(1))
-                    .pb(sp(2))
-                    .border_t_1()
-                    .border_color(hsla(c.border))
-                    .when(!st.conflicts.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .mx(sp(3))
-                                .my(sp(1))
-                                .px(sp(2))
-                                .py(sp(1))
-                                .rounded(px(contextual_theme::radius::SM))
-                                .border_1()
-                                .border_color(hsla(c.warning_border))
-                                .bg(hsla(c.warning_bg))
-                                .type_style(contextual_theme::type_style::UI_SMALL)
-                                .child(SharedString::from(format!(
-                                    "{} merge {}: resolve in your editor first.",
-                                    st.conflicts.len(),
-                                    if st.conflicts.len() == 1 {
-                                        "conflict"
-                                    } else {
-                                        "conflicts"
-                                    }
-                                ))),
-                        )
-                    })
-                    .child(self.section("Staged changes", true, &st.staged, cx))
-                    .child(self.section("Changes", false, &st.changes, cx))
-                    .when(empty, |d| {
-                        d.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(sp(2))
-                                .px(sp(3))
-                                .py(sp(3))
-                                .type_style(contextual_theme::type_style::UI_SMALL)
-                                .text_color(hsla(c.ink_muted))
-                                .child(Icon::new(IconName::Check).size(sp(4)))
-                                .child("No pending changes."),
-                        )
-                    }),
-            )
+            .child(self.grouped_changes(cx))
             .into_any_element()
     }
 }
