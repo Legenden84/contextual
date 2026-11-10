@@ -973,6 +973,7 @@ name = "contextual-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "contextual-core",
  "contextual-protocol",
  "serde",

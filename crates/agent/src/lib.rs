@@ -3,6 +3,9 @@
 //! The Windows app starts one per WSL distro (`wsl.exe -d <distro> -- contextual-agent`) and
 //! talks to it over stdin/stdout. Requests run concurrently; `$/cancel` aborts one and answers it
 //! with `RequestCancelled`. The agent exits when stdin closes or after `shutdown`.
+//! A duplicate active request ID is discarded without dispatch or a second response: the
+//! original operation retains its identity and cancellation handle. Command execution is not
+//! exposed; it will require cooperative cleanup rather than this task-abort cancellation.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -84,6 +87,17 @@ where
             }
             Message::Notification(n) => tracing::debug!("ignored notification {}", n.method),
             Message::Response(_) => tracing::debug!("ignored response"),
+            Message::Request(req)
+                if running
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains_key(&req.id) =>
+            {
+                // A second response with the same ID could be mistaken for the original
+                // operation's result. Reject the duplicate without disturbing that operation.
+                // This also applies to shutdown: it must not bypass active-ID ownership.
+                tracing::warn!(id = req.id, "discarded duplicate active RPC request");
+            }
             Message::Request(req) if req.method == method::SHUTDOWN => {
                 let _ = out_tx.send(Response::ok(req.id, Value::Null));
                 break;
@@ -187,5 +201,209 @@ fn core_error(e: contextual_core::Error) -> RpcError {
         code: RpcError::APPLICATION_ERROR,
         message: e.message.clone(),
         data: serde_json::to_value(&e).ok(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use contextual_core::{Error, Result};
+    use contextual_protocol::commands::{PrepareCommand, PreparedCommand};
+    use contextual_protocol::fs::{
+        Apply, ApplyResult, DirListing, ListDirs, ReadFiles, ReadFilesResult, Scan, ScanResult,
+        Undo, UndoResult,
+    };
+    use contextual_protocol::git::{GitCall, GitReply};
+    use tokio::io::BufReader;
+    use tokio::sync::Notify;
+
+    #[derive(Default)]
+    struct HeldPreparation {
+        calls: AtomicUsize,
+        entered: Notify,
+        release: Notify,
+    }
+
+    #[async_trait]
+    impl WorkspaceHost for HeldPreparation {
+        async fn allow_root(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn list_dirs(&self, _: ListDirs) -> Result<DirListing> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn scan(&self, _: Scan) -> Result<ScanResult> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn read(&self, _: ReadFiles) -> Result<ReadFilesResult> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn apply(&self, _: Apply) -> Result<ApplyResult> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn undo(&self, _: Undo) -> Result<UndoResult> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn git(&self, _: GitCall) -> Result<GitReply> {
+            unreachable!("not used by this transport test")
+        }
+
+        async fn prepare_command(&self, _: PrepareCommand) -> Result<PreparedCommand> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.entered.notify_one();
+            self.release.notified().await;
+            Err(Error::tool("Original preparation completed."))
+        }
+    }
+
+    async fn send(writer: &mut (impl AsyncWrite + Unpin), request: &Request) {
+        let mut bytes = serde_json::to_vec(request).unwrap();
+        bytes.push(b'\n');
+        writer.write_all(&bytes).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_active_ids_preserve_the_original_operation_and_response() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let host = Arc::new(HeldPreparation::default());
+            let (client, server) = tokio::io::duplex(8192);
+            let (server_read, server_write) = tokio::io::split(server);
+            let server_host = host.clone();
+            let server_task = tokio::spawn(async move {
+                serve(BufReader::new(server_read), server_write, server_host).await
+            });
+            let (client_read, mut client_write) = tokio::io::split(client);
+            let mut responses = BufReader::new(client_read).lines();
+
+            let proposal = Request::new(
+                7,
+                method::COMMAND_PREPARE,
+                serde_json::to_value(PrepareCommand {
+                    root: "/test-project".into(),
+                    project_epoch: "test-epoch".into(),
+                    command_json: "{}".into(),
+                })
+                .unwrap(),
+            );
+            send(&mut client_write, &proposal).await;
+            host.entered.notified().await;
+
+            send(&mut client_write, &proposal).await;
+            send(
+                &mut client_write,
+                &Request::new(7, method::SHUTDOWN, Value::Null),
+            )
+            .await;
+            // This response proves both duplicate frames were processed. Neither duplicate
+            // may dispatch, answer for ID 7, replace its handle, or shut the server down.
+            send(
+                &mut client_write,
+                &Request::new(
+                    8,
+                    method::INITIALIZE,
+                    serde_json::to_value(InitializeParams {
+                        protocol_version: PROTOCOL_VERSION,
+                        app_version: "test".into(),
+                        allowed_roots: Vec::new(),
+                    })
+                    .unwrap(),
+                ),
+            )
+            .await;
+            let barrier: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(barrier.id, 8);
+            assert!(barrier.error.is_none());
+            assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+
+            host.release.notify_one();
+            let original: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(original.id, 7);
+            assert_eq!(
+                original.error.unwrap().message,
+                "Original preparation completed."
+            );
+
+            send(
+                &mut client_write,
+                &Request::new(9, method::SHUTDOWN, Value::Null),
+            )
+            .await;
+            let shutdown: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(shutdown.id, 9);
+            assert!(shutdown.error.is_none());
+            assert!(responses.next_line().await.unwrap().is_none());
+            server_task.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_active_id_does_not_replace_the_original_cancellation_handle() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let host = Arc::new(HeldPreparation::default());
+            let (client, server) = tokio::io::duplex(8192);
+            let (server_read, server_write) = tokio::io::split(server);
+            let server_host = host.clone();
+            let server_task = tokio::spawn(async move {
+                serve(BufReader::new(server_read), server_write, server_host).await
+            });
+            let (client_read, mut client_write) = tokio::io::split(client);
+            let mut responses = BufReader::new(client_read).lines();
+            let proposal = Request::new(
+                7,
+                method::COMMAND_PREPARE,
+                serde_json::to_value(PrepareCommand {
+                    root: "/test-project".into(),
+                    project_epoch: "test-epoch".into(),
+                    command_json: "{}".into(),
+                })
+                .unwrap(),
+            );
+            send(&mut client_write, &proposal).await;
+            host.entered.notified().await;
+            send(&mut client_write, &proposal).await;
+
+            let notification = contextual_protocol::rpc::Notification::new(
+                method::CANCEL,
+                serde_json::to_value(CancelParams { id: 7 }).unwrap(),
+            );
+            let mut bytes = serde_json::to_vec(&notification).unwrap();
+            bytes.push(b'\n');
+            client_write.write_all(&bytes).await.unwrap();
+            let cancelled: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(cancelled.id, 7);
+            assert_eq!(cancelled.error.unwrap().code, RpcError::REQUEST_CANCELLED);
+            assert_eq!(host.calls.load(Ordering::SeqCst), 1);
+
+            // Never release the held preparation. Shutdown can finish only if cancellation
+            // retained and aborted the original task, rather than a duplicate's task.
+            send(
+                &mut client_write,
+                &Request::new(9, method::SHUTDOWN, Value::Null),
+            )
+            .await;
+            let shutdown: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(shutdown.id, 9);
+            assert!(responses.next_line().await.unwrap().is_none());
+            server_task.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

@@ -26,12 +26,21 @@ use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::error::ErrorCode;
 use crate::host::WorkspaceHost;
 use crate::{Error, Result};
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>>;
+
+/// Serialize disconnection with request registration so a caller cannot be inserted after
+/// pending requests have been cleared and then wait forever for a dead connection.
+fn disconnect(pending: &Pending, alive: &AtomicBool) {
+    let mut pending = pending.lock().unwrap_or_else(|error| error.into_inner());
+    alive.store(false, Ordering::Relaxed);
+    pending.clear();
+}
 
 pub struct RemoteHost {
     next_id: AtomicU64,
@@ -40,7 +49,7 @@ pub struct RemoteHost {
     /// Kept so the process is killed when the host is dropped.
     _child: Option<Child>,
     info: InitializeResult,
-    /// Cleared when the agent's output ends (it exited or crashed).
+    /// Cleared when either direction of the agent connection fails or closes.
     alive: Arc<AtomicBool>,
 }
 
@@ -97,21 +106,53 @@ impl RemoteHost {
         W: AsyncWrite + Unpin + Send + 'static,
     {
         let pending: Pending = Arc::default();
+        let alive = Arc::new(AtomicBool::new(true));
+        let closed = CancellationToken::new();
         let (out, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let writer_pending = pending.clone();
+        let writer_alive = alive.clone();
+        let writer_closed = closed.clone();
         tokio::spawn(async move {
             let mut writer = writer;
-            while let Some(line) = out_rx.recv().await {
-                if writer.write_all(&line).await.is_err() || writer.flush().await.is_err() {
+            loop {
+                let line = tokio::select! {
+                    biased;
+                    _ = writer_closed.cancelled() => break,
+                    line = out_rx.recv() => match line {
+                        Some(line) => line,
+                        None => break,
+                    },
+                };
+                let written = tokio::select! {
+                    biased;
+                    _ = writer_closed.cancelled() => break,
+                    result = async {
+                        writer.write_all(&line).await?;
+                        writer.flush().await
+                    } => result,
+                };
+                if written.is_err() {
                     break;
                 }
             }
+            // A broken stdin can leave stdout open indefinitely. Do not wait for reader EOF
+            // to fail callers, and do not send queued messages after the connection is lost.
+            disconnect(&writer_pending, &writer_alive);
+            writer_closed.cancel();
         });
         let reader_pending = pending.clone();
-        let alive = Arc::new(AtomicBool::new(true));
         let reader_alive = alive.clone();
         tokio::spawn(async move {
             let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            loop {
+                let line = tokio::select! {
+                    biased;
+                    _ = closed.cancelled() => break,
+                    line = lines.next_line() => match line {
+                        Ok(Some(line)) => line,
+                        Ok(None) | Err(_) => break,
+                    },
+                };
                 match serde_json::from_str::<Message>(&line) {
                     Ok(Message::Response(resp)) => {
                         let tx = reader_pending
@@ -123,20 +164,17 @@ impl RemoteHost {
                         }
                     }
                     Ok(Message::Notification(n)) => {
-                        tracing::debug!(target: "contextual_agent", "{} {}", n.method, n.params)
+                        // Future command progress may contain unshared output or secrets.
+                        tracing::debug!(target: "contextual_agent", "notification {}", n.method)
                     }
                     Ok(Message::Request(r)) => {
                         tracing::warn!("agent sent a request ({}); ignored", r.method)
                     }
-                    Err(e) => tracing::warn!("unparseable agent output: {e}: {line}"),
+                    Err(e) => tracing::warn!("unparseable agent output: {e}"),
                 }
             }
-            // Agent gone: fail everything still waiting.
-            reader_alive.store(false, Ordering::Relaxed);
-            reader_pending
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clear();
+            disconnect(&reader_pending, &reader_alive);
+            closed.cancel();
         });
 
         let mut host = Self {
@@ -189,17 +227,35 @@ impl RemoteHost {
         method: &str,
         params: P,
     ) -> Result<T> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut candidate = self.next_id.load(Ordering::Relaxed);
+        let id = loop {
+            let next = candidate
+                .checked_add(1)
+                .ok_or_else(|| Error::internal("Workspace request identities exhausted."))?;
+            match self.next_id.compare_exchange_weak(
+                candidate,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break candidate,
+                Err(current) => candidate = current,
+            }
+        };
+        let params = serde_json::to_value(params)?;
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, tx);
+        {
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            if !self.is_alive() {
+                return Err(agent_gone());
+            }
+            pending.insert(id, tx);
+        }
         let mut guard = CancelOnDrop {
             id,
             host: Some(self),
         };
-        self.send(&Request::new(id, method, serde_json::to_value(params)?))?;
+        self.send(&Request::new(id, method, params))?;
         let resp = rx.await.map_err(|_| agent_gone())?;
         guard.host = None;
         if let Some(err) = resp.error {
@@ -219,6 +275,9 @@ impl RemoteHost {
     }
 
     fn send<M: Serialize>(&self, msg: &M) -> Result<()> {
+        if !self.is_alive() {
+            return Err(agent_gone());
+        }
         let mut line = serde_json::to_vec(msg)?;
         line.push(b'\n');
         self.out.send(line).map_err(|_| agent_gone())
@@ -491,5 +550,181 @@ impl WorkspaceHost for SupervisedHost {
             async move { h.git(call).await }
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    struct FailingWriter {
+        inner: tokio::io::DuplexStream,
+        fail: Arc<AtomicBool>,
+        fail_flush: bool,
+    }
+
+    impl AsyncWrite for FailingWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            if self.fail.load(Ordering::SeqCst) && !self.fail_flush {
+                return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+            }
+            Pin::new(&mut self.inner).poll_write(cx, bytes)
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if self.fail.load(Ordering::SeqCst) && self.fail_flush {
+                return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+            }
+            Pin::new(&mut self.inner).poll_flush(cx)
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    async fn connection(
+        fail_flush: bool,
+    ) -> (
+        RemoteHost,
+        tokio::io::DuplexStream,
+        tokio::io::DuplexStream,
+        Arc<AtomicBool>,
+    ) {
+        let (to_agent, mut agent_input) = tokio::io::duplex(4096);
+        let (mut agent_output, from_agent) = tokio::io::duplex(4096);
+        let fail = Arc::new(AtomicBool::new(false));
+        let writer = FailingWriter {
+            inner: to_agent,
+            fail: fail.clone(),
+            fail_flush,
+        };
+        let handshake = async {
+            let mut line = String::new();
+            BufReader::new(&mut agent_input)
+                .read_line(&mut line)
+                .await
+                .unwrap();
+            let request: Request = serde_json::from_str(&line).unwrap();
+            assert_eq!(request.method, method::INITIALIZE);
+            let response = Response::ok(
+                request.id,
+                serde_json::to_value(InitializeResult {
+                    protocol_version: PROTOCOL_VERSION,
+                    agent_version: "test".into(),
+                    capabilities: Vec::new(),
+                })
+                .unwrap(),
+            );
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            agent_output.write_all(&bytes).await.unwrap();
+        };
+        let (host, ()) = tokio::join!(
+            RemoteHost::connect(BufReader::new(from_agent), writer, "test", Vec::new()),
+            handshake,
+        );
+        (host.unwrap(), agent_input, agent_output, fail)
+    }
+
+    #[tokio::test]
+    async fn reader_eof_fails_pending_and_later_requests() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (host, agent_input, agent_output, _fail) = connection(false).await;
+            let host = Arc::new(host);
+            let first_host = host.clone();
+            let first = tokio::spawn(async move {
+                first_host
+                    .request::<_, Value>("test/first", Value::Null)
+                    .await
+            });
+            let second_host = host.clone();
+            let second = tokio::spawn(async move {
+                second_host
+                    .request::<_, Value>("test/second", Value::Null)
+                    .await
+            });
+
+            let mut requests = BufReader::new(agent_input).lines();
+            assert!(requests.next_line().await.unwrap().is_some());
+            assert!(requests.next_line().await.unwrap().is_some());
+            // The other direction remains open: reader EOF alone must fail all callers.
+            drop(agent_output);
+
+            assert_eq!(first.await.unwrap().unwrap_err().code, ErrorCode::Io);
+            assert_eq!(second.await.unwrap().unwrap_err().code, ErrorCode::Io);
+            assert!(!host.is_alive());
+            assert!(host.pending.lock().unwrap().is_empty());
+            let error = host
+                .request::<_, Value>("test/later", Value::Null)
+                .await
+                .unwrap_err();
+            assert_eq!(error.message, AGENT_STOPPED);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn write_or_flush_failure_fails_callers_even_with_agent_output_open() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for fail_flush in [false, true] {
+                let (host, agent_input, _agent_output, fail) = connection(fail_flush).await;
+                let host = Arc::new(host);
+                let first_host = host.clone();
+                let first = tokio::spawn(async move {
+                    first_host
+                        .request::<_, Value>("test/first", Value::Null)
+                        .await
+                });
+
+                let mut requests = BufReader::new(agent_input).lines();
+                let first_request: Request =
+                    serde_json::from_str(&requests.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(first_request.method, "test/first");
+
+                fail.store(true, Ordering::SeqCst);
+                let error = host
+                    .request::<_, Value>("test/broken-write", Value::Null)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, ErrorCode::Io);
+                assert_eq!(first.await.unwrap().unwrap_err().code, ErrorCode::Io);
+                assert!(!host.is_alive());
+                assert!(host.pending.lock().unwrap().is_empty());
+                let error = host
+                    .request::<_, Value>("test/later", Value::Null)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.message, AGENT_STOPPED);
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn exhausted_request_ids_are_not_reused() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (host, _agent_input, _agent_output, _fail) = connection(false).await;
+            host.next_id.store(u64::MAX, Ordering::Relaxed);
+            assert!(
+                host.request::<_, Value>("test/exhausted", Value::Null)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(host.next_id.load(Ordering::Relaxed), u64::MAX);
+            assert!(host.pending.lock().unwrap().is_empty());
+        })
+        .await
+        .unwrap();
     }
 }

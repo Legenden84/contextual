@@ -46,7 +46,8 @@ Existing user-operated Source Control behavior is unchanged.
   rather than launching from the Windows app for a WSL project.
 - `SupervisedHost::call` retries read-only requests. Command dispatch must never use its retry
   path. Replacing an agent after preparation also invalidates approval.
-- Remote notifications are currently logged, not delivered as typed command progress.
+- Remote notification method names are logged without payloads; notifications are not yet
+  delivered as typed command progress.
 - Agent cancellation aborts request tasks, and EOF/shutdown waits for in-flight work.
   Commands need cooperative process-tree cleanup and explicit disconnect semantics.
 - Both Foundry pumps currently emit text, usage and Done only. EOF can produce Done without
@@ -200,6 +201,35 @@ This is not cross-process ownership: separate app/agent processes still require 
 ownership mechanism before native execution is enabled. Remote dispatch, lifecycle reconciliation,
 project closure/shutdown integration and saved-history/Inspect presentation also remain pending.
 Recovery records never create permits or enqueue work.
+
+#### 2c transport-hardening prerequisite
+
+This increment does not add executable host endpoints or select a native backend:
+- The agent discards duplicate active RPC IDs before dispatch, including duplicate IDs on
+  shutdown requests. It preserves the original operation and its cancellation handle.
+  It deliberately sends no second response with that ID: a duplicate's error must not be
+  mistaken for the original operation's result.
+- RPC active-ID protection is not durable invocation replay protection. Completed or
+  cancelled RPC IDs are no longer active; future command endpoints must independently
+  enforce single-use invocation IDs through their execution service and journal.
+- Either reader EOF/error or writer write/flush failure invalidates RemoteHost, fails pending
+  callers, and stops the opposite transport worker. Request registration and disconnection
+  share a lock, preventing insertion into an already-cleared dead connection.
+- Failed connections reject subsequent requests immediately. Exhausted numeric request IDs
+  refuse new requests instead of wrapping and reusing an identity.
+- Notification payloads and malformed wire lines are not copied into transport logs.
+- Existing Source Control retry classification and process-runner behavior are unchanged.
+  No command retry or execution path is introduced.
+
+Deterministic in-memory tests cover active-ID duplicates, duplicate shutdown, preservation
+of the original cancellation handle, reader EOF, independent write/flush failure while the
+agent's output remains open, pending/later callers, and request-ID exhaustion. They have not
+been run in the read/edit-block workflow and do not verify command execution or WSL behavior.
+
+Still pending: typed bounded progress, one-shot approved dispatch, cooperative command
+cancellation, outcome-unknown handling and reconciliation across connection loss. The agent's
+existing task-abort cancellation must not be reused as proof of command process-tree cleanup.
+Native process ownership and cross-process admission remain prerequisites for enabling Run.
 
 ### 2. Runner and local/remote host lifecycle
 
