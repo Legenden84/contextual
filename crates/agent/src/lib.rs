@@ -36,6 +36,26 @@ pub const CAPABILITIES: &[&str] = &[
     "commandPrepare",
 ];
 
+/// Publishes completion only while this task still owns the request ID.
+fn complete_request(
+    running: &Mutex<HashMap<u64, AbortHandle>>,
+    task_id: tokio::task::Id,
+    response: Response,
+    out: &mpsc::UnboundedSender<Response>,
+) {
+    let mut running = running.lock().unwrap_or_else(|error| error.into_inner());
+    if running
+        .get(&response.id)
+        .is_some_and(|handle| handle.id() == task_id)
+    {
+        // Abort does not interrupt a task's current poll. A cancelled task may arrive here
+        // after the numeric RPC ID has been reused; it must not retire the new owner.
+        // Keep publication under the lock so cancellation cannot also answer this request.
+        running.remove(&response.id);
+        let _ = out.send(response);
+    }
+}
+
 /// Reads requests from `reader` until EOF or `shutdown`, writing responses to `writer`.
 pub async fn serve<R, W>(reader: R, writer: W, host: Arc<dyn WorkspaceHost>) -> std::io::Result<()>
 where
@@ -111,15 +131,7 @@ where
                 let mut map = running.lock().unwrap_or_else(|e| e.into_inner());
                 let handle = tasks.spawn(async move {
                     let resp = dispatch(host.as_ref(), req).await;
-                    // Only answer if not cancelled meanwhile (cancel already answered).
-                    if running_for_task
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(&id)
-                        .is_some()
-                    {
-                        let _ = out.send(resp);
-                    }
+                    complete_request(&running_for_task, tokio::task::id(), resp, &out);
                 });
                 map.insert(id, handle);
             }
@@ -220,6 +232,91 @@ mod tests {
     use contextual_protocol::git::{GitCall, GitReply};
     use tokio::io::BufReader;
     use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn late_cancelled_completion_cannot_retire_a_reused_rpc_id() {
+        let running = Mutex::new(HashMap::new());
+        let (out, mut responses) = mpsc::unbounded_channel();
+        let mut tasks = JoinSet::new();
+
+        let original = tasks.spawn(std::future::pending::<()>());
+        let original_id = original.id();
+        running.lock().unwrap().insert(7, original);
+
+        // Model cancellation followed by immediate reuse of the numeric RPC ID.
+        // The old task may still be finishing its current poll on another runtime thread.
+        running.lock().unwrap().remove(&7).unwrap().abort();
+        let replacement = tasks.spawn(std::future::pending::<()>());
+        let replacement_id = replacement.id();
+        running.lock().unwrap().insert(7, replacement);
+
+        complete_request(
+            &running,
+            original_id,
+            Response::ok(7, Value::String("stale completion".into())),
+            &out,
+        );
+
+        assert!(matches!(
+            responses.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            running.lock().unwrap().get(&7).unwrap().id(),
+            replacement_id
+        );
+
+        let expected = Response::ok(7, Value::String("replacement completion".into()));
+        complete_request(&running, replacement_id, expected.clone(), &out);
+        assert_eq!(responses.try_recv().unwrap(), expected);
+        assert!(running.lock().unwrap().is_empty());
+
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn cancelled_request_without_replacement_cannot_publish_completion() {
+        let running = Mutex::new(HashMap::new());
+        let (out, mut responses) = mpsc::unbounded_channel();
+        let mut tasks = JoinSet::new();
+        let task = tasks.spawn(std::future::pending::<()>());
+        let task_id = task.id();
+        running.lock().unwrap().insert(7, task);
+        running.lock().unwrap().remove(&7).unwrap().abort();
+
+        complete_request(&running, task_id, Response::ok(7, Value::Null), &out);
+
+        assert!(matches!(
+            responses.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        while tasks.join_next().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn matching_task_can_publish_completion_only_once() {
+        let running = Mutex::new(HashMap::new());
+        let (out, mut responses) = mpsc::unbounded_channel();
+        let mut tasks = JoinSet::new();
+        let task = tasks.spawn(std::future::pending::<()>());
+        let task_id = task.id();
+        running.lock().unwrap().insert(7, task);
+        let expected = Response::ok(7, Value::Null);
+
+        complete_request(&running, task_id, expected.clone(), &out);
+        complete_request(&running, task_id, expected.clone(), &out);
+
+        assert_eq!(responses.try_recv().unwrap(), expected);
+        assert!(matches!(
+            responses.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(running.lock().unwrap().is_empty());
+
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
 
     #[derive(Default)]
     struct HeldPreparation {

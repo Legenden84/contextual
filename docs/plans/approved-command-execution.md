@@ -231,6 +231,26 @@ cancellation, outcome-unknown handling and reconciliation across connection loss
 existing task-abort cancellation must not be reused as proof of command process-tree cleanup.
 Native process ownership and cross-process admission remain prerequisites for enabling Run.
 
+#### 2c transport review: cancellation and RPC-ID reuse
+
+Static review found a completion-ownership race in the active-request registry. Tokio abort
+does not interrupt a task's current poll. After cancellation removes an RPC ID, a replacement
+request can acquire that numeric ID before the old task reaches its completion bookkeeping.
+Removing by RPC ID alone could then retire the replacement and publish the old response.
+
+Completion now checks the registered Tokio task identity before removing the request or
+publishing its response. The ownership check, removal and response enqueue share the registry
+lock. A stale task cannot remove a newer cancellation handle or answer for its request.
+This is connection-local response correlation, not durable invocation replay protection.
+
+Deterministic unit tests exercise the late-completion interleaving directly, including
+cancelled requests with and without an ID replacement and single-publication behavior.
+The existing in-memory agent tests continue to cover duplicate active requests and cancellation
+through the wire. These tests have not been run in the read/edit-block workflow.
+
+No executable endpoint, native backend, protocol capability or app execution control is added
+by this correction. Source Control dispatch and retry classification remain unchanged.
+
 ### 2. Runner and local/remote host lifecycle
 
 Add a separate approved-command path alongside the existing Git runner. Reuse `Cmd` and the
