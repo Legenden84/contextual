@@ -5,7 +5,8 @@
 //!
 //! A backend must establish process-tree ownership before the requested program can run.
 //! Its drop implementation must initiate cleanup even if its async operation is interrupted.
-//! Native backends and workspace execution transport are subsequent integration work.
+//! Explicitly configured LocalHosts expose this supervisor through WorkspaceHost::start_command.
+//! Native backends and remote execution transport are subsequent integration work.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -880,8 +881,19 @@ mod tests {
         CallId,
         ReviewPlan,
     ) {
+        proposal_on(Arc::new(LocalHost::new())).await
+    }
+
+    async fn proposal_on(
+        host: Arc<LocalHost>,
+    ) -> (
+        tempfile::TempDir,
+        Arc<LocalHost>,
+        ApprovalGate,
+        CallId,
+        ReviewPlan,
+    ) {
         let root = tempfile::tempdir().unwrap();
-        let host = Arc::new(LocalHost::new());
         let path = root.path().to_str().unwrap().to_owned();
         host.allow_root(&path).await.unwrap();
         let prepared = host
@@ -930,6 +942,156 @@ mod tests {
             fail_spawn: false,
             fail_cleanup: false,
         }
+    }
+
+    #[tokio::test]
+    async fn default_local_host_refuses_even_a_consumed_approval() {
+        let (_root, host, mut gate, call, plan) = proposal().await;
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+
+        assert!(
+            host.start_command(permit, CancellationToken::new())
+                .is_err()
+        );
+        gate.finish(&call, Outcome::FailedToStart).unwrap();
+        assert!(!gate.busy());
+        assert!(gate.approve(&call, &plan).is_err());
+    }
+
+    #[tokio::test]
+    async fn configured_workspace_host_executes_only_after_consuming_approval() {
+        let (_probe_root, _probe_host, _probe_gate, _probe_call, probe) = proposal().await;
+        let backend = Arc::new(runner(&probe));
+        let journal = Arc::new(Journal::default());
+        let configured = Arc::new(LocalHost::with_command_backend(
+            backend.clone(),
+            journal.clone(),
+        ));
+        let (_root, host, mut gate, call, plan) = proposal_on(configured).await;
+        let host: Arc<dyn WorkspaceHost> = host;
+
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 0);
+        let approval = gate.approve(&call, &plan).unwrap();
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = host
+            .start_command(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::Success);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 1);
+        assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
+        gate.finish(&call, result.outcome()).unwrap();
+        assert!(gate.approve(&call, &plan).is_err());
+    }
+
+    #[tokio::test]
+    async fn workspace_host_stop_finishes_cleanup_without_starting_another_attempt() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (_probe_root, _probe_host, _probe_gate, _probe_call, probe) = proposal().await;
+            let mut backend = runner(&probe);
+            backend.delay = Duration::from_secs(60);
+            let backend = Arc::new(backend);
+            let journal = Arc::new(Journal::default());
+            let configured = Arc::new(LocalHost::with_command_backend(
+                backend.clone(),
+                journal.clone(),
+            ));
+            let (_root, host, mut gate, call, plan) = proposal_on(configured).await;
+            let approval = gate.approve(&call, &plan).unwrap();
+            let permit = gate.begin(approval, &plan).unwrap();
+            let handle = host
+                .start_command(permit, CancellationToken::new())
+                .unwrap();
+            let mut progress = handle.progress();
+            while backend.launches.load(Ordering::SeqCst) == 0 {
+                progress.changed().await.unwrap();
+            }
+
+            // An independent conversation and a cloned host still cannot queue approved work.
+            let other_host = host.as_ref().clone();
+            let mut other_gate = ApprovalGate::new(plan.binding.clone());
+            let other_call = CallId {
+                turn: "other-turn".into(),
+                call: "other-call".into(),
+            };
+            other_gate
+                .propose(other_call.clone(), plan.clone())
+                .unwrap();
+            let approval = other_gate.approve(&other_call, &plan).unwrap();
+            let permit = other_gate.begin(approval, &plan).unwrap();
+            assert!(
+                other_host
+                    .start_command(permit, CancellationToken::new())
+                    .is_err()
+            );
+            other_gate
+                .finish(&other_call, Outcome::FailedToStart)
+                .unwrap();
+
+            handle.stop();
+            let result = handle.wait().await;
+            assert_eq!(result.status, ExecutionStatus::Cancelled);
+            assert!(result.cancelled && result.spawned);
+            assert!(result.history_error.is_none());
+            assert_eq!(journal.completions.load(Ordering::SeqCst), 1);
+            assert_eq!(backend.launches.load(Ordering::SeqCst), 1);
+            gate.finish(&call, result.outcome()).unwrap();
+            assert!(!gate.busy());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn configuring_a_new_host_does_not_accept_an_earlier_hosts_preparation() {
+        let (root, _old_host, mut gate, call, plan) = proposal().await;
+        let backend = Arc::new(runner(&plan));
+        let host = LocalHost::with_command_backend(
+            backend.clone(),
+            Arc::new(Journal::default()),
+        );
+        host.allow_root(root.path().to_str().unwrap())
+            .await
+            .unwrap();
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+        let result = host
+            .start_command(permit, CancellationToken::new())
+            .unwrap()
+            .wait()
+            .await;
+
+        assert_eq!(result.status, ExecutionStatus::FailedToStart);
+        assert!(!result.spawned);
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn configured_local_host_does_not_execute_a_wsl_permit() {
+        let (_root, _host, _gate, call, mut plan) = proposal().await;
+        let backend = Arc::new(runner(&plan));
+        let journal = Arc::new(Journal::default());
+        let host = LocalHost::with_command_backend(backend.clone(), journal.clone());
+        plan.binding.project.location = Location::Wsl {
+            distro: "Ubuntu".into(),
+        };
+        let mut gate = ApprovalGate::new(plan.binding.clone());
+        gate.propose(call.clone(), plan.clone()).unwrap();
+        let approval = gate.approve(&call, &plan).unwrap();
+        let permit = gate.begin(approval, &plan).unwrap();
+
+        assert!(
+            host.start_command(permit, CancellationToken::new())
+                .is_err()
+        );
+        assert_eq!(backend.launches.load(Ordering::SeqCst), 0);
+        assert_eq!(journal.intents.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

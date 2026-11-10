@@ -120,7 +120,8 @@ contract!(
     git_stage_commit,
     sibling_repositories,
     list_dirs,
-    command_preparation
+    command_preparation,
+    command_execution_unavailable
 );
 
 async fn refuses_other_roots<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(make: F) {
@@ -510,6 +511,75 @@ async fn command_preparation<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>
         host.prepare_command(invalid).await.unwrap_err().code,
         ErrorCode::InvalidInput,
     );
+}
+
+async fn command_execution_unavailable<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(
+    make: F,
+) {
+    use contextual_core::commands::{ApprovalGate, CallId, Outcome, ReviewPlan};
+    use contextual_core::location::{Location, ProjectRoot};
+
+    let f = Fixture::new();
+    let host = make(&f).await;
+    let prepared = host
+        .prepare_command(command_request(f.root()))
+        .await
+        .unwrap();
+    // Even a local label must not cause a RemoteHost or SupervisedHost to fall back locally.
+    let plan = ReviewPlan::from_prepared(
+        ProjectRoot {
+            location: Location::Local,
+            path: f.root(),
+        },
+        prepared,
+    )
+    .unwrap();
+    let mut gate = ApprovalGate::new(plan.binding.clone());
+    let call = CallId {
+        turn: "test-turn".into(),
+        call: "test-call".into(),
+    };
+    gate.propose(call.clone(), plan.clone()).unwrap();
+    let approval = gate.approve(&call, &plan).unwrap();
+    let permit = gate.begin(approval, &plan).unwrap();
+
+    let error = host
+        .start_command(permit, Default::default())
+        .err()
+        .expect("ordinary hosts must not enable command execution");
+    assert_eq!(error.code, ErrorCode::Tool);
+    gate.finish(&call, Outcome::FailedToStart).unwrap();
+    assert!(gate.approve(&call, &plan).is_err());
+}
+
+#[tokio::test]
+async fn reserved_execution_endpoints_are_not_advertised_or_dispatched() {
+    use contextual_protocol::commands::EXECUTION_CAPABILITY;
+    use contextual_protocol::rpc::method;
+
+    let f = Fixture::new();
+    let host = RemoteHost::spawn(
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_contextual-agent")),
+        "test",
+        vec![f.root()],
+    )
+    .await
+    .unwrap();
+    assert!(
+        !host
+            .info()
+            .capabilities
+            .iter()
+            .any(|capability| capability == EXECUTION_CAPABILITY)
+    );
+    for method in [method::COMMAND_DISPATCH, method::COMMAND_CANCEL] {
+        let error = host
+            .request::<_, serde_json::Value>(method, serde_json::Value::Null)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("Unknown method"));
+    }
+    host.shutdown().await.unwrap();
 }
 
 #[tokio::test]

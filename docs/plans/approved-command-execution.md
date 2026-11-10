@@ -14,10 +14,15 @@ app-generated invocation IDs. The journal implements durable no-clobber publicat
 filesystems supporting hard links and directory synchronization. Windows journal initialization
 fails closed until its durable-publication adapter is implemented and inspected.
 
-No native process-tree backend is implemented or selected. The in-process engine now reserves
+No native process-tree backend is implemented or selected. The in-process engine reserves
 process-wide local-host admission synchronously and checks journal recovery before writing a
-new intent. Cross-process ownership, remote execution/progress/cancellation transport, native
-tools, chat persistence, Inspect and action cards remain to be implemented. These foundations
+new intent. An explicitly configured LocalHost now exposes this engine through the
+permit-consuming `WorkspaceHost::start_command` entry point. Ordinary hosts still refuse it.
+Protocol version 4 reserves versioned execution envelopes and method names, but the agent
+does not implement those endpoints or advertise the execution capability.
+
+Cross-process ownership, remote execution/progress/cancellation transport, native tools,
+chat persistence, Inspect and action cards remain to be implemented. These foundations
 do not enable execution in the app.
 
 The supplied tests have not been run in the read/edit-block workflow. The agent contract
@@ -250,6 +255,45 @@ through the wire. These tests have not been run in the read/edit-block workflow.
 
 No executable endpoint, native backend, protocol capability or app execution control is added
 by this correction. Source Control dispatch and retry classification remain unchanged.
+
+#### 2c first integration increment: protocol contract and local host dispatch
+
+Protocol version 4 adds the execution wire contract without enabling executable RPC methods:
+- Independently versioned dispatch, cumulative progress, cooperative Stop and final-result
+  envelopes, with strict field shapes.
+- App invocation ID, project root, project epoch and host epoch correlation.
+- Explicit local/WSL location and exact reviewed preparation, including argument boundaries
+  and the in-memory restricted environment.
+- Distinct observed statuses, cancellation/timeout flags, stream metadata and history errors.
+- A reserved `commandExecutionV1` capability, deliberately absent from the agent handshake.
+- Stop's eventual response is a final observation after cleanup, not a signal acknowledgement.
+- Output-bearing wire types deliberately omit Debug and are not saved-chat or sharing types.
+  Defining serde types does not validate their semantic bounds or authorize execution.
+
+`WorkspaceHost::start_command` consumes a non-cloneable LaunchPermit synchronously:
+- Default hosts refuse before creating a worker. RemoteHost and SupervisedHost inherit this
+  refusal; neither uses a retry path or app-side runner.
+- `LocalHost::with_command_backend` constructs a fresh host with explicitly supplied managed
+  runner and journal dependencies. It is not used by the app or normal agent startup.
+- The configured host creates its execution engine with a clone of that exact host, preserving
+  the allowlist and preparation epoch. New host construction invalidates old preparation.
+- The existing engine retains synchronous process-wide admission, recovery, durable intent,
+  exact re-preparation, bounded capture, cooperative Stop and unknown-outcome blocking.
+- Existing Git/Source Control execution and retry classification are unchanged.
+
+Added tests cover wire round trips and required binding fields; approval-consuming dispatch
+through a trait-object host; stale-host refusal; cloned-host admission without queuing;
+fake-process Stop and completion recording; WSL-to-local refusal; and disabled execution on
+ordinary local, remote and supervised hosts. Agent contract tests also check that the reserved
+RPC methods remain unavailable and the execution capability is not advertised.
+These new tests have not been run in the read/edit-block workflow.
+
+Still required for Phase 2c: validate wire sizes, identities, sequence/counter semantics and
+result consistency at the receiving boundary; consume permits into a one-shot remote dispatch;
+connect the agent-owned execution service and durable replay protection; implement bounded
+progress delivery and cooperative cancellation; retain unknown outcomes on lost delivery or
+completion; and test all of those paths with fake managed processes. Do not advertise the
+capability merely because these DTOs and local service seams exist.
 
 ### 2. Runner and local/remote host lifecycle
 

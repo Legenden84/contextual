@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// Bumped whenever a method, a parameter or a result changes shape. The app redeploys the agent
 /// when the agent reports a different version.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub const JSONRPC: &str = "2.0";
 
@@ -28,6 +28,14 @@ pub mod method {
     pub const GIT: &str = "workspace/git";
     /// Non-executing preparation: `commands::PrepareCommand` → `commands::PreparedCommand`.
     pub const COMMAND_PREPARE: &str = "workspace/commandPrepare";
+    /// Reserved execution RPC: `commands::DispatchCommand` → `commands::CommandResult`.
+    /// Requires `commands::EXECUTION_CAPABILITY`; not implemented by the default agent.
+    pub const COMMAND_DISPATCH: &str = "workspace/commandDispatch";
+    /// Reserved cooperative Stop RPC: `commands::CancelCommand` → `commands::CommandResult`.
+    /// This is not `$/cancel`: completion must wait for process-tree cleanup.
+    pub const COMMAND_CANCEL: &str = "workspace/commandCancel";
+    /// Reserved bounded cumulative notification: `commands::CommandProgress`.
+    pub const COMMAND_PROGRESS: &str = "$/commandProgress";
     /// Notification, app → agent: `{ id }` of the request to cancel.
     pub const CANCEL: &str = "$/cancel";
     /// Notification, agent → app: `{ id, message }` for long operations.

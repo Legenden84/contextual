@@ -19,6 +19,10 @@ use contextual_protocol::git::{
     PushResult,
 };
 
+use crate::commands::LaunchPermit;
+use crate::commands::execution::{
+    ExecutionEngine, ExecutionHandle, ExecutionJournal, ManagedCommandRunner,
+};
 use crate::workspace::git::Git;
 use crate::workspace::{browse, files, paths, scan};
 use crate::{Error, Result};
@@ -45,6 +49,24 @@ pub trait WorkspaceHost: Send + Sync {
     async fn prepare_command(&self, _req: PrepareCommand) -> Result<PreparedCommand> {
         Err(Error::tool(
             "This workspace host does not support command preparation.",
+        ))
+    }
+    /// Consumes one approved attempt on this project's host, without queuing or retrying.
+    ///
+    /// The caller must obtain the permit through ApprovalGate::begin after explicit review.
+    /// Admission and launch refusal are synchronous. On error, no worker was started and the
+    /// caller must finish the gate attempt as FailedToStart, never reuse its approval.
+    /// Dropping the handle requests Stop; lifecycle owners must cancel and await workers.
+    ///
+    /// Default refusal is intentional. In particular, agent hosts must not fall back to an
+    /// app-side runner merely because their remote execution transport is not implemented.
+    fn start_command(
+        &self,
+        _permit: LaunchPermit,
+        _scope: tokio_util::sync::CancellationToken,
+    ) -> Result<ExecutionHandle> {
+        Err(Error::tool(
+            "Command execution is unavailable on this workspace host.",
         ))
     }
     /// Source Control and pull requests. Use the typed helpers on `dyn WorkspaceHost` (`git_status`, `pr_compare`…).
@@ -177,6 +199,11 @@ impl RootAllowlist {
     }
 }
 
+struct CommandBackend {
+    runner: Arc<dyn ManagedCommandRunner>,
+    journal: Arc<dyn ExecutionJournal>,
+}
+
 /// Runs the core in this process. The core's file functions are synchronous, so each call goes
 /// to tokio's blocking pool.
 #[derive(Clone, Default)]
@@ -185,6 +212,8 @@ pub struct LocalHost {
     git: Arc<Git>,
     /// Shared across clones; replaced when a new host/agent instance is created.
     command_preparer: Arc<crate::commands::prepare::CommandPreparer>,
+    /// Explicit integration seam. Ordinary hosts have no execution backend.
+    command_backend: Option<Arc<CommandBackend>>,
     /// Undo snapshots; `None` means the OS cache dir (`files::default_undo_dir`).
     undo_dir: Option<PathBuf>,
 }
@@ -206,6 +235,22 @@ impl LocalHost {
     pub fn with_git(git: Git) -> Self {
         Self {
             git: Arc::new(git),
+            ..Self::default()
+        }
+    }
+
+    /// Creates a fresh host with an explicitly supplied managed backend and durable journal.
+    ///
+    /// This is a host-service integration seam, not an app setting or a native backend
+    /// selector. The runner must meet ManagedCommandRunner's ownership contract. No native
+    /// implementation is supplied yet; fake processes exercise this path in tests.
+    /// Construction gives the host a fresh preparation epoch, invalidating earlier snapshots.
+    pub fn with_command_backend(
+        runner: Arc<dyn ManagedCommandRunner>,
+        journal: Arc<dyn ExecutionJournal>,
+    ) -> Self {
+        Self {
+            command_backend: Some(Arc::new(CommandBackend { runner, journal })),
             ..Self::default()
         }
     }
@@ -291,6 +336,24 @@ impl WorkspaceHost for LocalHost {
             preparer.prepare(&root, req)
         })
         .await
+    }
+
+    fn start_command(
+        &self,
+        permit: LaunchPermit,
+        scope: tokio_util::sync::CancellationToken,
+    ) -> Result<ExecutionHandle> {
+        let backend = self.command_backend.as_ref().ok_or_else(|| {
+            Error::tool("Command execution is unavailable on this workspace host.")
+        })?;
+        // The engine receives this exact host instance, including its preparation epoch and
+        // allowlist. It cannot accidentally pair an agent host with an app-side process runner.
+        ExecutionEngine::new(
+            Arc::new(self.clone()),
+            backend.runner.clone(),
+            backend.journal.clone(),
+        )
+        .start(permit, scope)
     }
 
     async fn git(&self, call: GitCall) -> Result<GitReply> {
