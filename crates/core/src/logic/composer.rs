@@ -3,6 +3,12 @@
 
 use std::ops::Range;
 
+/// Prepare a draft for sending without changing its leading Markdown indentation.
+/// Trimming both ends would outdent only the first item of a list.
+pub fn text_for_send(text: &str) -> &str {
+    text.trim_end()
+}
+
 /// One replacement and the desired collapsed selection after it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ComposerEdit {
@@ -228,6 +234,35 @@ mod tests {
 
     fn enter(text: &str) -> String {
         apply(text, newline(text, text.len()..text.len()).unwrap()).0
+    }
+
+    #[test]
+    fn sending_three_bullets_preserves_their_alignment() {
+        let edit = indent_on_space("*", "* ", 2..2).unwrap();
+        let (mut draft, _) = apply("* ", edit);
+        draft.push_str("first");
+        draft = enter(&draft);
+        draft.push_str("second");
+        draft = enter(&draft);
+        draft.push_str("third");
+
+        assert_eq!(
+            text_for_send(&draft),
+            "  * first\n  * second\n  * third"
+        );
+    }
+
+    #[test]
+    fn sending_preserves_nested_indentation_and_trims_the_end() {
+        assert_eq!(
+            text_for_send("  - parent\n    - child\n  - sibling\n\n"),
+            "  - parent\n    - child\n  - sibling"
+        );
+    }
+
+    #[test]
+    fn sending_whitespace_only_text_is_empty() {
+        assert_eq!(text_for_send(" \t\r\n  "), "");
     }
 
     #[test]

@@ -296,7 +296,7 @@ impl ChatPanel {
     }
 
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.input.read(cx).value().trim().to_string();
+        let text = composer::text_for_send(&self.input.read(cx).value()).to_string();
         let chat = self.chat.read(cx);
         if self.image_loading
             || self.settings_prompt_open
