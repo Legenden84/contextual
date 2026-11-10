@@ -13,6 +13,8 @@ pub mod admission;
 pub mod execution;
 pub mod journal;
 pub mod prepare;
+pub mod service;
+pub mod wire;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;

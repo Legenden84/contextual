@@ -4,23 +4,30 @@
 //! talks to it over stdin/stdout. Requests run concurrently; `$/cancel` aborts one and answers it
 //! with `RequestCancelled`. The agent exits when stdin closes or after `shutdown`.
 //! A duplicate active request ID is discarded without dispatch or a second response: the
-//! original operation retains its identity and cancellation handle. Command execution is not
-//! exposed; it will require cooperative cleanup rather than this task-abort cancellation.
+//! original operation retains its identity and cancellation handle. Ordinary startup does not
+//! expose execution. The explicitly configured `serve_with_execution` connection uses separate
+//! cooperative command ownership; it never treats task abortion as process-tree cleanup.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use contextual_core::host::WorkspaceHost;
+use contextual_core::rpc_transport::{BoundedLines, MAX_WORKSPACE_FRAME_BYTES};
+use contextual_protocol::rpc::raw::{self, Message, Request};
 use contextual_protocol::rpc::{
-    CancelParams, InitializeParams, InitializeResult, Message, PROTOCOL_VERSION, Request, Response,
-    RpcError, method,
+    CancelParams, InitializeParams, InitializeResult, PROTOCOL_VERSION, Response, RpcError, method,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use serde_json::value::RawValue;
+use tokio::io::{AsyncBufRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::task::{AbortHandle, JoinSet};
+
+mod execution;
+
+pub use execution::serve_with_execution;
 
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -76,23 +83,33 @@ where
 
     let running: Arc<Mutex<HashMap<u64, AbortHandle>>> = Arc::default();
     let mut tasks = JoinSet::new();
-    let mut lines = reader.lines();
-    while let Some(line) = lines.next_line().await? {
+    let mut lines = BoundedLines::new(reader, MAX_WORKSPACE_FRAME_BYTES);
+    while let Some(line) = match lines.next_line().await {
+        Ok(line) => line,
+        Err(error) => {
+            // Do not leave a detached writer waiting on a broken or malformed connection.
+            // JoinSet retains the existing task-abort behavior for a reader error.
+            writer_task.abort();
+            let _ = writer_task.await;
+            return Err(error);
+        }
+    } {
         while tasks.try_join_next().is_some() {}
         if line.trim().is_empty() {
             continue;
         }
-        let msg: Message = match serde_json::from_str(&line) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("unparseable message: {e}");
-                // No id to answer to; JSON-RPC uses null, which our u64 id can't hold. Log only.
+        let msg = match raw::parse(&line) {
+            Ok(message) => message,
+            Err(_) => {
+                // An invalid or ambiguous envelope has no trustworthy identity to answer.
+                // Never log wire contents or payload-bearing deserializer diagnostics.
+                tracing::warn!("discarded malformed workspace RPC envelope");
                 continue;
             }
         };
         match msg {
             Message::Notification(n) if n.method == method::CANCEL => {
-                if let Ok(CancelParams { id }) = serde_json::from_value(n.params)
+                if let Ok(CancelParams { id }) = parse(n.params)
                     && let Some(handle) = running
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
@@ -175,7 +192,10 @@ async fn dispatch(host: &dyn WorkspaceHost, req: Request) -> Response {
     }
 }
 
-async fn initialize(host: &dyn WorkspaceHost, params: Value) -> Result<Value, RpcError> {
+async fn initialize(
+    host: &dyn WorkspaceHost,
+    params: Option<Box<RawValue>>,
+) -> Result<Value, RpcError> {
     let p: InitializeParams = parse(params)?;
     for root in &p.allowed_roots {
         host.allow_root(root).await.map_err(core_error)?;
@@ -187,7 +207,7 @@ async fn initialize(host: &dyn WorkspaceHost, params: Value) -> Result<Value, Rp
     })
 }
 
-async fn call<P, T, F, Fut>(params: Value, f: F) -> Result<Value, RpcError>
+async fn call<P, T, F, Fut>(params: Option<Box<RawValue>>, f: F) -> Result<Value, RpcError>
 where
     P: DeserializeOwned,
     T: Serialize,
@@ -198,9 +218,10 @@ where
     to_value(f(p).await.map_err(core_error)?)
 }
 
-fn parse<P: DeserializeOwned>(params: Value) -> Result<P, RpcError> {
-    serde_json::from_value(params)
-        .map_err(|e| RpcError::new(RpcError::INVALID_PARAMS, e.to_string()))
+fn parse<P: DeserializeOwned>(params: Option<Box<RawValue>>) -> Result<P, RpcError> {
+    let json = params.as_deref().map_or("null", RawValue::get);
+    serde_json::from_str(json)
+        .map_err(|_| RpcError::new(RpcError::INVALID_PARAMS, "Malformed request parameters."))
 }
 
 fn to_value<T: Serialize>(v: T) -> Result<Value, RpcError> {
@@ -230,7 +251,8 @@ mod tests {
         Undo, UndoResult,
     };
     use contextual_protocol::git::{GitCall, GitReply};
-    use tokio::io::BufReader;
+    use contextual_protocol::rpc::Request;
+    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::sync::Notify;
 
     #[tokio::test]
@@ -367,6 +389,61 @@ mod tests {
         let mut bytes = serde_json::to_vec(request).unwrap();
         bytes.push(b'\n');
         writer.write_all(&bytes).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_preparation_fields_are_rejected_before_host_dispatch() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let host = Arc::new(HeldPreparation::default());
+            let (client, server) = tokio::io::duplex(8192);
+            let (server_read, server_write) = tokio::io::split(server);
+            let server_host = host.clone();
+            let server_task = tokio::spawn(async move {
+                serve(BufReader::new(server_read), server_write, server_host).await
+            });
+            let (client_read, mut client_write) = tokio::io::split(client);
+            let mut responses = BufReader::new(client_read).lines();
+
+            client_write
+                .write_all(
+                    b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"workspace/commandPrepare\",\
+                      \"params\":{\"root\":\"/first\",\"root\":\"/second\",\
+                      \"projectEpoch\":\"test-epoch\",\"commandJson\":\"{}\"}}\n",
+                )
+                .await
+                .unwrap();
+
+            let response: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(response.id, 7);
+            assert_eq!(response.error.unwrap().code, RpcError::INVALID_PARAMS);
+            assert_eq!(host.calls.load(Ordering::SeqCst), 0);
+
+            send(
+                &mut client_write,
+                &Request::new(9, method::SHUTDOWN, Value::Null),
+            )
+            .await;
+            let shutdown: Response =
+                serde_json::from_str(&responses.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(shutdown.id, 9);
+            server_task.await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn unterminated_request_is_never_dispatched() {
+        let host = Arc::new(HeldPreparation::default());
+        let input = b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"workspace/commandPrepare\",\
+                      \"params\":{\"root\":\"/project\",\"projectEpoch\":\"epoch\",\
+                      \"commandJson\":\"{}\"}}";
+        let error = serve(&input[..], tokio::io::sink(), host.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(host.calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

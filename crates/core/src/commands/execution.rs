@@ -6,7 +6,8 @@
 //! A backend must establish process-tree ownership before the requested program can run.
 //! Its drop implementation must initiate cleanup even if its async operation is interrupted.
 //! Explicitly configured LocalHosts expose this supervisor through WorkspaceHost::start_command.
-//! Native backends and remote execution transport are subsequent integration work.
+//! The agent service uses the same supervisor after establishing its connection binding.
+//! No native backend is selected by either path.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -260,13 +261,36 @@ impl ExecutionEngine {
     /// On a start error no worker was launched; the caller must finish its approval-gate attempt
     /// as FailedToStart. A new attempt still requires fresh approval.
     pub fn start(&self, permit: LaunchPermit, scope: CancellationToken) -> Result<ExecutionHandle> {
-        let runtime = tokio::runtime::Handle::try_current()
-            .map_err(|_| Error::internal("Command execution requires a Tokio runtime."))?;
         if permit.plan().binding.project.location != Location::Local {
             return Err(Error::forbidden(
                 "Remote projects must execute through their selected agent, never locally.",
             ));
         }
+        self.start_bound(permit, scope)
+    }
+
+    // Only the agent-owned service can enter here. It has checked the independently stored
+    // preparation binding and canonical admission key, not relabelled a RemoteHost as local.
+    pub(super) fn start_agent(
+        &self,
+        dispatch: super::wire::DecodedDispatch,
+        scope: CancellationToken,
+    ) -> Result<ExecutionHandle> {
+        let permit = LaunchPermit {
+            invocation: dispatch.invocation().clone(),
+            call: dispatch.call().clone(),
+            plan: dispatch.plan().clone(),
+        };
+        self.start_bound(permit, scope)
+    }
+
+    fn start_bound(
+        &self,
+        permit: LaunchPermit,
+        scope: CancellationToken,
+    ) -> Result<ExecutionHandle> {
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| Error::internal("Command execution requires a Tokio runtime."))?;
         let admission = self.host.local_command_admission().ok_or_else(|| {
             Error::forbidden("This workspace host cannot execute through an in-process runner.")
         })?;
@@ -304,6 +328,21 @@ pub struct ExecutionHandle {
 }
 
 impl ExecutionHandle {
+    pub(crate) fn from_worker(
+        invocation: InvocationId,
+        task: JoinHandle<ExecutionResult>,
+        cancel: CancellationToken,
+        progress: watch::Receiver<ExecutionProgress>,
+    ) -> Self {
+        Self {
+            invocation,
+            task,
+            guard: cancel.clone().drop_guard(),
+            cancel,
+            progress,
+        }
+    }
+
     pub fn invocation(&self) -> &InvocationId {
         &self.invocation
     }
@@ -346,11 +385,8 @@ impl ExecutionHandle {
 fn command_and_intent(permit: &LaunchPermit) -> Result<(Cmd, ExecutionIntent)> {
     let plan = permit.plan();
     plan.request.validate()?;
-    if plan.binding.project.location != Location::Local {
-        return Err(Error::forbidden(
-            "Remote projects must execute through their selected agent, never locally.",
-        ));
-    }
+    // Entry points, not the journal's location label, determine where execution happens.
+    // Agent intents retain the app's exact WSL location without translating native paths.
     let text = |value: &std::ffi::OsStr| {
         value
             .to_str()
@@ -410,26 +446,14 @@ async fn supervise(
             return ExecutionResult::not_started(ExecutionStatus::FailedToStart, error.message);
         }
     };
-    if cancel.is_cancelled() {
-        return ExecutionResult::not_started(
-            ExecutionStatus::Cancelled,
-            "Cancelled before launch.",
-        );
-    }
-
-    let recovery = tokio::select! {
-        biased;
-        _ = cancel.cancelled() => {
-            return ExecutionResult::not_started(
-                ExecutionStatus::Cancelled,
-                "Cancelled before launch.",
-            );
-        }
-        recovery = tokio::time::timeout(
-            PREPARATION_TIMEOUT,
-            journal.check_recovery(&intent.project, permit.plan().directory.root()),
-        ) => recovery,
-    };
+    // An accepted attempt must reach durable replay protection even if Stop arrives before
+    // spawn. Cancellation is checked by run_checked after intent publication. These bounded
+    // journal operations are never mistaken for a process-cleanup acknowledgement.
+    let recovery = tokio::time::timeout(
+        PREPARATION_TIMEOUT,
+        journal.check_recovery(&intent.project, permit.plan().directory.root()),
+    )
+    .await;
     if !matches!(recovery, Ok(Ok(()))) {
         let mut result = ExecutionResult::not_started(
             ExecutionStatus::FailedToStart,
@@ -579,7 +603,7 @@ impl Capture {
 /// ESC, C1 controls and bidi/invisible formatting characters are made visible rather than
 /// interpreted. Escaping instead of stripping also prevents OSC links from becoming UI links.
 /// These strings must still be rendered as plain text, never parsed as Markdown.
-fn escape_controls(text: &str) -> String {
+pub(super) fn escape_controls(text: &str) -> String {
     let mut escaped = String::new();
     for character in text.chars() {
         if (character.is_control() && !matches!(character, '\n' | '\t'))
@@ -1052,10 +1076,7 @@ mod tests {
     async fn configuring_a_new_host_does_not_accept_an_earlier_hosts_preparation() {
         let (root, _old_host, mut gate, call, plan) = proposal().await;
         let backend = Arc::new(runner(&plan));
-        let host = LocalHost::with_command_backend(
-            backend.clone(),
-            Arc::new(Journal::default()),
-        );
+        let host = LocalHost::with_command_backend(backend.clone(), Arc::new(Journal::default()));
         host.allow_root(root.path().to_str().unwrap())
             .await
             .unwrap();

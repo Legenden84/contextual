@@ -28,6 +28,7 @@ pub mod platform;
 pub mod process;
 pub mod recents;
 pub mod remote;
+pub mod rpc_transport;
 #[cfg(feature = "llm")]
 pub mod settings;
 pub mod threads;

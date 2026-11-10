@@ -17,11 +17,11 @@ use crate::{Error, Result};
 /// previously prepared snapshots.
 pub const ENVIRONMENT_POLICY: &str = "minimal-v1";
 
-const MAX_ENVIRONMENT_BYTES: usize = 32 * 1024;
+pub(super) const MAX_ENVIRONMENT_BYTES: usize = 32 * 1024;
 
 /// Parent variables that may enter the explicitly constructed command environment.
 /// No credentials, agent sockets, loader variables or tool-specific option variables.
-const BASE_VARIABLES: &[&str] = &[
+pub(super) const BASE_VARIABLES: &[&str] = &[
     "PATH",
     "HOME",
     "USER",

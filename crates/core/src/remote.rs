@@ -16,9 +16,10 @@ use contextual_protocol::fs::{
     UndoResult,
 };
 use contextual_protocol::git::{GitCall, GitReply};
+use contextual_protocol::rpc::raw::{self, Message};
 use contextual_protocol::rpc::{
-    AllowRootParams, CancelParams, InitializeParams, InitializeResult, Message, Notification,
-    PROTOCOL_VERSION, Request, Response, method,
+    AllowRootParams, CancelParams, InitializeParams, InitializeResult, Notification,
+    PROTOCOL_VERSION, Request, method,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -30,9 +31,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::ErrorCode;
 use crate::host::WorkspaceHost;
+use crate::rpc_transport::{BoundedLines, MAX_WORKSPACE_FRAME_BYTES};
 use crate::{Error, Result};
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Response>>>>;
+#[path = "remote_commands.rs"]
+mod commands;
+
+type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<raw::Response>>>>;
 
 /// Serialize disconnection with request registration so a caller cannot be inserted after
 /// pending requests have been cleared and then wait forever for a dead connection.
@@ -42,15 +47,18 @@ fn disconnect(pending: &Pending, alive: &AtomicBool) {
     pending.clear();
 }
 
+#[derive(Clone)]
 pub struct RemoteHost {
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
     pending: Pending,
     out: mpsc::UnboundedSender<Vec<u8>>,
-    /// Kept so the process is killed when the host is dropped.
-    _child: Option<Child>,
+    /// Execution workers retain the connection and child through cooperative Stop.
+    _child: Option<Arc<Child>>,
     info: InitializeResult,
     /// Cleared when either direction of the agent connection fails or closes.
     alive: Arc<AtomicBool>,
+    closed: CancellationToken,
+    commands: Arc<commands::CommandConnection>,
 }
 
 impl std::fmt::Debug for RemoteHost {
@@ -90,7 +98,7 @@ impl RemoteHost {
             });
         }
         let mut host = Self::connect(stdout, stdin, app_version, allowed_roots).await?;
-        host._child = Some(child);
+        host._child = Some(Arc::new(child));
         Ok(host)
     }
 
@@ -142,8 +150,11 @@ impl RemoteHost {
         });
         let reader_pending = pending.clone();
         let reader_alive = alive.clone();
+        let host_closed = closed.clone();
+        let commands = Arc::new(commands::CommandConnection::default());
+        let reader_commands = commands.clone();
         tokio::spawn(async move {
-            let mut lines = reader.lines();
+            let mut lines = BoundedLines::new(reader, MAX_WORKSPACE_FRAME_BYTES);
             loop {
                 let line = tokio::select! {
                     biased;
@@ -153,7 +164,7 @@ impl RemoteHost {
                         Ok(None) | Err(_) => break,
                     },
                 };
-                match serde_json::from_str::<Message>(&line) {
+                match raw::parse(&line) {
                     Ok(Message::Response(resp)) => {
                         let tx = reader_pending
                             .lock()
@@ -163,14 +174,26 @@ impl RemoteHost {
                             let _ = tx.send(resp);
                         }
                     }
+                    Ok(Message::Notification(n)) if n.method == method::COMMAND_PROGRESS => {
+                        let bytes = n.params.as_deref().map_or("null", |value| value.get());
+                        // Validate before coalescing. A slow consumer cannot hide a malformed
+                        // intermediate snapshot by overwriting it with a later valid one.
+                        if reader_commands.progress(bytes.as_bytes()).is_err() {
+                            break;
+                        }
+                    }
                     Ok(Message::Notification(n)) => {
-                        // Future command progress may contain unshared output or secrets.
                         tracing::debug!(target: "contextual_agent", "notification {}", n.method)
                     }
                     Ok(Message::Request(r)) => {
                         tracing::warn!("agent sent a request ({}); ignored", r.method)
                     }
-                    Err(e) => tracing::warn!("unparseable agent output: {e}"),
+                    Err(_) => {
+                        // A malformed response cannot establish an operation's completion.
+                        // Fail the connection instead of waiting forever or logging payloads.
+                        tracing::warn!("malformed workspace RPC envelope from agent");
+                        break;
+                    }
                 }
             }
             disconnect(&reader_pending, &reader_alive);
@@ -178,11 +201,13 @@ impl RemoteHost {
         });
 
         let mut host = Self {
-            next_id: AtomicU64::new(1),
+            next_id: Arc::new(AtomicU64::new(1)),
             pending,
             out,
             _child: None,
             alive,
+            closed: host_closed,
+            commands,
             info: InitializeResult {
                 protocol_version: 0,
                 agent_version: String::new(),
@@ -221,12 +246,37 @@ impl RemoteHost {
         &self.info
     }
 
+    /// Explicit host-integration opt-in. The location must come from the trusted launcher,
+    /// never from model arguments or a dispatch envelope. Ordinary app hosts do not call it.
+    pub fn with_command_location(self, location: crate::location::Location) -> Result<Self> {
+        self.commands.configure(location)?;
+        Ok(self)
+    }
+
+    /// Invalidates both transport directions. In-flight commands become Unknown locally;
+    /// connection loss requests cooperative cleanup on an execution-enabled agent.
+    pub fn close(&self) {
+        disconnect(&self.pending, &self.alive);
+        self.closed.cancel();
+    }
+
     /// Sends one request and waits for its response. Dropping the future cancels the request.
     pub async fn request<P: Serialize, T: DeserializeOwned>(
         &self,
         method: &str,
         params: P,
     ) -> Result<T> {
+        if self
+            .info
+            .capabilities
+            .iter()
+            .any(|capability| capability == contextual_protocol::commands::EXECUTION_CAPABILITY)
+            && matches!(method, method::COMMAND_DISPATCH | method::COMMAND_CANCEL)
+        {
+            return Err(Error::forbidden(
+                "Use the permit-consuming command dispatcher and its Stop handle.",
+            ));
+        }
         let mut candidate = self.next_id.load(Ordering::Relaxed);
         let id = loop {
             let next = candidate
@@ -271,7 +321,12 @@ impl RemoteHost {
                 },
             );
         }
-        Ok(serde_json::from_value(resp.result.unwrap_or(Value::Null))?)
+        let result = resp
+            .result
+            .as_deref()
+            .ok_or_else(|| Error::invalid("Workspace agent response has no result."))?;
+        serde_json::from_str(result.get())
+            .map_err(|_| Error::invalid("Malformed workspace agent response."))
     }
 
     fn send<M: Serialize>(&self, msg: &M) -> Result<()> {
@@ -354,7 +409,19 @@ impl WorkspaceHost for RemoteHost {
                 "The workspace agent does not support command preparation. Redeploy it.",
             ));
         }
-        self.request(method::COMMAND_PREPARE, req).await
+        let prepared: PreparedCommand = self.request(method::COMMAND_PREPARE, &req).await?;
+        if prepared.request != req {
+            return Err(Error::conflict("Agent preparation has a different request binding."));
+        }
+        self.commands.remember(&prepared)?;
+        Ok(prepared)
+    }
+    fn start_command(
+        &self,
+        permit: crate::commands::LaunchPermit,
+        scope: CancellationToken,
+    ) -> Result<crate::commands::execution::ExecutionHandle> {
+        commands::start(self, permit, scope)
     }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         self.request(method::GIT, call).await
@@ -535,6 +602,23 @@ impl WorkspaceHost for SupervisedHost {
         })
         .await
     }
+    fn start_command(
+        &self,
+        permit: crate::commands::LaunchPermit,
+        scope: CancellationToken,
+    ) -> Result<crate::commands::execution::ExecutionHandle> {
+        // Never call connected()/call() here: replacing a reviewed connection or retrying
+        // dispatch would turn one approval into a different execution attempt.
+        let current = self
+            .current
+            .try_lock()
+            .map_err(|_| Error::conflict("The reviewed agent connection is changing."))?;
+        let host = current
+            .as_ref()
+            .filter(|host| host.is_alive())
+            .ok_or_else(|| Error::tool("The reviewed agent connection is unavailable."))?;
+        host.start_command(permit, scope)
+    }
     async fn git(&self, call: GitCall) -> Result<GitReply> {
         let read_only = matches!(
             call,
@@ -560,6 +644,8 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use std::time::Duration;
+
+    use contextual_protocol::rpc::Response;
 
     struct FailingWriter {
         inner: tokio::io::DuplexStream,
@@ -633,6 +719,72 @@ mod tests {
             handshake,
         );
         (host.unwrap(), agent_input, agent_output, fail)
+    }
+
+    #[tokio::test]
+    async fn response_payload_duplicates_reach_the_typed_decoder() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (host, agent_input, mut agent_output, _fail) = connection(false).await;
+            let host = Arc::new(host);
+            let request_host = host.clone();
+            let request = tokio::spawn(async move {
+                request_host
+                    .request::<_, PrepareCommand>("test/raw-result", Value::Null)
+                    .await
+            });
+            let mut requests = BufReader::new(agent_input).lines();
+            let sent: Request =
+                serde_json::from_str(&requests.next_line().await.unwrap().unwrap()).unwrap();
+            let response = format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\
+                 \"root\":\"/first\",\"root\":\"/second\",\
+                 \"projectEpoch\":\"epoch\",\"commandJson\":\"{{}}\"}}}}\n",
+                sent.id,
+            );
+            agent_output.write_all(response.as_bytes()).await.unwrap();
+
+            let error = request.await.unwrap().unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput);
+            assert_eq!(error.message, "Malformed workspace agent response.");
+            assert!(host.pending.lock().unwrap().is_empty());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ambiguous_response_invalidates_pending_and_later_calls() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let (host, agent_input, mut agent_output, _fail) = connection(false).await;
+            let host = Arc::new(host);
+            let request_host = host.clone();
+            let request = tokio::spawn(async move {
+                request_host
+                    .request::<_, Value>("test/ambiguous-result", Value::Null)
+                    .await
+            });
+            let mut requests = BufReader::new(agent_input).lines();
+            let sent: Request =
+                serde_json::from_str(&requests.next_line().await.unwrap().unwrap()).unwrap();
+            let response = format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":null,\
+                 \"error\":{{\"code\":-32000,\"message\":\"private-value\"}}}}\n",
+                sent.id,
+            );
+            agent_output.write_all(response.as_bytes()).await.unwrap();
+
+            assert_eq!(request.await.unwrap().unwrap_err().message, AGENT_STOPPED);
+            assert!(!host.is_alive());
+            assert_eq!(
+                host.request::<_, Value>("test/later", Value::Null)
+                    .await
+                    .unwrap_err()
+                    .message,
+                AGENT_STOPPED
+            );
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

@@ -18,12 +18,13 @@ No native process-tree backend is implemented or selected. The in-process engine
 process-wide local-host admission synchronously and checks journal recovery before writing a
 new intent. An explicitly configured LocalHost now exposes this engine through the
 permit-consuming `WorkspaceHost::start_command` entry point. Ordinary hosts still refuse it.
-Protocol version 4 reserves versioned execution envelopes and method names, but the agent
-does not implement those endpoints or advertise the execution capability.
+Protocol version 4 supplies versioned execution envelopes and method names. An explicitly
+configured `serve_with_execution` connection now implements these endpoints around an
+agent-owned service. Ordinary agent startup still does not construct that service or advertise
+execution capability. RemoteHost additionally requires explicit trusted location binding.
 
-Cross-process ownership, remote execution/progress/cancellation transport, native tools,
-chat persistence, Inspect and action cards remain to be implemented. These foundations
-do not enable execution in the app.
+Cross-process ownership, native process backends, native tools, chat persistence, Inspect and
+action cards remain to be implemented. These integrations do not enable execution in the app.
 
 The supplied tests have not been run in the read/edit-block workflow. The agent contract
 tests exercise an agent on the test machine, not an actual Windows-to-WSL deployment.
@@ -294,6 +295,131 @@ connect the agent-owned execution service and durable replay protection; impleme
 progress delivery and cooperative cancellation; retain unknown outcomes on lost delivery or
 completion; and test all of those paths with fake managed processes. Do not advertise the
 capability merely because these DTOs and local service seams exist.
+
+#### 2c wire-validation increment
+
+`commands::wire` adds command-payload validation and observation state without enabling RPC
+execution:
+- Raw JSON decoding checks payload byte limits before deserializing and does not echo serde
+  diagnostics containing private values. Prepared environment maps reject duplicate keys.
+- Dispatch decoding checks invocation syntax, bounded identities, version, exact project/host
+  binding and local/WSL location against an independently supplied expected binding.
+- Preparation fields, argument totals and the restricted environment have explicit limits.
+  Permitted overrides must match the requested values; unrelated environment names fail.
+- Encoding consumes a LaunchPermit and preserves its exact parameters. Encoded bytes are
+  ordinary transport data, not durable authorization. Receiving-side replay protection is
+  still required.
+- DecodedDispatch is data, not a LaunchPermit. Its exact-snapshot comparison must use fresh
+  preparation from the execution host; parsing performs no filesystem access or launch.
+- Stop decoding checks the full invocation/project/host binding but performs no cancellation.
+- ObservationReceiver accepts bounded cumulative output and strictly increasing sequences.
+  Counters, truncation, stream completion, plain-text escaping and result flags are checked.
+  Final results must have a sequence greater than prior progress.
+- Cumulative prefixes cannot be rewritten. A trailing provisional UTF-8 replacement character
+  may change when a split code point is completed by later bytes.
+- Malformed or mismatched observations permanently invalidate the receiver. A later success
+  cannot clear that failure. Disconnection reports Unknown with only the last verified output;
+  it cannot downgrade an already verified final result or establish termination.
+- Known process status and history-write failure remain separate observations. The eventual
+  remote admission owner must retain its slot when history is unconfirmed.
+
+Tests cover permit encoding and snapshot preservation, binding mismatches, malformed requests,
+environment policy, Stop identity, payload limits, cumulative output, split UTF-8, sequence
+replay/wrap, terminal-stream changes, invalid result flags and unknown-on-disconnect behavior.
+These tests have not been run in the read/edit-block workflow.
+
+This is not yet a transport integration: command payload limits do not bound the existing
+JSON-RPC line reader, and decoding through an intermediate Value would lose duplicate-key
+evidence. The executable endpoint increment must connect bounded raw framing, one-shot
+dispatch, agent-owned durable replay/admission, sequenced bounded output delivery and
+cooperative cancellation. Execution capability advertisement and app execution remain off.
+
+#### 2c connection increment: bounded framing and raw payload preservation
+
+The agent and RemoteHost now use bounded, cancellation-safe newline framing:
+- The reader owns partial-frame state across cancelled read futures.
+- A 64 MiB general workspace-frame ceiling is enforced before copying excess bytes.
+  Command payloads retain their additional, smaller codec limits.
+- EOF inside a frame and invalid UTF-8 are transport errors, never complete requests.
+- Framing failure is permanent for that reader; no suffix can be treated as a new frame.
+- Reader errors also stop the agent's writer task instead of leaving it detached.
+
+Incoming RPC envelopes are decoded separately from raw params/results:
+- Duplicate envelope fields, invalid JSON-RPC versions, ambiguous request/response shapes
+  and responses with both result and error are rejected.
+- Explicit result:null remains distinguishable from an absent result.
+- Agent method parameters and RemoteHost typed results are deserialized directly from raw
+  JSON. They no longer pass through Value and lose duplicate-field evidence.
+- Malformed agent envelopes invalidate RemoteHost and fail pending callers. They do not
+  establish a successful or failed command outcome.
+- Wire contents and payload-bearing deserializer diagnostics are not copied into logs.
+- Existing active-ID ownership, cancellation behavior and Source Control retry classification
+  remain in place. The agent still has no executable command endpoint.
+
+Added tests cover exact limits, partial-read cancellation, split UTF-8, incomplete EOF,
+raw request/response duplicate preservation, invalid envelopes, pre-dispatch agent rejection
+and client connection invalidation. These tests have not been run in the read/edit workflow.
+
+Phase 2c is still not complete. Remaining integration includes bounded outgoing progress,
+agent-owned execution and durable replay protection, one-shot RemoteHost dispatch, cooperative
+Stop, client-side unknown-outcome admission across reconnection, and fake-process connection
+tests. Existing task-abort cancellation must not be applied to executable command workers.
+No execution capability is advertised and no native backend or app execution is enabled.
+
+#### 2c executable connection integration
+
+The opt-in agent service and RemoteHost now connect the execution supervisor:
+- `AgentExecutionService` owns a concrete native LocalHost, trusted execution location, managed
+  backend and agent-owned FileExecutionJournal. No RemoteHost can be paired with a local runner.
+- Preparation independently registers project/host epochs and the canonical admission root.
+  Raw dispatch validates against that registry. The supervisor re-prepares the full snapshot
+  after durable intent and before spawn.
+- Accepted workers publish immutable invocation intent even when Stop arrives before spawn.
+  Durable intent rejects duplicate execution after journal reopen; the service additionally
+  retains bounded in-memory IDs, including synchronous refusals. Admission errors are not
+  queued attempts and no client dispatch path retries them.
+- Canonical native admission remains process-wide. Unknown process outcomes, unconfirmed
+  history and interrupted workers retain their reservations.
+- `serve_with_execution` is an explicit library integration seam, not ordinary agent startup.
+  Only that connection advertises execution capability. Its process workers belong to the
+  service, independently of RPC waiters.
+- Outgoing connection buffering is eight bounded frames. Process output remains independently
+  capped at 64 KiB per stream and continues draining. Cumulative watch snapshots and checked
+  sequences permit skipped progress without losing retained prefixes. A saturated final-result
+  queue or stalled writer closes the connection rather than fabricating completion.
+- Stop validates the full invocation binding and returns the same final observation as dispatch,
+  only after supervisor cleanup and completion recording. `$/cancel` on executable dispatch
+  also requests cooperative Stop without removing the active RPC ID or aborting its waiter.
+- Reader EOF/error, malformed framing, writer failure and shutdown cancel the execution scope.
+  The connection awaits service cleanup before retiring RPC tasks. Dropping a connection future
+  requests cancellation; orderly owners must still await shutdown before stopping Tokio.
+- RemoteHost consumes one permit synchronously, requires an exact preparation cached on that
+  connection, and binds location from trusted integration code. Generic RPC requests cannot
+  dispatch commands on an execution-capable agent.
+- SupervisedHost dispatch uses only its current already-reviewed connection. It never launches,
+  reconnects, retries or falls back while consuming approval.
+- Incoming progress is validated before watch coalescing. Invalid observations, RPC errors,
+  lost delivery and unverified completion become Unknown with the last verified output.
+- Client reservations are process-wide and keyed by location plus host-native canonical root,
+  not connection/project epochs. Reconnection and fresh preparation cannot clear Unknown or
+  unconfirmed history. There is no reset/assume-stopped API or automatic reconciliation.
+- Service bindings/retained operations are capped at 32 projects, invocation memory at 1,024
+  attempts, client unresolved reservations at 256, and executable connection requests at 64.
+  Limits refuse work instead of evicting replay or unresolved-state protection.
+- Unshared output stays in memory. No Foundry tools, UI controls or ordinary app execution
+  configuration were added.
+
+New Unix connection tests use fake managed process trees and a real file journal. They cover
+approved dispatch, cumulative bounded output, independent-gate admission, exact parameter
+boundaries, stale preparation, cooperative Stop, duplicate active RPC/invocation IDs, durable
+duplicate protection after journal reopen, old-review refusal on a replacement connection,
+and unresolved client admission after disconnection and agent cleanup.
+
+These patches have not been compiled, formatted or tested in the read/edit-block workflow.
+They are not evidence of actual WSL, Windows or macOS process-tree behavior. Next work returns
+to Phase 2b: inspected native ownership backends, cross-process admission/reconciliation and
+Windows durable publication. App enablement remains blocked on that work and lifecycle/UI
+integration.
 
 ### 2. Runner and local/remote host lifecycle
 

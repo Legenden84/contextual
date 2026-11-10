@@ -48,7 +48,40 @@ pub struct PreparedCommand {
     pub program: String,
     pub args: Vec<String>,
     /// Complete environment after filtering and permitted overrides, not an inherited delta.
+    #[serde(deserialize_with = "deserialize_environment")]
     pub environment: BTreeMap<String, String>,
+}
+
+fn deserialize_environment<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct UniqueEnvironment;
+
+    impl<'de> serde::de::Visitor<'de> for UniqueEnvironment {
+        type Value = BTreeMap<String, String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an environment object with unique variable names")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut environment = BTreeMap::new();
+            while let Some((name, value)) = map.next_entry::<String, String>()? {
+                if environment.insert(name, value).is_some() {
+                    return Err(serde::de::Error::custom(
+                        "Duplicate command environment variable.",
+                    ));
+                }
+            }
+            Ok(environment)
+        }
+    }
+
+    deserializer.deserialize_map(UniqueEnvironment)
 }
 
 impl std::fmt::Debug for PreparedCommand {
@@ -143,8 +176,9 @@ pub struct CommandOutput {
     pub stderr: CommandStreamOutput,
 }
 
-/// A cumulative snapshot. Sequence numbers increase per invocation without wrapping.
+/// A cumulative snapshot. Sequence numbers start at one and increase without wrapping.
 /// Receivers may skip intermediate snapshots, but must reject mismatched or stale identities.
+/// The final result uses a sequence greater than every preceding progress snapshot.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CommandProgress {
@@ -251,6 +285,17 @@ mod tests {
         encoded.as_object_mut().unwrap().remove("approved");
         encoded.as_object_mut().unwrap().remove("version");
         assert!(serde_json::from_value::<DispatchCommand>(encoded).is_err());
+    }
+
+    #[test]
+    fn duplicate_environment_keys_are_not_silently_overwritten() {
+        let encoded = serde_json::to_string(&dispatch()).unwrap();
+        let duplicate = encoded.replace(
+            r#""PATH":"/usr/bin""#,
+            r#""PATH":"/unreviewed","PATH":"/usr/bin""#,
+        );
+        assert_ne!(duplicate, encoded);
+        assert!(serde_json::from_str::<DispatchCommand>(&duplicate).is_err());
     }
 
     #[test]

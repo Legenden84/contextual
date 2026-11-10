@@ -182,6 +182,178 @@ pub struct ProgressParams {
     pub message: String,
 }
 
+pub mod raw {
+    //! Incoming envelopes with payloads preserved as raw JSON.
+    //!
+    //! Deserialize command payloads directly from RawValue, never through Value. This keeps
+    //! duplicate-field evidence available to the command validators. None of these types
+    //! implement Debug: payloads can contain unshared output or restricted environments.
+
+    use serde::{Deserialize, Deserializer};
+    use serde_json::value::RawValue;
+
+    use super::{JSONRPC, RpcError};
+
+    pub struct Request {
+        pub id: u64,
+        pub method: String,
+        pub params: Option<Box<RawValue>>,
+    }
+
+    pub struct Notification {
+        pub method: String,
+        pub params: Option<Box<RawValue>>,
+    }
+
+    pub struct Response {
+        pub id: u64,
+        pub result: Option<Box<RawValue>>,
+        pub error: Option<RpcError>,
+    }
+
+    pub enum Message {
+        Request(Request),
+        Notification(Notification),
+        Response(Response),
+    }
+
+    // Preserve the distinction between an absent field and a present JSON null. In particular,
+    // result:null is a valid response, but id:null is not an invocation identity.
+    fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        T::deserialize(deserializer).map(Some)
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Envelope {
+        jsonrpc: String,
+        #[serde(default, deserialize_with = "present")]
+        id: Option<u64>,
+        #[serde(default, deserialize_with = "present")]
+        method: Option<String>,
+        #[serde(default, deserialize_with = "present")]
+        params: Option<Box<RawValue>>,
+        #[serde(default, deserialize_with = "present")]
+        result: Option<Box<RawValue>>,
+        #[serde(default, deserialize_with = "present")]
+        error: Option<RpcError>,
+    }
+
+    /// Validates the envelope without interpreting its payload.
+    ///
+    /// The framing layer must bound `line` before calling this function. Errors deliberately
+    /// omit serde diagnostics and wire contents.
+    pub fn parse(line: &str) -> Result<Message, &'static str> {
+        const INVALID: &str = "Malformed workspace RPC envelope.";
+        let envelope: Envelope = serde_json::from_str(line).map_err(|_| INVALID)?;
+        if envelope.jsonrpc != JSONRPC {
+            return Err(INVALID);
+        }
+        if let Some(method) = envelope.method {
+            if method.is_empty()
+                || method.len() > 128
+                || method.chars().any(char::is_control)
+                || envelope.result.is_some()
+                || envelope.error.is_some()
+            {
+                return Err(INVALID);
+            }
+            return Ok(match envelope.id {
+                Some(id) => Message::Request(Request {
+                    id,
+                    method,
+                    params: envelope.params,
+                }),
+                None => Message::Notification(Notification {
+                    method,
+                    params: envelope.params,
+                }),
+            });
+        }
+        if envelope.params.is_some() || envelope.result.is_some() == envelope.error.is_some() {
+            return Err(INVALID);
+        }
+        let id = envelope.id.ok_or(INVALID)?;
+        Ok(Message::Response(Response {
+            id,
+            result: envelope.result,
+            error: envelope.error,
+        }))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[derive(Deserialize)]
+        struct Payload {
+            #[serde(rename = "value")]
+            _value: u32,
+        }
+
+        #[test]
+        fn duplicate_payload_fields_survive_request_envelope_decoding() {
+            let line = r#"{"jsonrpc":"2.0","id":1,"method":"test","params":{"value":1,"value":2}}"#;
+            let Message::Request(request) = parse(line).ok().unwrap() else {
+                panic!("expected request");
+            };
+            let params = request.params.unwrap();
+            assert_eq!(params.get(), r#"{"value":1,"value":2}"#);
+            assert!(serde_json::from_str::<Payload>(params.get()).is_err());
+        }
+
+        #[test]
+        fn duplicate_payload_fields_survive_response_envelope_decoding() {
+            let line = r#"{"jsonrpc":"2.0","id":1,"result":{"value":1,"value":2}}"#;
+            let Message::Response(response) = parse(line).ok().unwrap() else {
+                panic!("expected response");
+            };
+            let result = response.result.unwrap();
+            assert_eq!(result.get(), r#"{"value":1,"value":2}"#);
+            assert!(serde_json::from_str::<Payload>(result.get()).is_err());
+        }
+
+        #[test]
+        fn explicit_null_result_is_not_mistaken_for_an_absent_result() {
+            let Message::Response(response) = parse(r#"{"jsonrpc":"2.0","id":1,"result":null}"#)
+                .ok()
+                .unwrap()
+            else {
+                panic!("expected response");
+            };
+            assert_eq!(response.result.unwrap().get(), "null");
+        }
+
+        #[test]
+        fn ambiguous_duplicate_and_incomplete_envelopes_are_refused() {
+            for line in [
+                r#"{"jsonrpc":"2.0","id":1,"id":2,"method":"test"}"#,
+                r#"{"jsonrpc":"2.0","id":null,"method":"test"}"#,
+                r#"{"jsonrpc":"2.0","id":1}"#,
+                r#"{"jsonrpc":"2.0","id":1,"result":null,"error":{"code":1,"message":"x"}}"#,
+                r#"{"jsonrpc":"2.0","id":1,"method":"test","result":null}"#,
+                r#"{"jsonrpc":"2.0","id":1,"method":null,"result":null}"#,
+                r#"{"jsonrpc":"1.0","id":1,"method":"test"}"#,
+                r#"{"jsonrpc":"2.0","method":"test","unexpected":true}"#,
+            ] {
+                assert!(parse(line).is_err(), "{line}");
+            }
+        }
+
+        #[test]
+        fn malformed_envelope_errors_do_not_echo_private_values() {
+            let error = parse(r#"{"jsonrpc":"2.0","id":"private-value","method":"test"}"#)
+                .err()
+                .unwrap();
+            assert_eq!(error, "Malformed workspace RPC envelope.");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
