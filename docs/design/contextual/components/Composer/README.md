@@ -25,6 +25,14 @@ Typing `* `, `- `, `+ `, `1. ` or `1) ` on a new, unindented line gives the mark
 two-space text indent. An asterisk without its following space stays literal. Existing
 indentation is preserved, and bulk pasted text is not automatically reformatted.
 
+With the caret anywhere on a list item, Tab indents that line by two more spaces and changes
+an unordered bullet (`*`, `+` or `-`) to `-`. Shift+Tab removes up to two leading spaces or one
+leading tab, keeping the marker. Numbering and checkbox state are preserved. These shortcuts
+also work on empty items; Enter then continues at the new indentation level. The caret stays
+at the same position relative to the content, and each indentation edit uses native undo.
+Selected text, ordinary prose, quotes and fenced code retain native Tab behavior. Shift+Tab
+on an already unindented item also falls through, allowing keyboard focus to leave the input.
+
 Enter continues a bullet, increments a numbered list, or continues a `> ` quote. Checklists
 such as `- [x] done` continue with an unchecked `- [ ] ` item. Enter on an empty item removes
 its marker and indentation and inserts a regular line break. Shift+Enter inserts a plain

@@ -31,7 +31,9 @@ gpui_kit::actions!(
         CloseFolder,
         ZoomIn,
         ZoomOut,
-        ResetZoom
+        ResetZoom,
+        ComposerIndent,
+        ComposerOutdent
     ]
 );
 
@@ -172,6 +174,20 @@ fn zoom_keys(macos: bool) -> [&'static str; 6] {
 }
 
 fn keymap(cx: &mut App) {
+    // Match the focused Input inside the composer, rather than competing with
+    // its bindings at an ancestor node. Register after the toolkit's keymap.
+    cx.bind_keys([
+        KeyBinding::new(
+            "tab",
+            ComposerIndent,
+            Some("ContextualComposer > Input"),
+        ),
+        KeyBinding::new(
+            "shift-tab",
+            ComposerOutdent,
+            Some("ContextualComposer > Input"),
+        ),
+    ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     // Fallback for toolkit popups whose focus lives outside Shell's subtree.
     cx.on_action(|_: &ZoomIn, cx| {

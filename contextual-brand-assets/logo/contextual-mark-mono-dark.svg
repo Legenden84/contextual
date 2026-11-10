@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs><mask id="m"><rect width="32" height="32" fill="#fff"/>
+    <rect x="10.25" y="6.25" width="20" height="23.5" rx="4.25" fill="#000"/></mask></defs>
+  <rect x="2.5" y="3" width="17" height="22" rx="3.5" fill="#1f2328" mask="url(#m)"/>
+  <rect x="11.75" y="7.75" width="17" height="20.5" rx="2.75" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <rect x="14.75" y="11.5" width="10.5" height="2.5" rx="1.25" fill="#1f2328"/>
+  <rect x="14.75" y="16.25" width="7" height="2.5" rx="1.25" fill="#1f2328"/>
+  <rect x="14.75" y="21" width="11" height="2.5" rx="1.25" fill="#1f2328" opacity=".45"/>
+</svg>

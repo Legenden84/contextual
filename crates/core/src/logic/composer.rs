@@ -176,6 +176,58 @@ pub fn indent_on_space(
     Some(ComposerEdit::new(start..cursor, format!("  {typed}")))
 }
 
+/// Tab indents the current list item by two spaces, using `-` for unordered
+/// bullets. Shift+Tab (`outdent`) removes up to two leading spaces or one tab,
+/// preserving the marker. Numbering and checkbox state are never changed.
+/// Selections, non-list lines and fenced code are left to the native input.
+/// An already unindented item returns `None` on outdent, allowing focus traversal.
+pub fn indent_list(
+    text: &str,
+    selection: Range<usize>,
+    outdent: bool,
+) -> Option<ComposerEdit> {
+    if !valid_range(text, &selection) || !selection.is_empty() {
+        return None;
+    }
+
+    let cursor = selection.start;
+    let start = line_start(text, cursor);
+    let end = text[cursor..].find('\n').map_or(text.len(), |i| cursor + i);
+    let line = &text[start..end];
+    if in_fence(&text[..start]) || thematic_break(line) || !prefix(line)?.list {
+        return None;
+    }
+
+    if outdent {
+        let removed = if line.starts_with('\t') {
+            1
+        } else {
+            line.bytes().take_while(|b| *b == b' ').take(2).count()
+        };
+        if removed == 0 {
+            return None;
+        }
+        return Some(ComposerEdit {
+            range: start..start + removed,
+            text: String::new(),
+            cursor: cursor - removed.min(cursor - start),
+        });
+    }
+
+    let body = line.trim_start_matches([' ', '\t']);
+    let indent_len = line.len() - body.len();
+    let unordered = matches!(body.as_bytes().first(), Some(b'*' | b'-' | b'+'));
+    Some(ComposerEdit {
+        range: start..start + indent_len + usize::from(unordered),
+        text: format!(
+            "  {}{}",
+            &line[..indent_len],
+            if unordered { "-" } else { "" }
+        ),
+        cursor: cursor + 2,
+    })
+}
+
 /// Plain Enter: continue a list/quote, exit an empty item, or insert a normal
 /// newline. Replacing a selection is deliberately ordinary text editing.
 pub fn newline(text: &str, selection: Range<usize>) -> Option<ComposerEdit> {
@@ -295,6 +347,119 @@ mod tests {
             assert!(indent_on_space(before, after, after.len()..after.len()).is_none());
         }
         assert!(indent_on_space("*hello", "* hello", 2..2).is_none());
+    }
+
+    #[test]
+    fn tab_indents_bullets_and_preserves_numbering_and_checkbox_state() {
+        for (text, expected) in [
+            ("  * ", "    - "),
+            ("  * item", "    - item"),
+            ("+ item", "  - item"),
+            ("  - item", "    - item"),
+            ("  9. item", "    9. item"),
+            ("2) item", "  2) item"),
+            ("  * [X] done", "    - [X] done"),
+        ] {
+            let edit = indent_list(text, text.len()..text.len(), false).unwrap();
+            assert_eq!(apply(text, edit), (expected.into(), expected.len()));
+        }
+    }
+
+    #[test]
+    fn shift_tab_removes_one_level_without_changing_the_marker() {
+        for (text, expected) in [
+            ("    - item", "  - item"),
+            ("  * item", "* item"),
+            (" - item", "- item"),
+            ("\t- item", "- item"),
+            ("   - item", " - item"),
+            ("  9. item", "9. item"),
+            ("  - [x] done", "- [x] done"),
+        ] {
+            let edit = indent_list(text, text.len()..text.len(), true).unwrap();
+            assert_eq!(apply(text, edit), (expected.into(), expected.len()));
+        }
+    }
+
+    #[test]
+    fn repeated_tabs_and_enter_keep_the_new_list_level() {
+        let text = "  * item";
+        let (text, cursor) = apply(
+            text,
+            indent_list(text, text.len()..text.len(), false).unwrap(),
+        );
+        let edit = indent_list(&text, cursor..cursor, false).unwrap();
+        let (text, cursor) = apply(&text, edit);
+        let edit = indent_list(&text, cursor..cursor, true).unwrap();
+        let (text, _) = apply(&text, edit);
+        assert_eq!(enter(&text), "    - item\n    - ");
+    }
+
+    #[test]
+    fn tab_preserves_the_unicode_caret_and_other_lines() {
+        let text = "intro 🦀\n  * café world\n  * sibling";
+        let cursor = "intro 🦀\n  * café".len();
+        let edit = indent_list(text, cursor..cursor, false).unwrap();
+        let (indented, next_cursor) = apply(text, edit);
+        assert_eq!(
+            (&*indented, next_cursor),
+            (
+                "intro 🦀\n    - café world\n  * sibling",
+                "intro 🦀\n    - café".len()
+            )
+        );
+
+        let edit = indent_list(&indented, next_cursor..next_cursor, true).unwrap();
+        assert_eq!(
+            apply(&indented, edit),
+            ("intro 🦀\n  - café world\n  * sibling".into(), cursor)
+        );
+    }
+
+    #[test]
+    fn shift_tab_keeps_a_caret_inside_removed_indentation_on_the_line() {
+        let text = "intro\n  - item";
+        let cursor = "intro\n ".len();
+        let edit = indent_list(text, cursor..cursor, true).unwrap();
+        assert_eq!(apply(text, edit), ("intro\n- item".into(), "intro\n".len()));
+    }
+
+    #[test]
+    fn tab_leaves_non_lists_fences_and_thematic_breaks_to_native_input() {
+        for text in [
+            "",
+            "ordinary prose",
+            "a * item",
+            "> quote",
+            "```rust\n  * code",
+            "~~~text\n  - code",
+            "  * * *",
+            "  - - -",
+        ] {
+            for outdent in [false, true] {
+                assert!(
+                    indent_list(text, text.len()..text.len(), outdent).is_none(),
+                    "{text:?}, outdent={outdent}"
+                );
+            }
+        }
+        let text = "```\ncode\n```\n* item";
+        let edit = indent_list(text, text.len()..text.len(), false).unwrap();
+        assert_eq!(apply(text, edit).0, "```\ncode\n```\n  - item");
+    }
+
+    #[test]
+    fn tab_leaves_selections_and_invalid_ranges_untouched() {
+        let text = "  * café 🦀";
+        for selection in [0..text.len(), 9..9, 0..text.len() + 1] {
+            assert!(indent_list(text, selection, false).is_none());
+        }
+    }
+
+    #[test]
+    fn shift_tab_at_column_zero_allows_focus_traversal() {
+        let text = "- item";
+        assert!(indent_list(text, text.len()..text.len(), true).is_none());
     }
 
     #[test]

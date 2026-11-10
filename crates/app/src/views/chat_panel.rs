@@ -302,6 +302,31 @@ impl ChatPanel {
         }
     }
 
+    fn composer_indent(
+        &mut self,
+        outdent: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_prompt_open
+            || !self.input.read(cx).focus_handle(cx).is_focused(window)
+            || self.composer_is_composing(window, cx)
+        {
+            cx.propagate();
+            return;
+        }
+
+        let input = self.input.read(cx);
+        let edit = composer::indent_list(&input.value(), input.selected_range(), outdent);
+        if let Some(edit) = edit {
+            self.edit_composer(edit, window, cx);
+            cx.stop_propagation();
+        } else {
+            // Let the toolkit's existing binding handle non-list text and selections.
+            cx.propagate();
+        }
+    }
+
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = composer::text_for_send(&self.input.read(cx).value()).to_string();
         let chat = self.chat.read(cx);
@@ -1276,6 +1301,17 @@ impl Render for ChatPanel {
                             .child(
                                 div()
                                     .id("composer")
+                                    .key_context("ContextualComposer")
+                                    .capture_action(cx.listener(
+                                        |t, _: &crate::ComposerIndent, window, cx| {
+                                            t.composer_indent(false, window, cx);
+                                        },
+                                    ))
+                                    .capture_action(cx.listener(
+                                        |t, _: &crate::ComposerOutdent, window, cx| {
+                                            t.composer_indent(true, window, cx);
+                                        },
+                                    ))
                                     .flex()
                                     .flex_col()
                                     .min_w_0()
