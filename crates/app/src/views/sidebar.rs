@@ -135,7 +135,7 @@ impl Render for Sidebar {
                 "tab-rules",
                 SideTab::Rules,
                 IconName::BookOpen,
-                "Rules",
+                "Skills",
                 Some(rules_on),
                 cx,
             ))
