@@ -114,6 +114,7 @@ fn cfg(endpoint: &str, deployment: &str) -> FoundryConfig {
         context_limit: None,
         input_price_per_1m: None,
         output_price_per_1m: None,
+        tokens_per_minute: None,
     }
 }
 
@@ -823,4 +824,100 @@ async fn image_detail_is_always_high() {
     let reqs = server.received_requests().await.unwrap();
     let body: Value = serde_json::from_slice(&reqs[2].body).unwrap();
     assert_eq!(body["input"][0]["content"][0]["detail"], "high");
+}
+
+/// Answers 429 (with `retry-after-ms`) a number of times, then the recorded stream.
+struct RateLimited {
+    remaining: std::sync::atomic::AtomicUsize,
+    body: &'static str,
+}
+
+impl Respond for RateLimited {
+    fn respond(&self, _: &Request) -> ResponseTemplate {
+        use std::sync::atomic::Ordering;
+        let left = self.remaining.load(Ordering::SeqCst);
+        if left == 0 {
+            return sse("responses-stream.sse");
+        }
+        self.remaining.store(left - 1, Ordering::SeqCst);
+        ResponseTemplate::new(429)
+            .insert_header("retry-after-ms", "1000")
+            .set_body_raw(self.body, "application/json")
+    }
+}
+
+async fn rate_limited(times: usize, body: &'static str) -> MockServer {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let server = MockServer::builder().listener(listener).start().await;
+    Mock::given(any())
+        .respond_with(RateLimited {
+            remaining: times.into(),
+            body,
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+const TOKEN_RATE_LIMIT: &str = r#"{"error":{"code":"429","message":"Requests to the gpt-6 deployment have exceeded token rate limit. Please retry after 1 second."}}"#;
+
+#[tokio::test]
+async fn rate_limits_are_waited_out_and_reported() {
+    // More 429s than the two retries other errors get.
+    let server = rate_limited(3, TOKEN_RATE_LIMIT).await;
+    let c = client(&server.uri(), "gpt-resp");
+    let events = chat(&c, req(vec![], "hi", None)).await;
+    let waits: Vec<&Value> = events.iter().filter(|e| e["type"] == "waiting").collect();
+    assert_eq!(
+        waits,
+        vec![&json!({"type":"waiting","seconds":1,"reason":"rateLimited"}); 3]
+    );
+    assert_eq!(events.last().unwrap()["type"], "done");
+    assert!(!events.iter().any(|e| e["type"] == "error"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn an_exhausted_quota_is_not_retried() {
+    let server = rate_limited(
+        1,
+        r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"#,
+    )
+    .await;
+    let c = client(&server.uri(), "gpt-resp");
+    let events = chat(&c, req(vec![], "hi", None)).await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "error");
+    assert!(
+        events[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exceeded your current quota")
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn requests_are_held_to_the_configured_quota() {
+    let server = azure_like().await;
+    let mut config = cfg(&format!("{}/", server.uri()), "gpt-paced");
+    // Room for one turn a minute: each reserves its input plus 4096 output tokens.
+    config.tokens_per_minute = Some(6_000);
+    let c = FoundryClient::new(config).unwrap().with_max_retries(0);
+    let first = chat(&c, req(vec![], "hi", None)).await;
+    assert_eq!(first.last().unwrap()["type"], "done");
+
+    let cancel = CancellationToken::new();
+    let mut second = c.stream_conversation(req(vec![], "again", None), cancel.clone());
+    let event = tokio::time::timeout(Duration::from_secs(5), second.next())
+        .await
+        .expect("a wait is reported straight away")
+        .unwrap();
+    let ChatEvent::Waiting { seconds, reason } = event else {
+        panic!("expected a wait, got {event:?}");
+    };
+    assert_eq!(reason, contextual_core::llm::WaitReason::Quota);
+    assert!((55..=60).contains(&seconds), "{seconds}");
+    cancel.cancel();
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }

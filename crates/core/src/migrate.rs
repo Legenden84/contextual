@@ -74,6 +74,7 @@ pub fn import_env(text: &str) -> EnvImport {
         context_limit: num(cfg::ENV_CONTEXT_LIMIT).and_then(|v| v.parse().ok()),
         input_price_per_1m: num(cfg::ENV_INPUT_PRICE).and_then(|v| v.parse().ok()),
         output_price_per_1m: num(cfg::ENV_OUTPUT_PRICE).and_then(|v| v.parse().ok()),
+        tokens_per_minute: num(cfg::ENV_TOKENS_PER_MINUTE).and_then(|v| v.parse().ok()),
     };
     EnvImport {
         foundry,
@@ -95,7 +96,8 @@ pub fn merge(into: &mut FoundrySettings, from: &FoundrySettings) {
         max_completion_tokens,
         context_limit,
         input_price_per_1m,
-        output_price_per_1m
+        output_price_per_1m,
+        tokens_per_minute
     );
 }
 

@@ -41,6 +41,8 @@ pub struct FoundrySettings {
     pub input_price_per_1m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_price_per_1m: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_per_minute: Option<u64>,
 }
 
 impl FoundrySettings {
@@ -55,6 +57,7 @@ impl FoundrySettings {
             context_limit: cfg.context_limit,
             input_price_per_1m: cfg.input_price_per_1m,
             output_price_per_1m: cfg.output_price_per_1m,
+            tokens_per_minute: cfg.tokens_per_minute,
         }
     }
 
@@ -68,6 +71,7 @@ impl FoundrySettings {
             config::ENV_CONTEXT_LIMIT => self.context_limit.map(|n| n.to_string()),
             config::ENV_INPUT_PRICE => self.input_price_per_1m.map(|n| n.to_string()),
             config::ENV_OUTPUT_PRICE => self.output_price_per_1m.map(|n| n.to_string()),
+            config::ENV_TOKENS_PER_MINUTE => self.tokens_per_minute.map(|n| n.to_string()),
             _ => None,
         }
     }

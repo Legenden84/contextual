@@ -10,6 +10,7 @@
 pub mod client;
 pub mod config;
 pub mod conversation;
+pub mod pacing;
 pub mod sse;
 pub mod tasks;
 pub mod tools;
@@ -20,6 +21,7 @@ pub use config::{
     ConfigProblems, FoundryConfig, foundry_config_from_env, public_config, read_foundry_config,
 };
 pub use conversation::ChatStream;
+pub use pacing::WaitReason;
 pub use tools::{PROPOSE_COMMAND, ToolCall, ToolResult, command_request};
 pub use types::{
     ApiKind, ChatEvent, ChatMessage, ChatRole, ContentPart, ConversationRequest, ImageUrl,

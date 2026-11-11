@@ -71,6 +71,7 @@ pub struct SettingsScreen {
     max_tokens: Field,
     in_price: Field,
     out_price: Field,
+    tokens_per_minute: Field,
     max_kb: Field,
     new_exclusion: Entity<InputState>,
     output_prompt: Entity<TextareaState>,
@@ -175,6 +176,12 @@ impl SettingsScreen {
             opt(f.output_price_per_1m),
             false,
         );
+        let tokens_per_minute = field(
+            "Tokens per minute",
+            "The deployment's quota; requests wait until they fit. Empty: no pacing.",
+            opt(f.tokens_per_minute),
+            false,
+        );
         let max_kb = field(
             "Max file size (KB)",
             "Larger files are listed as too large.",
@@ -221,6 +228,7 @@ impl SettingsScreen {
             max_tokens,
             in_price,
             out_price,
+            tokens_per_minute,
             max_kb,
             new_exclusion,
             output_prompt,
@@ -266,6 +274,10 @@ impl SettingsScreen {
             context_limit: num(self.text(&self.context_limit, cx), self.context_limit.label)?,
             input_price_per_1m: num(self.text(&self.in_price, cx), self.in_price.label)?,
             output_price_per_1m: num(self.text(&self.out_price, cx), self.out_price.label)?,
+            tokens_per_minute: num(
+                self.text(&self.tokens_per_minute, cx),
+                self.tokens_per_minute.label,
+            )?,
         };
         s.workspace.exclusions = self.exclusions.clone();
         s.workspace.presets = self.presets.read(cx).presets(cx);
@@ -333,6 +345,10 @@ impl SettingsScreen {
             (
                 &self.out_price,
                 f.output_price_per_1m.map(|v| v.to_string()),
+            ),
+            (
+                &self.tokens_per_minute,
+                f.tokens_per_minute.map(|v| v.to_string()),
             ),
         ] {
             if let Some(v) = value {
@@ -805,6 +821,7 @@ impl Render for SettingsScreen {
                     .child(self.field_row(&self.max_tokens, cx))
                     .child(self.field_row(&self.in_price, cx))
                     .child(self.field_row(&self.out_price, cx))
+                    .child(self.field_row(&self.tokens_per_minute, cx))
                     .child(
                         div()
                             .flex()

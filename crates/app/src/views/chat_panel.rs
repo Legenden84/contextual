@@ -72,6 +72,8 @@ pub struct ChatPanel {
     command_details: HashSet<contextual_core::commands::CallId>,
     /// Redraws the running time of a command while one runs.
     command_clock: Option<gpui_kit::Task<()>>,
+    /// Redraws the countdown while a request waits for Azure capacity.
+    capacity_clock: Option<gpui_kit::Task<()>>,
     _subs: Vec<Subscription>,
 }
 
@@ -216,6 +218,26 @@ impl ChatPanel {
                         }
                     }));
                 }
+                if chat.capacity_wait().is_some() && this.capacity_clock.is_none() {
+                    this.capacity_clock = Some(cx.spawn(async move |this, cx| {
+                        loop {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(250))
+                                .await;
+                            let waiting = this.update(cx, |this, cx| {
+                                let waiting = this.chat.read(cx).capacity_wait().is_some();
+                                if !waiting {
+                                    this.capacity_clock = None;
+                                }
+                                cx.notify();
+                                waiting
+                            });
+                            if !waiting.unwrap_or(false) {
+                                break;
+                            }
+                        }
+                    }));
+                }
                 if replaced || n != this.rendered {
                     this.list.reset(n);
                     this.list.scroll_to_end();
@@ -291,6 +313,7 @@ impl ChatPanel {
             command_collapsed: HashSet::new(),
             command_details: HashSet::new(),
             command_clock: None,
+            capacity_clock: None,
             _subs: subs,
         }
     }
@@ -1263,19 +1286,20 @@ impl Render for ChatPanel {
         let reduce_motion = self.app.read(cx).settings.reduce_motion;
         // One stable location for all foreground work. User decisions are not busy work,
         // so approval and the native picker show a static mark rather than an animation.
-        let activity = chat
-            .activity()
-            .map(|activity| (activity.label(), true))
+        let activity: Option<(SharedString, bool)> = chat
+            .activity_text()
+            .map(|text| (text.into(), true))
             .or_else(|| {
                 chat.pending
                     .as_ref()
-                    .map(|_| ("Waiting for your approval", false))
+                    .map(|_| ("Waiting for your approval".into(), false))
             })
             .or_else(|| {
                 if self.image_picker_open {
-                    Some(("Choose images", false))
+                    Some(("Choose images".into(), false))
                 } else {
-                    self.image_loading.then_some(("Preparing images", true))
+                    self.image_loading
+                        .then_some(("Preparing images".into(), true))
                 }
             });
         let attachments: Vec<_> = chat

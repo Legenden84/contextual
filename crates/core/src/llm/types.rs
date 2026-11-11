@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::pacing::WaitReason;
 use super::tools::{ToolCall, ToolResult, definition_tokens};
 use crate::logic::context::PICTURE_TOKENS;
 use crate::logic::format::estimate_tokens;
@@ -228,6 +229,12 @@ pub enum ChatEvent {
     /// that resembles a command request stays inert.
     ToolsUnsupported {
         message: String,
+    },
+    /// The request is held for about `seconds` before it is sent (again); the turn goes on
+    /// by itself afterwards. Sent again if the wait is extended.
+    Waiting {
+        seconds: u64,
+        reason: WaitReason,
     },
     Done {
         finish_reason: Option<String>,

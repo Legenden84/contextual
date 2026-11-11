@@ -6,11 +6,15 @@
 //! - Responses API (`OpenAI` on Azure's v1 base): `POST <endpoint>/openai/v1/responses`, no
 //!   api-version, with `Authorization: Bearer <key>` and `api-key`.
 //!
-//! Like the SDK it retries twice on connection errors, 408, 409, 429 and 5xx (honouring
+//! Like the SDK it retries twice on connection errors, 408, 409 and 5xx (honouring
 //! `retry-after-ms` / `retry-after` / `x-should-retry`), never follows redirects (the key would
-//! leak), and builds error messages the same way (`"<status> <error.message>"`).
+//! leak), and builds error messages the same way (`"<status> <error.message>"`). Rate limits
+//! (429) are waited out for longer, and requests are held back to the deployment's
+//! tokens-per-minute quota when it is configured; see [`super::pacing`].
 
 use super::config::FoundryConfig;
+use super::pacing::{self, Reservation, WaitReason};
+use super::types::ChatEvent;
 use crate::error::{Error, ErrorCode};
 use crate::logic::context::{BudgetExceeded, FALLBACK_CONTEXT_LIMIT, RequestBudget};
 use crate::models;
@@ -18,6 +22,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValu
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 /// The SDK's default `maxRetries`.
@@ -131,6 +136,26 @@ pub(crate) fn truthy(v: &serde_json::Value) -> bool {
 /// (process-wide, like the old module-level map).
 static RESPONSES_SUPPORT: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
 static TOOLS_SUPPORT: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
+
+/// What a request costs against the deployment's tokens-per-minute quota (prompt plus output
+/// allowance, as Azure counts it), and where waits are reported.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Pace<'a> {
+    pub cost: u64,
+    pub notify: Option<&'a mpsc::Sender<ChatEvent>>,
+}
+
+impl Pace<'_> {
+    /// Reports a wait of a second or more; a full queue only loses a status line.
+    fn report(&self, wait: Duration, reason: WaitReason) {
+        if let Some(tx) = self.notify.filter(|_| wait >= Duration::from_secs(1)) {
+            let _ = tx.try_send(ChatEvent::Waiting {
+                seconds: pacing::display_seconds(wait),
+                reason,
+            });
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Api {
@@ -283,11 +308,42 @@ impl FoundryClient {
         h
     }
 
-    /// POSTs JSON with the SDK's retry policy; returns the successful response (body unread).
+    /// Holds the request until it fits the configured tokens-per-minute quota, then reserves
+    /// its cost. Without a quota (or a cost) nothing is held.
+    async fn admit(
+        &self,
+        pace: Pace<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Reservation>, FoundryError> {
+        let Some(limit) = self.cfg.tokens_per_minute.filter(|_| pace.cost > 0) else {
+            return Ok(None);
+        };
+        let key = self.support_key();
+        loop {
+            match pacing::reserve(&key, limit, pace.cost) {
+                Ok(reservation) => return Ok(Some(reservation)),
+                Err(wait) => {
+                    tracing::info!(
+                        "Holding a request of ~{} tokens for {wait:?} (quota {limit}/min)",
+                        pace.cost
+                    );
+                    pace.report(wait, WaitReason::Quota);
+                    tokio::select! {
+                        _ = cancel.cancelled() => return Err(FoundryError::Cancelled),
+                        _ = tokio::time::sleep(wait) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// POSTs JSON with the SDK's retry policy, waiting out rate limits; returns the successful
+    /// response (body unread).
     pub(crate) async fn post(
         &self,
         api: Api,
         body: &serde_json::Value,
+        pace: Pace<'_>,
         cancel: &CancellationToken,
     ) -> Result<reqwest::Response, FoundryError> {
         let url: String = match api {
@@ -300,7 +356,16 @@ impl FoundryClient {
         let bytes = serde_json::to_vec(body).map_err(|e| FoundryError::Failed(e.to_string()))?;
         let headers = self.headers(api);
         let mut attempt = 0u32;
+        let mut rate_limited = 0u32;
+        let mut rate_limit_waited = Duration::ZERO;
         loop {
+            let reservation = self.admit(pace, cancel).await?;
+            // A refused request used no quota.
+            let release = || {
+                if let Some(r) = &reservation {
+                    pacing::release(r);
+                }
+            };
             let send = self
                 .http
                 .post(&url)
@@ -319,7 +384,46 @@ impl FoundryClient {
                     (FoundryError::Connection("Connection error.".into()), None)
                 }
                 Ok(Ok(resp)) if resp.status().is_success() => return Ok(resp),
+                Ok(Ok(resp)) if resp.status().as_u16() == 429 => {
+                    release();
+                    let refused = resp
+                        .headers()
+                        .get("x-should-retry")
+                        .and_then(|v| v.to_str().ok())
+                        == Some("false");
+                    let response_headers = resp.headers().clone();
+                    let body = tokio::select! {
+                        _ = cancel.cancelled() => return Err(FoundryError::Cancelled),
+                        b = resp.text() => b.unwrap_or_default(),
+                    };
+                    let message = status_message(429, &body);
+                    let wait = pacing::rate_limit_delay(&response_headers, &message)
+                        .unwrap_or_else(|| pacing::rate_limit_backoff(rate_limited));
+                    let error = FoundryError::Status {
+                        status: 429,
+                        message,
+                    };
+                    if refused
+                        || pacing::is_quota_exhausted(&error.raw_message())
+                        || rate_limit_waited + wait > pacing::RATE_LIMIT_PATIENCE
+                    {
+                        return Err(error);
+                    }
+                    tracing::info!(
+                        "Foundry rate limit ({}); retrying in {wait:?}",
+                        error.raw_message()
+                    );
+                    pace.report(wait, WaitReason::RateLimited);
+                    tokio::select! {
+                        _ = cancel.cancelled() => return Err(FoundryError::Cancelled),
+                        _ = tokio::time::sleep(wait) => {}
+                    }
+                    rate_limit_waited += wait;
+                    rate_limited += 1;
+                    continue;
+                }
                 Ok(Ok(resp)) => {
+                    release();
                     let status = resp.status().as_u16();
                     let retry = should_retry(status, resp.headers());
                     let delay = retry_after(resp.headers());
@@ -365,7 +469,11 @@ impl FoundryClient {
         body: &serde_json::Value,
         cancel: &CancellationToken,
     ) -> Result<serde_json::Value, FoundryError> {
-        let resp = self.post(Api::Chat, body, cancel).await?;
+        // One-off requests: the body's size stands in for its prompt.
+        let output = body["max_completion_tokens"].as_u64().unwrap_or(0);
+        let cost = (body.to_string().len() as u64 / 4).saturating_add(output);
+        let pace = Pace { cost, notify: None };
+        let resp = self.post(Api::Chat, body, pace, cancel).await?;
         let text = tokio::select! {
             _ = cancel.cancelled() => return Err(FoundryError::Cancelled),
             t = resp.text() => t.map_err(|_| FoundryError::Connection("Connection error.".into()))?,
@@ -438,6 +546,7 @@ mod tests {
             model_name: "m".into(),
             max_completion_tokens: 1,
             context_limit: None,
+            tokens_per_minute: None,
             input_price_per_1m: None,
             output_price_per_1m: None,
         };

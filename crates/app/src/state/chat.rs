@@ -14,9 +14,10 @@ use contextual_core::commands::history::{RecordStatus, ShareChoice, SharedResult
 use contextual_core::commands::{CallId, CommandRequest, LaunchPermit, ReviewPlan};
 use contextual_core::host::WorkspaceHost;
 use contextual_core::inspect::LiveRound;
-use contextual_core::llm::ToolCall;
+use contextual_core::llm::pacing::display_seconds;
 use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, RepairInput};
 use contextual_core::llm::{FoundryClient, FoundryConfig};
+use contextual_core::llm::{ToolCall, WaitReason};
 use contextual_core::location::ProjectRoot;
 use contextual_core::logic::changes::ChangeContext;
 use contextual_core::logic::context::LiveContextTokens;
@@ -72,6 +73,13 @@ impl ChatActivity {
             Self::Stopping => "Stopping",
         }
     }
+}
+
+/// A request held back for Azure capacity: sent by itself when the wait is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CapacityWait {
+    pub until: std::time::Instant,
+    pub reason: WaitReason,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -204,6 +212,8 @@ pub struct ChatModel {
     pub attachments: Vec<Attachment>,
     cancel: Option<CancellationToken>,
     activity: ChatActivity,
+    /// Set while the request of the streaming round waits for quota or a rate limit.
+    capacity_wait: Option<CapacityWait>,
     /// File contents as sent (diff originals), by path.
     contents: HashMap<String, String>,
     /// Sent only as condensed references: never offered for saving.
@@ -306,6 +316,7 @@ impl ChatModel {
             attachments: Vec::new(),
             cancel: None,
             activity: ChatActivity::PreparingContext,
+            capacity_wait: None,
             contents: HashMap::new(),
             reference_only: HashSet::new(),
             include: HashMap::new(),
@@ -347,6 +358,34 @@ impl ChatModel {
 
     /// Gate the last reported phase on the actual operation lifetime. Every existing
     /// completion/error path clears `cancel` or `saving`, so no stale busy label remains.
+    /// The wait still ahead of the streaming round's request, if it is being held back.
+    pub fn capacity_wait(&self) -> Option<(std::time::Duration, WaitReason)> {
+        let wait = self
+            .capacity_wait
+            .filter(|_| self.activity() == Some(ChatActivity::WaitingForResponse))?;
+        let left = wait
+            .until
+            .saturating_duration_since(std::time::Instant::now());
+        (!left.is_zero()).then_some((left, wait.reason))
+    }
+
+    /// The activity line: the activity's label, or a countdown while the request waits.
+    pub fn activity_text(&self) -> Option<String> {
+        let activity = self.activity()?;
+        Some(match self.capacity_wait() {
+            Some((left, WaitReason::Quota)) => {
+                format!("Waiting for token quota · {} s", display_seconds(left))
+            }
+            Some((left, WaitReason::RateLimited)) => {
+                format!(
+                    "Rate limited by Azure · retrying in {} s",
+                    display_seconds(left)
+                )
+            }
+            None => activity.label().to_string(),
+        })
+    }
+
     pub fn activity(&self) -> Option<ChatActivity> {
         if let Some(token) = &self.cancel {
             Some(if token.is_cancelled() {
@@ -658,6 +697,22 @@ impl ChatModel {
         // cancels upstream independently and flushes its final buffered text before closing.
         while let Some(event) = rx.recv().await {
             match event {
+                ChatEvent::Waiting { seconds, reason } => {
+                    let alive = this
+                        .update(cx, |this, cx| {
+                            this.capacity_wait = Some(CapacityWait {
+                                until: std::time::Instant::now()
+                                    + std::time::Duration::from_secs(seconds),
+                                reason,
+                            });
+                            cx.notify();
+                        })
+                        .is_ok();
+                    if !alive {
+                        token.cancel();
+                        return;
+                    }
+                }
                 ChatEvent::Delta { text } => {
                     reply.push_str(&text);
                     // Keep the raw response here, but prepare its display on the blocking
@@ -692,6 +747,7 @@ impl ChatModel {
                         .update(cx, |this, cx| {
                             if !text.is_empty() {
                                 this.activity = ChatActivity::WritingResponse;
+                                this.capacity_wait = None;
                             }
                             if let Some(m) = this.messages.iter_mut().find(|m| m.id == ai_id) {
                                 m.text = current;
@@ -743,6 +799,7 @@ impl ChatModel {
                 ChatEvent::ToolsUnsupported { message } => tools_unsupported = Some(message),
             }
         }
+        let _ = this.update(cx, |this, _| this.capacity_wait = None);
         if let Err(e) = streamer.await
             && failure.is_none()
         {

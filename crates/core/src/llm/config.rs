@@ -26,6 +26,10 @@ pub struct FoundryConfig {
     pub input_price_per_1m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_price_per_1m: Option<f64>,
+    /// The deployment's tokens-per-minute quota. When set, requests are held until they fit
+    /// instead of being refused with 429.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_per_minute: Option<u64>,
 }
 
 pub const ENV_ENDPOINT: &str = "AZURE_OPENAI_ENDPOINT";
@@ -37,10 +41,11 @@ pub const ENV_MAX_COMPLETION_TOKENS: &str = "AZURE_OPENAI_MAX_COMPLETION_TOKENS"
 pub const ENV_CONTEXT_LIMIT: &str = "AZURE_OPENAI_CONTEXT_LIMIT";
 pub const ENV_INPUT_PRICE: &str = "AZURE_OPENAI_INPUT_PRICE_PER_1M";
 pub const ENV_OUTPUT_PRICE: &str = "AZURE_OPENAI_OUTPUT_PRICE_PER_1M";
+pub const ENV_TOKENS_PER_MINUTE: &str = "AZURE_OPENAI_TOKENS_PER_MINUTE";
 
 pub const REQUIRED_ENV: [&str; 4] = [ENV_ENDPOINT, ENV_API_KEY, ENV_API_VERSION, ENV_DEPLOYMENT];
 /// Every variable the loader reads.
-pub const ALL_ENV: [&str; 9] = [
+pub const ALL_ENV: [&str; 10] = [
     ENV_ENDPOINT,
     ENV_API_KEY,
     ENV_API_VERSION,
@@ -50,6 +55,7 @@ pub const ALL_ENV: [&str; 9] = [
     ENV_CONTEXT_LIMIT,
     ENV_INPUT_PRICE,
     ENV_OUTPUT_PRICE,
+    ENV_TOKENS_PER_MINUTE,
 ];
 
 pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 16384;
@@ -150,6 +156,10 @@ pub fn read_foundry_config(
         }),
     );
     let context_limit = check(ENV_CONTEXT_LIMIT, positive_int(get(ENV_CONTEXT_LIMIT)));
+    let tokens_per_minute = check(
+        ENV_TOKENS_PER_MINUTE,
+        positive_int(get(ENV_TOKENS_PER_MINUTE)),
+    );
     let mut price = |key: &str| match positive(get(key)) {
         Ok(v) => v,
         Err(()) => {
@@ -176,6 +186,7 @@ pub fn read_foundry_config(
         context_limit,
         input_price_per_1m,
         output_price_per_1m,
+        tokens_per_minute,
     })
 }
 
@@ -206,6 +217,9 @@ impl FoundryConfig {
         }
         if let Some(n) = self.output_price_per_1m {
             v.push((ENV_OUTPUT_PRICE, n.to_string()));
+        }
+        if let Some(n) = self.tokens_per_minute {
+            v.push((ENV_TOKENS_PER_MINUTE, n.to_string()));
         }
         v
     }

@@ -187,6 +187,7 @@ impl Workbench {
             context_limit: None,
             input_price_per_1m: None,
             output_price_per_1m: None,
+            tokens_per_minute: None,
         })
         .unwrap()
         .with_max_retries(0);

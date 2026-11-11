@@ -12,7 +12,7 @@
 //! this module cannot reach the execution engine.
 
 use super::client::{
-    Api, FoundryClient, FoundryError, describe_error, error_payload_message, truthy,
+    Api, FoundryClient, FoundryError, Pace, describe_error, error_payload_message, truthy,
 };
 use super::sse::{SseDecoder, SseEvent};
 use super::tools::{self, CallAssembler, Field};
@@ -368,6 +368,21 @@ impl SseReader {
     }
 }
 
+/// A turn's cost against the quota: the whole logical input (a stored chain is counted in
+/// full by Azure too) plus the output allowance. Waits are reported on the turn's events.
+fn pace<'a>(
+    client: &FoundryClient,
+    req: &ConversationRequest,
+    tx: &'a mpsc::Sender<ChatEvent>,
+) -> Pace<'a> {
+    Pace {
+        cost: req
+            .estimated_input_tokens()
+            .saturating_add(u64::from(client.cfg.max_completion_tokens)),
+        notify: Some(tx),
+    }
+}
+
 /// `Err(Cancelled)` when the receiver is gone.
 async fn send(tx: &mpsc::Sender<ChatEvent>, ev: ChatEvent) -> Result<(), FoundryError> {
     if emit(tx, ev).await {
@@ -383,10 +398,11 @@ impl FoundryClient {
         req: &ConversationRequest,
         previous: Option<&str>,
         offer: ToolOffer,
+        pace: Pace<'_>,
         cancel: &CancellationToken,
     ) -> Result<reqwest::Response, FoundryError> {
         let body = responses_body(self, req, previous, offer);
-        self.post(Api::Responses, &body, cancel).await
+        self.post(Api::Responses, &body, pace, cancel).await
     }
 
     async fn pump_responses(
@@ -513,7 +529,9 @@ impl FoundryClient {
         cancel: &CancellationToken,
     ) -> Result<(), FoundryError> {
         let body = chat_body(self, req, offer);
-        let resp = self.post(Api::Chat, &body, cancel).await?;
+        let resp = self
+            .post(Api::Chat, &body, pace(self, req, tx), cancel)
+            .await?;
         let mut finish_reason: Option<String> = None;
         // Indexed `delta.tool_calls`, whose identity, name and arguments can each arrive
         // in pieces across chunks.
@@ -642,15 +660,22 @@ impl FoundryClient {
         cancel: &CancellationToken,
     ) -> Result<(), FoundryError> {
         let declared = offer != ToolOffer::None;
+        let pace = pace(self, req, tx);
         if self.responses_supported() != Some(false) {
             let previous = req.previous_response_id.as_deref();
-            let started = match self.start_responses(req, previous, offer, cancel).await {
+            let started = match self
+                .start_responses(req, previous, offer, pace, cancel)
+                .await
+            {
                 Ok(resp) => Some((resp, false)),
                 Err(FoundryError::Cancelled) => return Err(FoundryError::Cancelled),
                 Err(e) if previous.is_some() && is_missing_previous(&e) => {
                     // The whole history is rebuilt as data, including earlier calls and
                     // their results. Nothing in it is work to perform.
-                    Some((self.start_responses(req, None, offer, cancel).await?, true))
+                    Some((
+                        self.start_responses(req, None, offer, pace, cancel).await?,
+                        true,
+                    ))
                 }
                 // A refusal of the tool declaration is not a missing Responses API.
                 Err(e) if declared && is_tools_unsupported(&e) => return Err(e),
