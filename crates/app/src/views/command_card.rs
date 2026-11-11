@@ -10,8 +10,8 @@ use contextual_core::commands::CallId;
 use std::collections::HashSet;
 
 use contextual_core::commands::card::{
-    Card, CardInput, CardLine, CardPhase, CardTone, EFFECTS_SHORT, LOCAL_NOTE, LineWord,
-    SAVED_NOTE, SHARE_WARNING, STOP_NOTE, WordKind, elapsed_between, review_card, short_duration,
+    Card, CardInput, CardLine, CardPhase, CardTone, EFFECTS_SHORT, LineWord, SAVED_NOTE,
+    SHARE_WARNING, STOP_NOTE, WordKind, elapsed_between, review_card, short_duration,
 };
 use contextual_core::commands::execution::ExecutionProgress;
 use contextual_core::commands::history::CommandRecord;
@@ -1013,23 +1013,8 @@ fn render(
                 .into_any_element(),
         );
     }
-    if actions.share {
-        let (share_panel, share_call) = (panel.clone(), call.clone());
-        left.push(
-            Button::new(button_id("share", &call), "Share output…")
-                .icon(IconName::Share)
-                .size(ButtonSize::Xs)
-                .variant(ButtonVariant::Primary)
-                .on_click(move |_, window, cx| {
-                    share_panel
-                        .update(cx, |panel, cx| {
-                            panel.begin_command_share(share_call.clone(), window, cx)
-                        })
-                        .ok();
-                })
-                .into_any_element(),
-        );
-        left.push(quiet(LOCAL_NOTE));
+    if actions.share && card.staged.is_none() {
+        left.push(quiet("Output stays local."));
     }
     if actions.unshare {
         let (unshare_chat, unshare_call) = (chat.clone(), call.clone());

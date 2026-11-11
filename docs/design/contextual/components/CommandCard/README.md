@@ -67,7 +67,7 @@ The card is one line when there is nothing to decide, and grows only by what the
 | Waiting for you | `accent-ink` | **Run** or **Run again** (primary, play icon), Edit, Skip | Details |
 | Starting | `ink-muted` | none | Details |
 | Running · 12 s | `ink-muted` | Stop (square icon), the stop note | Details |
-| exit 0 · 18 ms | `success` | **Share output…** (primary), "Output stays local until you share it" | Details, Run again… |
+| exit 0 · 18 ms | `success` | "Output stays local." | Details, Run again… |
 | exit N / no exit code / did not start / timed out | `danger` | as above | Details, Run again… |
 | stopped | `warning` | as above | Details, Run again… |
 | Outcome unknown: … | `warning` | Check whether it still runs | Details |
@@ -90,31 +90,20 @@ composer the shortcut sends the message, as always.
 **Review changes** (primary) / Cancel. Opening the editor voids any approval at once. An edit
 is checked by the host and comes back as "Needs review"; it is never run from the editor.
 
-## Sharing a result
+## Continuing after a command
 
-Running a command sends nothing to the model. Sharing is a separate decision, in two steps.
-
-**Share output…** (offered while the finished command's output is still held in memory)
-replaces the card body with the preview:
-
-- the warning, in `warning`: "Output may contain secrets or contents of files you did not
-  select."
-- a tick box per stream, "Include output" and "Include error output", each with an editable
-  `code-small` text area when ticked, so a secret can be removed by hand;
-- "The model will receive exactly this:" and the structured result as it will be sent, in
-  `code-small` on `surface-100`. It follows every tick and keystroke, and states which streams
-  were omitted and whether the text was edited;
-- "What you share is sent to the model and becomes part of the saved chat.";
-- **Use this result** (primary) / Cancel.
-
-*Use this result* sends nothing. The card then says what the model will receive when the
-conversation continues, with **Don't share** to withdraw it.
+Running a command sends nothing to the model. The card has no **Share output…** button
+and does not open a sharing preview. Captured output remains available locally; removing
+the button does not enable automatic sharing.
 
 Under the cards of the latest reply sits the **Continue row**: a primary extra-small
-**Continue** button and one muted sentence, for example "The model will be told: 1 result
-shared, 1 rejected, 1 ran without sharing its result." Continue is the only thing that tells
-the model; it sends one request. A proposal the user has not decided on is reported as not
-run, and its card closes. The row is disabled while a command runs or the model replies.
+**Continue** button and one muted sentence summarising what the model will be told.
+Continue sends one request. A command that ran without a staged result is reported as
+"not shared"; a proposal the user has not decided on is reported as not run, and its card
+closes. The row is disabled while a command runs or the model replies.
+
+The underlying result-staging support remains for debug automation. If a result is staged,
+the card still describes it and offers **Don't share** to withdraw it before Continue.
 
 A result that shares no outcome ("rejected", "not run", "not shared") carries the call's
 identity, that word and a sentence. Nothing about how a command ended.
@@ -126,10 +115,9 @@ identity, that word and a sentence. Nothing about how a command ended.
   ("Commands may modify files or access the network. Save/Undo does not undo command
   effects.") is in Settings.
 - Stop: "Stopping ends the command. It does not undo what it already did."
-- Output: "Output stays local until you share it".
+- Output: "Output stays local."
 - Buttons are verbs: Run, Run again, Edit, Skip, Stop, Prepare again, Run again…,
-  Review changes, Check whether it still runs, Share output…, Use this result, Don't share,
-  Details, Hide details, Continue.
+  Review changes, Check whether it still runs, Don't share, Details, Hide details, Continue.
 
 ## Accessibility
 

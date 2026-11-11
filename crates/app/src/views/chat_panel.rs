@@ -360,54 +360,6 @@ impl ChatPanel {
         cx.notify();
     }
 
-    /// Opens the share preview for a finished command, filled with what was captured.
-    /// Opening it shares nothing.
-    pub(crate) fn begin_command_share(
-        &mut self,
-        call: contextual_core::commands::CallId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(output) = self
-            .project
-            .read(cx)
-            .commands
-            .output(&call)
-            .map(|(_, result)| result.output.clone())
-        else {
-            return;
-        };
-        let stream = |captured: String, window: &mut Window, cx: &mut Context<Self>| {
-            let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 12));
-            input.update(cx, |state, cx| state.set_value(captured, window, cx));
-            input
-        };
-        let stdout = stream(output.stdout.text.clone(), window, cx);
-        let stderr = stream(output.stderr.text.clone(), window, cx);
-        // The preview shows what would be sent, so it follows every edit.
-        let subs = [&stdout, &stderr]
-            .into_iter()
-            .map(|input| {
-                cx.subscribe(input, |this: &mut Self, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        this.list.reset(this.rendered);
-                        cx.notify();
-                    }
-                })
-            })
-            .collect();
-        self.command_share = Some(crate::views::command_card::ShareEdit {
-            call,
-            stdout_on: !output.stdout.text.is_empty(),
-            stderr_on: !output.stderr.text.is_empty(),
-            stdout,
-            stderr,
-            _subs: subs,
-        });
-        self.list.reset(self.rendered);
-        cx.notify();
-    }
-
     pub(crate) fn toggle_share_stream(&mut self, stdout: bool, cx: &mut Context<Self>) {
         if let Some(share) = self.command_share.as_mut() {
             if stdout {
