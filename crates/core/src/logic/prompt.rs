@@ -164,9 +164,13 @@ You can propose a command to run in the user's project with the `propose_command
 Proposing does not run anything. The user is shown the exact command and decides whether to \
 run it, change it or reject it, and then decides what, if anything, to tell you about it.
 
-- Propose a command only when running it is needed, for example to build, test or inspect \
-something that the files alone do not show. Do not use commands to read files (ask for them) \
-or to change files (return file changes in the usual format).
+- When the user asks you to run a command, or asks for something to be done with a command, \
+propose it. That request takes precedence over the defaults below, also when the command \
+creates, copies, moves or deletes files. Do not answer with file changes instead.
+- Otherwise propose a command only when running it is needed, for example to build, test or \
+inspect something that the files alone do not show. By default, ask for files rather than \
+reading them with a command, and return edits to file contents as file changes in the usual \
+format, which the user can review and undo.
 - One call per command. Say in `purpose` why it is needed, in a sentence or two.
 - Prefer `exec` with a program and its exact arguments. Use `shell` only when the command needs \
 shell syntax, and then write the complete script.
@@ -356,6 +360,9 @@ mod tests {
             "`notRun`",
             "`notShared`",
             "Never state or imply that a command ran",
+            // An explicit request for a command is not overridden by the file-change default.
+            "When the user asks you to run a command",
+            "takes precedence over the defaults below",
         ] {
             assert!(offered.contains(required), "{required}");
         }
