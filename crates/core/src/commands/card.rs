@@ -22,12 +22,19 @@ pub const SHARE_WARNING: &str =
 /// Shown with whatever will be shared.
 pub const SAVED_NOTE: &str =
     "What you share is sent to the model and becomes part of the saved chat.";
+/// The effects note in a few words, on a card whose command can still run. Nothing is
+/// known about what a command will do, so it says "may" for every command.
+pub const EFFECTS_SHORT: &str = "May change files · not covered by Undo";
+/// Shown next to the button that opens the share preview.
+pub const LOCAL_NOTE: &str = "Output stays local until you share it";
 /// Shown next to Stop.
 pub const STOP_NOTE: &str = "Stopping ends the command. It does not undo what it already did.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardTone {
     Neutral,
+    /// Waiting for the user's decision.
+    Attention,
     Ok,
     Warn,
     Danger,
@@ -58,6 +65,24 @@ pub struct CardLine {
     pub mono: bool,
 }
 
+/// How one word of the command line is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WordKind {
+    Program,
+    /// An argument that starts with `-`.
+    Flag,
+    /// An argument shown in quotes, because it is empty or holds more than plain characters.
+    Quoted,
+    Plain,
+}
+
+/// One word of the command as a single line. Words are separated by one space when drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineWord {
+    pub text: String,
+    pub kind: WordKind,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CardActions {
     /// Approve exactly what is shown and start it.
@@ -82,6 +107,24 @@ pub struct Card {
     pub phase: CardPhase,
     pub status: String,
     pub tone: CardTone,
+    /// The command as one line: the program and its arguments, each quoted where its
+    /// boundaries would otherwise be unclear, or a one-line script as written. The exact
+    /// boundaries are in `command`.
+    pub line: Vec<LineWord>,
+    /// A script of more than one line, complete. `line` then names only its interpreter.
+    pub script: Option<String>,
+    /// The requested directory, when it is not the project root.
+    pub cwd: Option<String>,
+    /// Environment overrides as `NAME=value`.
+    pub environment: Vec<String>,
+    /// "timeout 120 s".
+    pub timeout: String,
+    /// When the latest attempt started, while it runs.
+    pub started_at: Option<String>,
+    /// How long the latest attempt took, once it ended.
+    pub duration: Option<String>,
+    /// The latest attempt was ended because it ran out of time.
+    pub timed_out: bool,
     /// "Purpose (model-provided)".
     pub purpose: Option<String>,
     /// The exact program and argument boundaries, or the interpreter and complete script.
@@ -90,6 +133,10 @@ pub struct Card {
     pub details: Vec<CardLine>,
     /// Why an action is unavailable, or what went wrong.
     pub notice: Option<String>,
+    /// What the model was told about this proposal, once the conversation continued.
+    pub told: Option<String>,
+    /// The model was given this command's result.
+    pub shared: bool,
     /// The request shown differs from what the model proposed.
     pub edited: bool,
     /// What will be shared when the conversation continues, if the user chose a result.
@@ -160,6 +207,115 @@ fn requested(request: &CommandRequest) -> Vec<CardLine> {
             line("Script", script, true),
         ],
     }
+}
+
+/// Characters that never need quoting to show where an argument begins and ends.
+fn plain(word: &str) -> bool {
+    !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c))
+}
+
+/// One argument as a shell would need it written. For display only: nothing is run from
+/// this text.
+fn quoted(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
+}
+
+fn word(text: &str, kind: WordKind) -> LineWord {
+    if plain(text) {
+        LineWord {
+            text: text.to_owned(),
+            kind,
+        }
+    } else {
+        LineWord {
+            text: quoted(text),
+            kind: WordKind::Quoted,
+        }
+    }
+}
+
+/// The command as one line, and the complete script when it has more than one line.
+fn one_line(request: &CommandRequest) -> (Vec<LineWord>, Option<String>) {
+    match &request.command {
+        Command::Exec { program, args } => {
+            let mut words = vec![word(program, WordKind::Program)];
+            words.extend(args.iter().map(|argument| {
+                word(
+                    argument,
+                    if argument.starts_with('-') {
+                        WordKind::Flag
+                    } else {
+                        WordKind::Plain
+                    },
+                )
+            }));
+            (words, None)
+        }
+        Command::Shell {
+            interpreter,
+            script,
+        } => {
+            let name = LineWord {
+                text: interpreter_name(*interpreter).to_owned(),
+                kind: WordKind::Program,
+            };
+            if script.contains('\n') {
+                let lines = script.lines().count();
+                (
+                    vec![
+                        name,
+                        LineWord {
+                            text: format!("script · {lines} lines"),
+                            kind: WordKind::Plain,
+                        },
+                    ],
+                    Some(script.clone()),
+                )
+            } else {
+                (
+                    vec![LineWord {
+                        text: script.clone(),
+                        kind: WordKind::Plain,
+                    }],
+                    None,
+                )
+            }
+        }
+    }
+}
+
+/// A length of time in the largest unit that keeps it short: "18 ms", "4.2 s", "1 m 05 s".
+pub fn short_duration(duration: time::Duration) -> String {
+    let millis = duration.whole_milliseconds().max(0);
+    if millis < 1_000 {
+        format!("{millis} ms")
+    } else if millis < 60_000 {
+        let tenths = millis / 100;
+        if tenths % 10 == 0 {
+            format!("{} s", tenths / 10)
+        } else {
+            format!("{}.{} s", tenths / 10, tenths % 10)
+        }
+    } else {
+        let seconds = millis / 1_000;
+        format!("{} m {:02} s", seconds / 60, seconds % 60)
+    }
+}
+
+/// A running time without its fraction, which is not worth redrawing for.
+pub fn whole_seconds(duration: time::Duration) -> time::Duration {
+    time::Duration::seconds(duration.whole_seconds())
+}
+
+/// The time between two recorded instants, when both can be read.
+pub fn elapsed_between(from: &str, to: &str) -> Option<time::Duration> {
+    let parse = |text: &str| {
+        time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
+    };
+    Some(parse(to)? - parse(from)?)
 }
 
 fn where_it_runs(location: &Location, platform: Option<CommandPlatform>) -> String {
@@ -246,17 +402,17 @@ fn finished_status(record: &CommandRecord, status: ExecutionStatus) -> (String, 
         );
     }
     match status {
-        ExecutionStatus::Success => ("Finished: exit code 0".into(), CardTone::Ok),
+        ExecutionStatus::Success => ("exit 0".into(), CardTone::Ok),
         ExecutionStatus::Failure => (
             match observed.and_then(|observed| observed.exit_code) {
-                Some(code) => format!("Finished: exit code {code}"),
-                None => "Ended without an exit code".into(),
+                Some(code) => format!("exit {code}"),
+                None => "no exit code".into(),
             },
             CardTone::Danger,
         ),
-        ExecutionStatus::FailedToStart => ("Did not start".into(), CardTone::Danger),
-        ExecutionStatus::Cancelled => ("Stopped".into(), CardTone::Warn),
-        ExecutionStatus::TimedOut => ("Stopped: timed out".into(), CardTone::Warn),
+        ExecutionStatus::FailedToStart => ("did not start".into(), CardTone::Danger),
+        ExecutionStatus::Cancelled => ("stopped".into(), CardTone::Warn),
+        ExecutionStatus::TimedOut => ("timed out".into(), CardTone::Danger),
         ExecutionStatus::Unknown => (
             "Outcome unknown: it may still be running".into(),
             CardTone::Warn,
@@ -267,10 +423,10 @@ fn finished_status(record: &CommandRecord, status: ExecutionStatus) -> (String, 
 /// What the model was told, as a short phrase for a closed card.
 fn answered_note(answer: &Answer) -> &'static str {
     match answer {
-        Answer::Rejected => "The model was told it was rejected.",
+        Answer::Rejected => "The model was told you rejected it.",
         Answer::NotRun { .. } => "The model was told it was not run.",
         Answer::Withheld { .. } => "The model was told it ran. Its result was not shared.",
-        Answer::Outcome { .. } => "Its result was shared with the model.",
+        Answer::Outcome { .. } => "Result shared with the model.",
     }
 }
 
@@ -285,10 +441,23 @@ pub fn review_card(input: &CardInput<'_>) -> Card {
             phase: CardPhase::Unusable,
             status: "Could not be read as a command".into(),
             tone: CardTone::Warn,
+            line: vec![LineWord {
+                text: tool.clone(),
+                kind: WordKind::Program,
+            }],
+            script: None,
+            cwd: None,
+            environment: Vec::new(),
+            timeout: String::new(),
+            started_at: None,
+            duration: None,
+            timed_out: false,
             purpose: None,
             command: vec![line("Tool", tool, true)],
             details: Vec::new(),
             notice: Some(problem.clone()),
+            told: None,
+            shared: false,
             edited: false,
             staged: None,
             actions: CardActions::default(),
@@ -310,11 +479,7 @@ pub fn review_card(input: &CardInput<'_>) -> Card {
 
     let (phase, status, tone) = match recorded {
         RecordStatus::Running => (CardPhase::Running, "Running".to_owned(), CardTone::Neutral),
-        RecordStatus::Rejected => (
-            CardPhase::Rejected,
-            "Rejected".to_owned(),
-            CardTone::Neutral,
-        ),
+        RecordStatus::Rejected => (CardPhase::Rejected, "Skipped".to_owned(), CardTone::Neutral),
         RecordStatus::NotRun => (CardPhase::NotRun, "Not run".to_owned(), CardTone::Neutral),
         _ if input.starting => (
             CardPhase::Starting,
@@ -324,16 +489,18 @@ pub fn review_card(input: &CardInput<'_>) -> Card {
         // A fresh review of a proposal that ran before: a re-run awaiting approval.
         RecordStatus::Finished(_) if reviewing && open => (
             CardPhase::Review,
-            "Needs review to run again".to_owned(),
-            CardTone::Warn,
+            "Waiting for you".to_owned(),
+            CardTone::Attention,
         ),
         RecordStatus::Finished(status) => {
             let (status, tone) = finished_status(record, status);
             (CardPhase::Finished, status, tone)
         }
-        RecordStatus::NeedsReview if reviewing => {
-            (CardPhase::Review, "Needs review".to_owned(), CardTone::Warn)
-        }
+        RecordStatus::NeedsReview if reviewing => (
+            CardPhase::Review,
+            "Waiting for you".to_owned(),
+            CardTone::Attention,
+        ),
         RecordStatus::NeedsReview => (
             CardPhase::Unprepared,
             if input.preparing {
@@ -391,17 +558,41 @@ pub fn review_card(input: &CardInput<'_>) -> Card {
     let notice = input
         .error
         .map(str::to_owned)
-        .or_else(|| blocked.map(str::to_owned))
-        .or_else(|| answered.map(|answered| answered_note(&answered.answer).to_owned()));
+        .or_else(|| blocked.map(str::to_owned));
+    let (line, script) = one_line(shown);
+    let latest = record.attempts.last();
+    let root = matches!(shown.cwd.trim_matches('/'), "" | ".");
 
     Card {
         phase,
         status,
         tone,
+        line,
+        script,
+        cwd: (!root).then(|| shown.cwd.clone()),
+        environment: shown
+            .environment
+            .iter()
+            .map(|variable| format!("{}={}", variable.name, variable.value))
+            .collect(),
+        timeout: format!("timeout {} s", shown.timeout_seconds),
+        started_at: latest
+            .filter(|_| phase == CardPhase::Running)
+            .map(|attempt| attempt.started_at.clone()),
+        duration: latest
+            .filter(|_| phase == CardPhase::Finished)
+            .and_then(|attempt| {
+                elapsed_between(&attempt.started_at, attempt.finished_at.as_deref()?)
+            })
+            .map(short_duration),
+        timed_out: phase == CardPhase::Finished
+            && recorded == RecordStatus::Finished(ExecutionStatus::TimedOut),
         purpose: Some(shown.purpose.clone()),
         command: requested(shown),
         details: details(record, shown, input.plan),
         notice,
+        told: answered.map(|answered| answered_note(&answered.answer).to_owned()),
+        shared: answered.is_some_and(|answered| matches!(answered.answer, Answer::Outcome { .. })),
         edited: shown != proposed,
         staged: input.staged.filter(|_| open).map(|result| {
             format!(
@@ -539,6 +730,66 @@ mod tests {
     }
 
     #[test]
+    fn the_one_line_form_quotes_every_argument_whose_boundaries_would_be_unclear() {
+        let history = proposed(exec());
+        let card = review_card(&input(history.get(&call()).unwrap()));
+        let words: Vec<(&str, WordKind)> = card
+            .line
+            .iter()
+            .map(|word| (word.text.as_str(), word.kind))
+            .collect();
+        assert_eq!(
+            words,
+            [
+                ("cargo", WordKind::Program),
+                ("test", WordKind::Plain),
+                ("--", WordKind::Flag),
+                ("'a b'", WordKind::Quoted),
+                ("''", WordKind::Quoted),
+            ]
+        );
+        assert_eq!(card.script, None);
+        assert_eq!(card.cwd.as_deref(), Some("crates/core"));
+        assert_eq!(card.timeout, "timeout 120 s");
+        assert!(card.environment.is_empty());
+        assert_eq!(quoted("it's"), r"'it'\''s'");
+
+        let one = proposed(request(serde_json::json!({
+            "kind": "shell", "interpreter": "sh", "script": "ls | wc -l"
+        })));
+        let one = review_card(&input(one.get(&call()).unwrap()));
+        assert_eq!(one.line.len(), 1);
+        assert_eq!(one.line[0].text, "ls | wc -l");
+        assert_eq!(one.script, None);
+
+        // A longer script is never cut down to its first line.
+        let script = "set -e\ncargo test";
+        let long = proposed(request(serde_json::json!({
+            "kind": "shell", "interpreter": "bash", "script": script
+        })));
+        let long = review_card(&input(long.get(&call()).unwrap()));
+        assert_eq!(long.line[0].text, "bash");
+        assert_eq!(long.line[1].text, "script · 2 lines");
+        assert_eq!(long.script.as_deref(), Some(script));
+    }
+
+    #[test]
+    fn durations_are_short_and_unreadable_instants_give_none() {
+        let ms = time::Duration::milliseconds;
+        assert_eq!(short_duration(ms(18)), "18 ms");
+        assert_eq!(short_duration(ms(4_230)), "4.2 s");
+        assert_eq!(short_duration(ms(60_000 - 1)), "59.9 s");
+        assert_eq!(short_duration(ms(12_000)), "12 s");
+        assert_eq!(short_duration(ms(65_400)), "1 m 05 s");
+        assert_eq!(short_duration(ms(-5)), "0 ms");
+        assert_eq!(
+            elapsed_between("2026-11-10T12:00:00Z", "2026-11-10T12:00:04.2Z"),
+            Some(ms(4_200))
+        );
+        assert_eq!(elapsed_between("yesterday", NOW), None);
+    }
+
+    #[test]
     fn nothing_can_be_run_until_a_prepared_plan_is_on_screen() {
         let history = proposed(exec());
         let record = history.get(&call()).unwrap();
@@ -613,7 +864,9 @@ mod tests {
     fn finished_cards_state_the_outcome_and_offer_only_a_fresh_preparation() {
         let history = finished(ExecutionStatus::Failure, Some(3));
         let card_failed = review_card(&input(history.get(&call()).unwrap()));
-        assert_eq!(card_failed.status, "Finished: exit code 3");
+        assert_eq!(card_failed.status, "exit 3");
+        // Both recorded instants are the same in this test.
+        assert_eq!(card_failed.duration.as_deref(), Some("0 ms"));
         assert_eq!(card_failed.tone, CardTone::Danger);
         assert!(card_failed.actions.prepare);
         assert!(!card_failed.actions.run && !card_failed.actions.reject);
@@ -700,9 +953,10 @@ mod tests {
         });
         assert_eq!(closed.actions, CardActions::default());
         assert_eq!(
-            closed.notice.as_deref(),
+            closed.told.as_deref(),
             Some("The model was told it ran. Its result was not shared.")
         );
+        assert!(!closed.shared && closed.notice.is_none());
     }
 
     #[test]

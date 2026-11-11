@@ -67,6 +67,11 @@ pub struct ChatPanel {
     command_edit: Option<(contextual_core::commands::CallId, Entity<TextareaState>)>,
     /// The open share preview of a finished command. View state only.
     command_share: Option<crate::views::command_card::ShareEdit>,
+    /// Command cards whose output is folded away, and those whose details are open.
+    command_collapsed: HashSet<contextual_core::commands::CallId>,
+    command_details: HashSet<contextual_core::commands::CallId>,
+    /// Redraws the running time of a command while one runs.
+    command_clock: Option<gpui_kit::Task<()>>,
     _subs: Vec<Subscription>,
 }
 
@@ -186,6 +191,30 @@ impl ChatPanel {
                 if replaced {
                     this.command_edit = None;
                     this.command_share = None;
+                    this.command_collapsed.clear();
+                    this.command_details.clear();
+                }
+                let running = chat.command_running();
+                if running && this.command_clock.is_none() {
+                    this.command_clock = Some(cx.spawn(async move |this, cx| {
+                        loop {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(500))
+                                .await;
+                            let running = this.update(cx, |this, cx| {
+                                let running = this.chat.read(cx).command_running();
+                                if running {
+                                    cx.notify();
+                                } else {
+                                    this.command_clock = None;
+                                }
+                                running
+                            });
+                            if !running.unwrap_or(false) {
+                                break;
+                            }
+                        }
+                    }));
                 }
                 if replaced || n != this.rendered {
                     this.list.reset(n);
@@ -217,7 +246,8 @@ impl ChatPanel {
                     InputEvent::PressEnter {
                         secondary: true, ..
                     } => {
-                        if !this.composer_is_composing(window, cx) {
+                        if !this.composer_is_composing(window, cx) && !this.run_waiting_command(cx)
+                        {
                             this.send(window, cx);
                         }
                     }
@@ -258,8 +288,58 @@ impl ChatPanel {
             settings_open_focus: cx.focus_handle(),
             command_edit: None,
             command_share: None,
+            command_collapsed: HashSet::new(),
+            command_details: HashSet::new(),
+            command_clock: None,
             _subs: subs,
         }
+    }
+
+    /// Folds or unfolds the output of one command card.
+    pub(crate) fn toggle_command_output(
+        &mut self,
+        call: &contextual_core::commands::CallId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_collapsed.remove(call) {
+            self.command_collapsed.insert(call.clone());
+        }
+        self.remeasure_commands(cx);
+    }
+
+    /// Opens or closes the details of one command card.
+    pub(crate) fn toggle_command_details(
+        &mut self,
+        call: &contextual_core::commands::CallId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_details.remove(call) {
+            self.command_details.insert(call.clone());
+        }
+        self.remeasure_commands(cx);
+    }
+
+    /// A card changed height without the chat changing: measure the messages again.
+    fn remeasure_commands(&mut self, cx: &mut Context<Self>) {
+        let n = self.rendered;
+        let top = self.list.logical_scroll_top();
+        self.list.splice(0..n, n);
+        self.list.scroll_to(top);
+        cx.notify();
+    }
+
+    /// The composer's send shortcut with nothing to send: runs the command that is waiting.
+    fn run_waiting_command(&mut self, cx: &mut Context<Self>) -> bool {
+        let chat = self.chat.read(cx);
+        if !self.input.read(cx).value().trim().is_empty() || !chat.attachments.is_empty() {
+            return false;
+        }
+        let Some(call) = crate::views::command_card::runnable_call(&self.chat, &self.project, cx)
+        else {
+            return false;
+        };
+        self.chat.update(cx, |chat, cx| chat.run_command(call, cx));
+        true
     }
 
     /// Opens the editor for a proposed command. Its approval is void from this moment.
@@ -1015,8 +1095,13 @@ fn render_message(
                 &this.chat,
                 &this.project,
                 entity,
-                this.command_edit.as_ref(),
-                this.command_share.as_ref(),
+                &crate::views::command_card::CardView {
+                    collapsed: &this.command_collapsed,
+                    details: &this.command_details,
+                    animate: !this.app.read(cx).settings.reduce_motion,
+                    editing: this.command_edit.as_ref(),
+                    sharing: this.command_share.as_ref(),
+                },
                 &m,
                 cx,
             );

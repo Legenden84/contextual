@@ -21,7 +21,7 @@ pub fn load_fonts(cx: &mut App) {
 }
 
 // Icons beyond gpui-component's default set, embedded from the Lucide catalog.
-gpui_kit::assets::icon_assets!(ExtraIcons, [GitBranch, Image, Brain, Send]);
+gpui_kit::assets::icon_assets!(ExtraIcons, [GitBranch, Image, Brain, Send, Timer, Share]);
 
 pub const MOSS_ICON_PATH: &str = "icons/contextual-moss.svg";
 
