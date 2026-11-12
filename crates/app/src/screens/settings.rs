@@ -8,9 +8,9 @@ use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
-    div,
+    AppContext, ClickEvent, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, div,
 };
 
 use crate::state::{AppModel, ConnectionTest};
@@ -1110,11 +1110,27 @@ impl Render for SettingsScreen {
                     .when(!active, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
                     .focus(|s| s.border_color(hsla(c.focus_ring)))
                     .cursor_pointer()
-                    .on_click(cx.listener(move |t, _, window, cx| t.select_model(key, window, cx)))
+                    .on_click(cx.listener(move |t, event: &ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            t.router_key = Some(key);
+                        }
+                        t.select_model(key, window, cx);
+                    }))
                     .on_key_down(cx.listener(move |t, e: &KeyDownEvent, window, cx| {
-                        if matches!(e.keystroke.key.as_str(), "enter" | "space") {
-                            cx.stop_propagation();
-                            t.select_model(key, window, cx);
+                        match e.keystroke.key.as_str() {
+                            "enter" | "space" => {
+                                cx.stop_propagation();
+                                t.select_model(key, window, cx);
+                            }
+                            "r" if !e.keystroke.modifiers.control
+                                && !e.keystroke.modifiers.alt
+                                && !e.keystroke.modifiers.platform =>
+                            {
+                                cx.stop_propagation();
+                                t.router_key = Some(key);
+                                t.select_model(key, window, cx);
+                            }
+                            _ => {}
                         }
                     }))
                     .child(
@@ -1209,17 +1225,8 @@ impl Render for SettingsScreen {
                             .pl(px(LABEL_W) + sp(4))
                             .type_style(contextual_theme::type_style::UI_SMALL)
                             .text_color(hsla(c.ink_muted))
-                            .child(if is_router {
-                                div()
-                                    .child("This model reads each message first and chooses.")
-                                    .into_any_element()
-                            } else {
-                                Button::new("make-router", "Make routing model")
-                                    .on_click(cx.listener(move |t, _, _, cx| {
-                                        t.router_key = Some(key);
-                                        cx.notify();
-                                    }))
-                                    .into_any_element()
+                            .when(is_router, |d| {
+                                d.child("This model reads each message first and chooses.")
                             })
                             .child(LinkButton::new(
                                 ("remove-model", key),
@@ -1421,7 +1428,16 @@ impl Render for SettingsScreen {
                                     .pt(sp(2))
                                     .type_style(contextual_theme::type_style::UI_SMALL)
                                     .text_color(hsla(c.warning))
-                                    .child("No routing model: select a model and press Make routing model."),
+                                    .child("No routing model selected."),
+                            )
+                        })
+                        .when(!no_models, |d| {
+                            d.child(
+                                div()
+                                    .pt(sp(2))
+                                    .type_style(contextual_theme::type_style::UI_SMALL)
+                                    .text_color(hsla(c.ink_muted))
+                                    .child("Double-click a model, or focus its row and press R, to make it the routing model."),
                             )
                         })
                         .when(no_models, |d| {
