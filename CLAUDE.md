@@ -4,9 +4,9 @@ Local desktop developer tool: a chat client that sends selected project files to
 LLM (Azure AI Foundry) and lets the user review and save proposed changes. The model never writes
 to disk; saving ("Save" in the UI, `apply` in code) is an explicit, checked, undoable action.
 The model can also propose commands, which run only when the user approves the exact command;
-their effects are not covered by Save/Undo. That is off unless the user turns on "Let the
-assistant propose commands" in Settings (`chat.proposeCommands`), read at startup
-(`docs/plans/approved-command-execution.md`).
+their effects are not covered by Save/Undo. Command execution is always configured, with no
+Settings flag. Local projects use the native backend and WSL projects use their agent;
+unavailable backends, journals or agent capabilities leave execution unavailable.
 
 Several models can be configured (`foundry.models` in settings.json, or `AZURE_OPENAI_<NAME>_…`
 variables; endpoint, key and API version are shared). No model is built in: deployment, tier,
@@ -69,10 +69,8 @@ Rust is in `~/.cargo/bin`. Development is Linux-only; the app runs through WSLg.
   `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<msg>|switch:<branch>`
   (`envfile` with `--settings`: the env-file picker; `models` with `--settings`: the Models group),
   `CONTEXTUAL_DEV_REMOTE=1` (serve projects through a local agent: the WSL code path),
-  `CONTEXTUAL_DEV_COMMANDS=1` (turns command proposals on for one run without changing
-  Settings: in-process for local projects, through `contextual-agent --commands` for WSL
-  ones; see `docs/plans/approved-command-execution.md`) with
-  `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit|command-share|command-withhold|command-decline|command-quit|command-close`. Point
+  `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit|command-share|command-withhold|command-decline|command-quit|command-close`
+  (simulate explicit command-card actions; no command-enablement variable is needed). Point
   `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand; add
   `AZURE_OPENAI_ROUTER` and `AZURE_OPENAI_<NAME>_DEPLOYMENT` / `_TIER` per model to try routing.
 - Test fixtures were recorded from the old TypeScript app; see `crates/core/tests/fixtures/README.md`.

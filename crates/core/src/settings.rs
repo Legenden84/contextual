@@ -223,16 +223,12 @@ impl WorkspaceSettings {
 pub struct ChatSettings {
     /// The model gets the project tree and asks for the files and skills it needs.
     pub model_picks_files: bool,
-    /// The assistant may propose commands. Each one is shown first and runs only when the
-    /// user approves that exact command. Off unless the user turns it on.
-    pub propose_commands: bool,
 }
 
 impl Default for ChatSettings {
     fn default() -> Self {
         Self {
             model_picks_files: true,
-            propose_commands: false,
         }
     }
 }
@@ -677,20 +673,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_proposals_are_off_until_the_user_turns_them_on() {
-        assert!(!Settings::default().chat.propose_commands);
-        // Settings saved before the option existed leave it off.
-        let old: Settings = serde_json::from_str(r#"{"chat":{"modelPicksFiles":false}}"#).unwrap();
-        assert!(!old.chat.propose_commands && !old.chat.model_picks_files);
-        let empty: Settings = serde_json::from_str("{}").unwrap();
-        assert!(!empty.chat.propose_commands);
+    fn legacy_command_flag_is_ignored_and_not_saved() {
+        for enabled in [false, true] {
+            let old = serde_json::json!({
+                "chat": {
+                    "modelPicksFiles": false,
+                    "proposeCommands": enabled
+                }
+            });
+            let settings: Settings = serde_json::from_value(old).unwrap();
+            assert!(!settings.chat.model_picks_files);
+            assert_eq!(
+                serde_json::to_value(&settings.chat).unwrap(),
+                serde_json::json!({ "modelPicksFiles": false })
+            );
+        }
+    }
 
-        let mut on = Settings::default();
-        on.chat.propose_commands = true;
-        let saved = serde_json::to_value(&on).unwrap();
-        assert_eq!(saved["chat"]["proposeCommands"], true);
-        let back: Settings = serde_json::from_value(saved).unwrap();
-        assert!(back.chat.propose_commands);
+    #[test]
+    fn default_settings_have_no_command_flag() {
+        let empty: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.chat, ChatSettings::default());
+        assert_eq!(
+            serde_json::to_value(&empty.chat).unwrap(),
+            serde_json::json!({ "modelPicksFiles": true })
+        );
     }
 
     #[test]

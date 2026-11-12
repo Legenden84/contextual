@@ -91,8 +91,6 @@ impl AppModel {
         };
         let state_store = StateStore::open_default().ok();
         let state = state_store.as_ref().map(|s| s.load()).unwrap_or_default();
-        // Read once: turning command proposals on or off applies from the next start.
-        let propose_commands = settings.chat.propose_commands;
         let mut this = Self {
             screen: Screen::Welcome,
             back_to: Screen::Welcome,
@@ -105,7 +103,7 @@ impl AppModel {
             config: None,
             routing: None,
             connection_test: ConnectionTest::Idle,
-            hosts: hosts::Hosts::new(propose_commands),
+            hosts: hosts::Hosts::new(),
             project_host: None,
             project: None,
             scm: None,
@@ -125,8 +123,8 @@ impl AppModel {
         }
     }
 
-    /// Whether approved commands can run for a project at this location (the user's
-    /// setting as it was at startup).
+    /// Whether this location is configured for approved commands. Host readiness and
+    /// per-command approval are checked separately.
     pub fn commands_enabled(&self, location: &Location) -> bool {
         self.hosts.commands_enabled(location)
     }

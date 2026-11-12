@@ -113,7 +113,7 @@ pub struct SendEnv {
     pub auto: bool,
     /// The skills the model may load (system prompt), when `auto`.
     pub skill_index: String,
-    /// Offer the command-proposal tool in this turn (development switch).
+    /// Offer the command-proposal tool when the project's host is configured for commands.
     pub commands: bool,
     /// What the chat calls the model that `config` reaches.
     pub label: String,
@@ -295,7 +295,7 @@ pub struct ChatModel {
     pub live_context: Option<LiveContextTokens>,
     /// Several models: the one the user picked for this chat (`None`: chosen per message).
     pub pinned_model: Option<String>,
-    /// Approved commands can run for this project's host (development switch).
+    /// This project's host is configured for commands; each launch still needs approval.
     pub commands_enabled: bool,
     /// Identifies this opening of the project to the host's command preparation.
     project_epoch: String,
