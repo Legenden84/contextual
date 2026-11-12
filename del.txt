@@ -1,3 +1,0 @@
-cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-
-cargo test -p contextual-core --no-default-features --target x86_64-pc-windows-gnu --lib --no-run
