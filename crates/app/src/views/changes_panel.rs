@@ -9,9 +9,9 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
-use crate::state::chat::{CenterView, ChatModel};
+use crate::state::chat::ChatModel;
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, row_height, sp};
-use crate::ui::{Button, ButtonVariant, Checkbox, pane_header};
+use crate::ui::{Button, ButtonSize, ButtonVariant, Checkbox, pane_header};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 
 pub struct ChangesPanel {
@@ -110,6 +110,7 @@ impl Render for ChangesPanel {
                 };
                 let path = ch.path.clone();
                 let diff_path = path.clone();
+                let discard_path = path.clone();
                 div()
                     .id(("change", i))
                     .flex()
@@ -188,6 +189,15 @@ impl Render for ChangesPanel {
                                 )),
                             ),
                     )
+                    .child(
+                        Button::new(("discard-change", i), "Discard")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .disabled(busy)
+                            .on_click(cx.listener(move |t, _, _, cx| {
+                                t.chat.update(cx, |c, cx| c.discard_file(&discard_path, cx));
+                            })),
+                    )
             })
             .collect();
         let conflicts = changes.iter().any(|ch| ch.conflict.is_some());
@@ -251,7 +261,7 @@ impl Render for ChangesPanel {
                     .py(sp(2))
                     .type_style(contextual_theme::type_style::UI_SMALL)
                     .text_color(hsla(c.ink_muted))
-                    .child("Discard removes checked proposals only. Project files and original replies are kept."),
+                    .child("Discard removes that file’s proposal only. Project files and original replies are kept."),
             )
             .child(
                 div()
@@ -261,22 +271,7 @@ impl Render for ChangesPanel {
                     .p(sp(3))
                     .border_t_1()
                     .border_color(hsla(c.border))
-                    .child(Button::new("open-diff", "Open diff").on_click(cx.listener(|t, _, _, cx| {
-                        t.chat.update(cx, |c, cx| {
-                            c.set_center(CenterView::Diff, cx);
-                        })
-                    })))
                     .child(div().flex_1())
-                    .child(
-                        Button::new(
-                            "discard",
-                            format!("Discard {picked} {}", if picked == 1 { "file" } else { "files" }),
-                        )
-                        .disabled(picked == 0 || busy)
-                        .on_click(cx.listener(|t, _, _, cx| {
-                            t.chat.update(cx, |c, cx| c.discard_included(cx));
-                        })),
-                    )
                     .child(
                         Button::new("save", format!("Save {picked} {}…", if picked == 1 { "file" } else { "files" }))
                             .variant(ButtonVariant::Primary)

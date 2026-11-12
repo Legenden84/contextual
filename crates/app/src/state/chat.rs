@@ -2235,18 +2235,13 @@ impl ChatModel {
 
     // ------------------------------------------------------------------ discard / save / undo
 
-    /// Discards checked proposals, retaining historical replies and the last Save's undo.
-    /// No workspace operation is performed.
-    pub fn discard_included(&mut self, cx: &mut Context<Self>) {
+    /// Discards one file's proposal regardless of its Save selection, retaining historical
+    /// replies and the last Save's undo. No workspace operation is performed.
+    pub fn discard_file(&mut self, path: &str, cx: &mut Context<Self>) {
         if self.streaming() || self.saving || self.command_running() {
             return;
         }
-        let paths = self
-            .include
-            .iter()
-            .filter(|(_, included)| **included)
-            .map(|(path, _)| path.clone())
-            .collect();
+        let paths = HashSet::from([path.to_string()]);
         let discarded = chat::discard_pending_changes(&mut self.thread, &paths);
         if discarded.is_empty() {
             return;
