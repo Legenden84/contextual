@@ -31,6 +31,8 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
   - `logic/` — pure functions: diff, markdown/response parsing, changes, SEARCH/REPLACE edits,
     `reads` (the model picks files: `read` blocks, project tree, skill index, limits),
     `route` (several models: routing prompt, `route` block, tier rules),
+    `cutoff` (replies cut off at the token limit: finished sections kept, follow-up rounds,
+    `APPEND` blocks continue a partial file),
     prompt (incl. `FILE_FORMAT`, appended to the system prompt and not shown in Settings), tree
     sums, context totals, images, PR helpers.
   - `chat.rs` — turn preparation (only files new or changed since sent, by hash), saved-thread

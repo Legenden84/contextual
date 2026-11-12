@@ -2,7 +2,7 @@
 //! headings, paragraphs, bullet and numbered lists (nested by indentation), block quotes, tables,
 //! horizontal rules, fenced code blocks, and inline code, bold, italic and links. Plus the
 //! `### FILE:` / `### EDIT:` / `### DELETE:` headers the output format asks for, which drive the
-//! Changes panel. Anything unrecognised renders as a paragraph.
+//! Changes panel, and `### APPEND:`, which continues a file after a reply was cut off. Anything unrecognised renders as a paragraph.
 //!
 //! The TS regexes use lookaround and backreferences, which the `regex` crate lacks; those rules are
 //! rewritten as equivalent patterns or small hand-written matchers.
@@ -87,11 +87,19 @@ pub enum Block {
     Delete {
         path: String,
     },
+    /// Lines to add at the end of a file (the next fence); used to continue a file that a
+    /// cut-off reply left unfinished.
+    Append {
+        path: String,
+    },
     Code {
         code: String,
         lang: Lang,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// The source ended before the fence was closed.
+        #[serde(skip)]
+        open: bool,
     },
 }
 
@@ -113,6 +121,7 @@ pub fn file_progress(blocks: &[Block], path: &str, streaming: bool) -> FileProgr
     }
     let trailing_path = blocks.last().and_then(|block| match block {
         Block::File { path }
+        | Block::Append { path }
         | Block::Edit { path, .. }
         | Block::Delete { path }
         | Block::Code {
@@ -332,6 +341,7 @@ line_re!(REPLACE_MARK, r"^{s}*>{5,9}{s}*REPLACE{s}*$");
 line_re!(FILE_HEADER, r"^{s}*#{2,4} FILE:{s}*({dot}+)$");
 line_re!(DELETE_HEADER, r"^{s}*#{2,4} DELETE:{s}*({dot}+)$");
 line_re!(EDIT_HEADER, r"^{s}*#{2,4} EDIT:{s}*({dot}+)$");
+line_re!(APPEND_HEADER, r"^{s}*#{2,4} APPEND:{s}*({dot}+)$");
 line_re!(HEADING, r"^{s}{0,3}(#{1,6}){s}+({dot}*?){s}*#*{s}*$");
 // `([-*_])(\s*\1){2,}` without the backreference.
 line_re!(
@@ -538,6 +548,7 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
                 code.push(lines[i]);
                 i += 1;
             }
+            let open = i >= lines.len();
             let info = js::trim(group(&fence, 2))
                 .split(js::is_ws)
                 .next()
@@ -551,6 +562,7 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
                 code: code.join("\n"),
                 lang,
                 path: file_path.take(),
+                open,
             });
         } else if let Some(edit) = EDIT_HEADER.captures(line) {
             flush(&mut para, &mut blocks);
@@ -562,6 +574,11 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
             let path = clean_path(group(&file, 1));
             file_path = Some(path.clone());
             blocks.push(Block::File { path });
+        } else if let Some(append) = APPEND_HEADER.captures(line) {
+            flush(&mut para, &mut blocks);
+            let path = clean_path(group(&append, 1));
+            file_path = Some(path.clone());
+            blocks.push(Block::Append { path });
         } else if let Some(del) = DELETE_HEADER.captures(line) {
             flush(&mut para, &mut blocks);
             blocks.push(Block::Delete {
@@ -699,7 +716,28 @@ mod tests {
             Block::Code {
                 code: "x".into(),
                 lang: Lang::Typescript,
-                path: Some("a.ts".into())
+                path: Some("a.ts".into()),
+                open: false,
+            }
+        );
+    }
+
+    #[test]
+    fn append_header_tags_next_fence_and_open_fences_are_marked() {
+        let b = parse_markdown("### APPEND: a.ts\n```ts\nx\ny");
+        assert_eq!(
+            b[0],
+            Block::Append {
+                path: "a.ts".into()
+            }
+        );
+        assert_eq!(
+            b[1],
+            Block::Code {
+                code: "x\ny".into(),
+                lang: Lang::Typescript,
+                path: Some("a.ts".into()),
+                open: true,
             }
         );
     }

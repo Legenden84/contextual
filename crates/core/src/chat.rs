@@ -13,7 +13,7 @@ use crate::commands::{CallId, InvocationId};
 use crate::llm::tools::{ToolCall, ToolResult, command_request};
 use crate::llm::types::{ApiKind, ChatMessage as LlmMessage, ChatRole, MessageContent};
 use crate::location::Location;
-use crate::logic::changes::{ChangeContext, parse_changes};
+use crate::logic::changes::{ChangeContext, Parsed, PartialFile, parse_reply};
 use crate::logic::format::fmt_k;
 use crate::logic::hash::hash_text;
 use crate::logic::markdown::{Block, parse_markdown};
@@ -1119,13 +1119,16 @@ pub fn touched_paths(reply: &str) -> Vec<String> {
     out
 }
 
-/// Parses a finished reply into proposed changes (none when the reply was cut off).
-pub fn proposed_changes(reply: &str, truncated: bool, ctx: &dyn ChangeContext) -> Vec<Change> {
-    if truncated {
-        Vec::new()
-    } else {
-        parse_changes(reply, ctx)
-    }
+/// Parses a finished reply into proposed changes. A reply cut off at the token limit
+/// (`truncated`) yields the sections it finished and a [`Parsed::cutoff`] describing the rest;
+/// `held` is a file an earlier cut-off reply left unfinished.
+pub fn proposed_changes(
+    reply: &str,
+    truncated: bool,
+    held: Option<&PartialFile>,
+    ctx: &dyn ChangeContext,
+) -> Parsed {
+    parse_reply(reply, truncated, held, ctx)
 }
 
 fn usable_proposal(change: &Change) -> bool {
@@ -1137,9 +1140,10 @@ fn usable_proposal(change: &Change) -> bool {
 pub fn proposed_changes_on_top(
     reply: &str,
     truncated: bool,
+    held: Option<&PartialFile>,
     ctx: &dyn ChangeContext,
     pending: &[Change],
-) -> Vec<Change> {
+) -> Parsed {
     struct Proposed<'a> {
         disk: &'a dyn ChangeContext,
         pending: &'a [Change],
@@ -1175,7 +1179,7 @@ pub fn proposed_changes_on_top(
         }
     }
 
-    proposed_changes(reply, truncated, &Proposed { disk: ctx, pending })
+    proposed_changes(reply, truncated, held, &Proposed { disk: ctx, pending })
 }
 
 /// Compose successive proposals into one disk-relative change per path. Newer contents win,
@@ -1295,7 +1299,7 @@ pub fn turn_notes(
     }
     if truncated {
         out.push((
-            "The reply hit the completion token limit and was cut off, so its file changes were not offered for saving. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.".into(),
+            "The reply hit the completion token limit and was cut off. Its finished file changes were offered for saving; the one it was writing was not. Raise AZURE_OPENAI_MAX_COMPLETION_TOKENS or ask for fewer files.".into(),
             Tone::Warn,
         ));
     }
@@ -1576,9 +1580,11 @@ mod tests {
         let next = proposed_changes_on_top(
             "### EDIT: a.txt\n<<<<<<< SEARCH\nONE\n=======\nFIRST\n>>>>>>> REPLACE",
             false,
+            None,
             &ProposalDisk,
             &first,
-        );
+        )
+        .changes;
         assert_eq!(next[0].old, "ONE\ntwo\n");
         assert_eq!(next[0].new, "FIRST\ntwo\n");
         assert!(next[0].unplaced.as_ref().unwrap().is_empty());
@@ -1589,7 +1595,9 @@ mod tests {
         assert_eq!(merged[1], first[1]);
         assert_eq!(merge_pending_changes(&merged, &[]), merged);
 
-        let cut_off = proposed_changes_on_top("### DELETE: b.txt", true, &ProposalDisk, &merged);
+        let cut_off =
+            proposed_changes_on_top("### DELETE: b.txt", true, None, &ProposalDisk, &merged)
+                .changes;
         assert_eq!(merge_pending_changes(&merged, &cut_off), merged);
     }
 
@@ -1599,9 +1607,11 @@ mod tests {
         let next = proposed_changes_on_top(
             "### EDIT: new.txt\n<<<<<<< SEARCH\nfirst\n=======\nsecond\n>>>>>>> REPLACE",
             false,
+            None,
             &ProposalDisk,
             &first,
-        );
+        )
+        .changes;
         let merged = merge_pending_changes(&first, &next);
         assert_eq!(
             merged,
@@ -1614,7 +1624,9 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         );
-        let deleted = proposed_changes_on_top("### DELETE: new.txt", false, &ProposalDisk, &merged);
+        let deleted =
+            proposed_changes_on_top("### DELETE: new.txt", false, None, &ProposalDisk, &merged)
+                .changes;
         assert!(merge_pending_changes(&merged, &deleted).is_empty());
     }
 
@@ -1624,9 +1636,11 @@ mod tests {
         let recreated = proposed_changes_on_top(
             "### FILE: a.txt\n```\nreplacement\n```",
             false,
+            None,
             &ProposalDisk,
             &deleted,
-        );
+        )
+        .changes;
         let merged = merge_pending_changes(&deleted, &recreated);
         assert_eq!(merged[0].status, ChangeStatus::M);
         assert_eq!(merged[0].old, "one\ntwo\n");

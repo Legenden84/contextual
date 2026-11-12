@@ -53,7 +53,8 @@ access other files and the network; their side effects will not be covered by Sa
   context totals, images, PR helpers; `reads`: the model picks its files — the `read` protocol,
   the project tree and skill index it is sent, checking requests and the per-message limits;
   `route`: several models — the routing model's prompt, the `route` block it answers with and
-  the tier rules applied to it).
+  the tier rules applied to it; `cutoff`: a reply cut off at the completion token limit keeps
+  its finished sections and is continued in follow-up rounds, a partial file through `APPEND`).
 - `threads` (saved chats, per project key; `import_legacy` copies the old app's), `settings`
   (`settings.json`, env overrides, `SecretStore`), `recents` (`state.json`), `migrate`
   (`.env.local` import), `models` (the user's model descriptions under `models` in `settings.json`: context

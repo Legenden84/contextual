@@ -100,7 +100,7 @@ complete file contents
 
 Never return a file marked as a condensed reference.";
 
-fn fence_lang(path: &str) -> &'static str {
+pub(crate) fn fence_lang(path: &str) -> &'static str {
     match lang_from_path(Some(path)) {
         Lang::Csharp => "csharp",
         Lang::Typescript => "typescript",

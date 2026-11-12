@@ -19,8 +19,9 @@ use contextual_core::llm::types::{ApiKind, ChatEvent, ConversationRequest, Repai
 use contextual_core::llm::{FoundryClient, FoundryConfig};
 use contextual_core::llm::{ToolCall, WaitReason};
 use contextual_core::location::ProjectRoot;
-use contextual_core::logic::changes::ChangeContext;
+use contextual_core::logic::changes::{ChangeContext, Cutoff, PartialFile};
 use contextual_core::logic::context::LiveContextTokens;
+use contextual_core::logic::cutoff::{self, MAX_CONTINUATIONS};
 use contextual_core::logic::edits::format_edits;
 use contextual_core::logic::format::estimate_tokens;
 use contextual_core::logic::images::Attachment;
@@ -198,6 +199,8 @@ struct Rounds {
     /// Files and tokens read automatically so far.
     files: usize,
     tokens: u64,
+    /// Follow-ups sent so far because a reply was cut off at the token limit.
+    continuations: usize,
 }
 
 /// A turn to stream.
@@ -208,6 +211,8 @@ struct Turn {
     rounds: Rounds,
     /// The turn only returns command results: the user typed nothing.
     results_only: bool,
+    /// A file the previous, cut-off reply was writing; this turn's reply may continue it.
+    held: Option<PartialFile>,
 }
 
 /// The reads to answer a request with.
@@ -691,6 +696,7 @@ impl ChatModel {
                 tree_version: tree.map(|(_, v)| v),
                 rounds: Rounds::default(),
                 results_only: false,
+                held: None,
             };
             Self::stream(this, turn, env, rules_on, token, cx).await;
         });
@@ -1153,6 +1159,7 @@ impl ChatModel {
             tree_version,
             rounds,
             results_only,
+            held,
         } = turn;
         let Ok((base, ai_id, staged)) = this.update(cx, |this, cx| {
             let ai = UiMessage::assistant(&env.label, &now());
@@ -1487,14 +1494,29 @@ impl ChatModel {
                 reference_only: &this.reference_only,
             };
             if completed {
-                chat::proposed_changes_on_top(&reply, truncated, &ctx, this.changes_ref())
+                chat::proposed_changes_on_top(
+                    &reply,
+                    truncated,
+                    held.as_ref(),
+                    &ctx,
+                    this.changes_ref(),
+                )
             } else {
                 // An interrupted or failed reply must not supersede reviewed proposals.
-                Vec::new()
+                Default::default()
             }
         }) else {
             return;
         };
+        let cut = proposed.cutoff.take();
+        let mut proposed = proposed.changes;
+        // A cut-off reply is continued in another round, unless it also proposed commands
+        // (they must be answered first) or the continuations for this message are used up.
+        let continue_cut = cut
+            .as_ref()
+            .filter(|_| truncated && completed && !proposed_commands)
+            .filter(|_| rounds.continuations < MAX_CONTINUATIONS)
+            .cloned();
         // Each reply shows its own usage; earlier rounds show theirs.
         let mut usage_total = usage;
         for change in proposed.iter_mut() {
@@ -1552,10 +1574,17 @@ impl ChatModel {
                 m.cost = cost;
             }
             let chain_reset = done.as_ref().is_some_and(|d| d.3);
+            let gave_up = truncated && continue_cut.is_none();
             for (t, tone) in
-                chat::turn_notes(failure.as_deref(), chain_reset, api, base.api, truncated)
+                chat::turn_notes(failure.as_deref(), chain_reset, api, base.api, gave_up)
             {
                 this.note(t, tone);
+            }
+            if let Some(path) = cut.as_ref().and_then(|c| c.abandoned.as_ref()) {
+                this.note(
+                    format!("`{path}` was cut off and the model did not finish it, so it was not offered for saving."),
+                    Tone::Warn,
+                );
             }
             if env.auto && completed && rounds.n > LIMITS.rounds {
                 this.note(
@@ -1570,6 +1599,14 @@ impl ChatModel {
             if let Some(message) = tools_unsupported {
                 this.note(message, Tone::Warn);
             }
+            if let Some(cut) = continue_cut {
+                let next = Rounds {
+                    continuations: rounds.continuations + 1,
+                    ..rounds
+                };
+                this.continue_cut_off(cut, next, env, rules_on, cx);
+                return;
+            }
             this.cancel = None;
             this.save_thread(cx);
             cx.notify();
@@ -1577,6 +1614,49 @@ impl ChatModel {
                 this.prepare_open_commands(cx);
             }
         });
+    }
+
+    /// The last reply was cut off at the token limit: ask the model to carry on from where it
+    /// stopped. Its answer is proposed on top of what was received.
+    fn continue_cut_off(
+        &mut self,
+        cut: Cutoff,
+        rounds: Rounds,
+        env: SendEnv,
+        rules_on: Vec<Rule>,
+        cx: &mut Context<Self>,
+    ) {
+        let token = CancellationToken::new();
+        self.cancel = Some(token.clone());
+        self.activity = ChatActivity::WaitingForResponse;
+        self.save_thread(cx);
+        cx.notify();
+        let mut selected = self.project.read(cx).selected.clone();
+        selected.extend(self.thread.loaded.iter().cloned());
+        let text = cutoff::continuation_text(&cut, rounds.continuations == MAX_CONTINUATIONS);
+        let prepared = chat::prepare_turn(
+            &self.thread,
+            &[],
+            &selected,
+            &text,
+            &[],
+            rules_on.len(),
+            TurnOptions {
+                followup: true,
+                ..TurnOptions::default()
+            },
+        );
+        let turn = Turn {
+            prepared,
+            tree_version: None,
+            rounds,
+            results_only: false,
+            held: cut.partial().cloned(),
+        };
+        let task = cx.spawn(async move |this, cx| {
+            Self::stream(this, turn, env, rules_on, token, cx).await;
+        });
+        self._tasks.push(task);
     }
 
     // ------------------------------------------------------------------ commands
@@ -1857,6 +1937,7 @@ impl ChatModel {
             tree_version: None,
             rounds: Rounds::default(),
             results_only,
+            held: None,
         };
         let task = cx.spawn(async move |this, cx| {
             Self::stream(this, turn, env, rules_on, token, cx).await;
@@ -2385,6 +2466,7 @@ impl ChatModel {
             n: rounds.n + 1,
             files: rounds.files,
             tokens: rounds.tokens,
+            continuations: rounds.continuations,
         };
         let step = ReadStep {
             ai_id: ai_id.to_string(),
@@ -2520,6 +2602,7 @@ impl ChatModel {
                     tree_version: None,
                     rounds,
                     results_only: false,
+                    held: None,
                 }
             }) else {
                 return;

@@ -1,0 +1,195 @@
+diff --git a/crates/agent/tests/host_contract.rs b/crates/agent/tests/host_contract.rs
+index 2c12ea7..7503f29 100644
+--- a/crates/agent/tests/host_contract.rs
++++ b/crates/agent/tests/host_contract.rs
+@@ -296,7 +296,12 @@ async fn git_delete_local_branch<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHo
+         })
+         .await
+         .unwrap();
+-    assert!(!branches.local.iter().any(|branch| branch.name == "finished"));
++    assert!(
++        !branches
++            .local
++            .iter()
++            .any(|branch| branch.name == "finished")
++    );
+     assert_eq!(branches.current.as_deref(), Some("main"));
+ 
+     let error = host
+diff --git a/crates/app/src/dev.rs b/crates/app/src/dev.rs
+index 1cbc6ee..e12ddbe 100644
+--- a/crates/app/src/dev.rs
++++ b/crates/app/src/dev.rs
+@@ -5,7 +5,7 @@
+ //! opens that view, or runs that Source Control action, at startup.
+ //! `CONTEXTUAL_DEV_OPEN=envfile` with `--settings` opens the env-file picker in Settings.
+ //! `CONTEXTUAL_DEV_OPEN=models` with `--settings` starts Settings on the Models group.
+- //!
++//!
+ //! `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit` presses that
+ //! button on the first proposed command once its review card is ready (`command-stop` presses
+ //! Run, then Stop when the command has produced output; `command-edit` replaces every `ran`
+diff --git a/crates/app/src/screens/settings.rs b/crates/app/src/screens/settings.rs
+index 2a21e97..a000413 100644
+--- a/crates/app/src/screens/settings.rs
++++ b/crates/app/src/screens/settings.rs
+@@ -243,9 +243,7 @@ fn opt<T: ToString>(v: Option<T>) -> String {
+ 
+ /// Sort valid tiers numerically, with missing or invalid tiers last.
+ fn tier_sort_key(tier: Option<&str>) -> (bool, Option<u8>) {
+-    let tier = tier
+-        .and_then(|t| t.parse::<u8>().ok())
+-        .filter(|&t| t > 0);
++    let tier = tier.and_then(|t| t.parse::<u8>().ok()).filter(|&t| t > 0);
+     (tier.is_none(), tier)
+ }
+ 
+diff --git a/crates/app/src/screens/workspace.rs b/crates/app/src/screens/workspace.rs
+index 451d581..3cd317d 100644
+--- a/crates/app/src/screens/workspace.rs
++++ b/crates/app/src/screens/workspace.rs
+@@ -861,8 +861,7 @@ impl Render for WorkspaceScreen {
+                                 });
+                             }
+                             if compact {
+-                                t.compact_panel =
+-                                    (!changes_visible).then_some(DockPanel::Changes);
++                                t.compact_panel = (!changes_visible).then_some(DockPanel::Changes);
+                                 if changes_visible {
+                                     t.chat_panel.update(cx, |panel, cx| {
+                                         panel.focus_input(window, cx);
+diff --git a/crates/app/src/state/hosts.rs b/crates/app/src/state/hosts.rs
+index 6aab16f..552ef7b 100644
+--- a/crates/app/src/state/hosts.rs
++++ b/crates/app/src/state/hosts.rs
+@@ -4,7 +4,7 @@
+ //! `CONTEXTUAL_DEV_REMOTE=1` (debug builds) treats every project as living in a "dev" distro
+ //! served by a locally spawned `contextual-agent`, so the remote path can be exercised on Linux.
+ //!
+- //! Command execution is always configured: the in-process host gets this platform's native
++//! Command execution is always configured: the in-process host gets this platform's native
+ //! command backend, and agents are started in their explicit `--commands` mode for their
+ //! distro. Every command still requires the user's approval of the exact reviewed plan.
+ //! An unavailable backend or durable history leaves execution unavailable.
+diff --git a/crates/app/src/state/scm.rs b/crates/app/src/state/scm.rs
+index 22c169d..293e335 100644
+--- a/crates/app/src/state/scm.rs
++++ b/crates/app/src/state/scm.rs
+@@ -452,7 +452,8 @@ impl ScmModel {
+         let requested_root = root.clone();
+         let deleted_name = name.clone();
+         let job = runtime::spawn(cx, async move {
+-            host.git_delete_branch(DeleteBranchRequest { root, name }).await
++            host.git_delete_branch(DeleteBranchRequest { root, name })
++                .await
+         });
+         cx.notify();
+         cx.spawn(async move |this, cx| {
+diff --git a/crates/app/src/views/branch_picker.rs b/crates/app/src/views/branch_picker.rs
+index a4bdf2d..8505719 100644
+--- a/crates/app/src/views/branch_picker.rs
++++ b/crates/app/src/views/branch_picker.rs
+@@ -1,5 +1,5 @@
+ //! Branch quick pick (VS Code-style), opened from the branch name in the status bar or Source
+- //! Control: filter, switch, create, or explicitly delete a local branch.
++//! Control: filter, switch, create, or explicitly delete a local branch.
+ 
+ use contextual_protocol::git::BranchInfo;
+ use gpui_kit::component::input::{Input, InputEvent, InputState};
+@@ -197,7 +197,11 @@ impl BranchPicker {
+                 IconButton::with_glyph(
+                     SharedString::from(format!(
+                         "{}:{}",
+-                        if confirming { "confirm-delete" } else { "delete-branch" },
++                        if confirming {
++                            "confirm-delete"
++                        } else {
++                            "delete-branch"
++                        },
+                         branch.name
+                     )),
+                     div()
+@@ -213,7 +217,8 @@ impl BranchPicker {
+                             return;
+                         }
+                         this.confirm_delete = None;
+-                        this.scm.update(cx, |scm, cx| scm.delete_branch(name.clone(), cx));
++                        this.scm
++                            .update(cx, |scm, cx| scm.delete_branch(name.clone(), cx));
+                     } else {
+                         this.confirm_delete = Some(name.clone());
+                     }
+diff --git a/crates/app/src/views/chat_panel.rs b/crates/app/src/views/chat_panel.rs
+index c65bd2c..19c3a4e 100644
+--- a/crates/app/src/views/chat_panel.rs
++++ b/crates/app/src/views/chat_panel.rs
+@@ -1062,15 +1062,9 @@ fn render_message(
+                 .rounded(px(contextual_theme::radius::LG))
+                 .bg(hsla(c.surface_200))
+                 .child(header("You", &m, cx))
+-                .child(
+-                    div()
+-                        .mt(sp(2))
+-                        .whitespace_normal()
+-                        .child(crate::views::markdown::selectable_plain(
+-                            format!("{}-prompt", m.id),
+-                            &m.text,
+-                        )),
+-                )
++                .child(div().mt(sp(2)).whitespace_normal().child(
++                    crate::views::markdown::selectable_plain(format!("{}-prompt", m.id), &m.text),
++                ))
+                 .when_some(m.images.as_ref().filter(|i| !i.is_empty()), |d, imgs| {
+                     d.child(
+                         div()
+diff --git a/crates/app/src/views/chats_menu.rs b/crates/app/src/views/chats_menu.rs
+index 3e30e5e..dbb8006 100644
+--- a/crates/app/src/views/chats_menu.rs
++++ b/crates/app/src/views/chats_menu.rs
+@@ -137,7 +137,9 @@ impl Render for ChatsMenu {
+                     .py(sp(1))
+                     .cursor_pointer()
+                     .when(active, |d| d.bg(hsla(c.surface_selected)))
+-                    .when(!active && !busy, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
++                    .when(!active && !busy, |d| {
++                        d.hover(|s| s.bg(hsla(c.surface_hover)))
++                    })
+                     .on_click(cx.listener(move |m, _, _, cx| {
+                         if busy || active {
+                             return;
+diff --git a/crates/core/tests/git_integration.rs b/crates/core/tests/git_integration.rs
+index 9d9289a..beb07bb 100644
+--- a/crates/core/tests/git_integration.rs
++++ b/crates/core/tests/git_integration.rs
+@@ -483,9 +483,17 @@ async fn delete_branch_preserves_remote_and_working_tree() {
+     git.delete_branch(&root, "finished").await.unwrap();
+ 
+     let branches = git.list_branches(&root, false).await.unwrap();
+-    assert!(!branches.local.iter().any(|branch| branch.name == "finished"));
+     assert!(
+-        branches.remote.iter().any(|branch| branch.name == "origin/finished")
++        !branches
++            .local
++            .iter()
++            .any(|branch| branch.name == "finished")
++    );
++    assert!(
++        branches
++            .remote
++            .iter()
++            .any(|branch| branch.name == "origin/finished")
+     );
+     assert_eq!(git.status(&root).await.unwrap(), before);
+     assert_eq!(
+@@ -516,7 +524,10 @@ async fn delete_branch_refuses_unmerged_commits() {
+     git_cmd(&root, &["stash", "-u", "-q"]);
+     let original = git_cmd(&root, &["branch", "--show-current"]);
+     git_cmd(&root, &["switch", "-c", "unmerged"]);
+-    git_cmd(&root, &["commit", "--allow-empty", "-m", "Keep this commit"]);
++    git_cmd(
++        &root,
++        &["commit", "--allow-empty", "-m", "Keep this commit"],
++    );
+     let tip = git_cmd(&root, &["rev-parse", "HEAD"]);
+     git_cmd(&root, &["switch", &original]);
+ 

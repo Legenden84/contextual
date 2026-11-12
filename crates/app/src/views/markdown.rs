@@ -799,7 +799,7 @@ fn blocks(
                 .h(px(1.0))
                 .bg(hsla(c.border))
                 .into_any_element(),
-            Block::File { path } => header(&key, path, false, cx),
+            Block::File { path } | Block::Append { path } => header(&key, path, false, cx),
             Block::Delete { path } => header(&key, path, true, cx),
             Block::Edit { path, partial, .. } => {
                 if !shown_edits.insert(path.clone()) {
@@ -840,7 +840,9 @@ fn blocks(
                     _ => div().into_any_element(),
                 }
             }
-            Block::Code { code, lang, path } => {
+            Block::Code {
+                code, lang, path, ..
+            } => {
                 let entry = path.as_deref().and_then(|p| by_path.get(p).copied());
                 let change = entry.map(|(change, _)| change);
                 let max = if change.is_some_and(|c| c.status == ChangeStatus::M) {
