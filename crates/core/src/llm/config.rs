@@ -49,12 +49,14 @@ pub const ENV_ROUTER: &str = "AZURE_OPENAI_ROUTER";
 /// Per model only (`AZURE_OPENAI_<NAME>_TIER`, `…_DESCRIPTION`); never read without a name.
 pub const ENV_TIER: &str = "AZURE_OPENAI_TIER";
 pub const ENV_DESCRIPTION: &str = "AZURE_OPENAI_DESCRIPTION";
+/// USD per 1M cached input tokens (`AZURE_OPENAI_<NAME>_CACHED_INPUT_PRICE_PER_1M`).
+pub const ENV_CACHED_INPUT_PRICE: &str = "AZURE_OPENAI_CACHED_INPUT_PRICE_PER_1M";
 
 const ENV_PREFIX: &str = "AZURE_OPENAI_";
 
 /// The variables each model has for itself when several are configured. The endpoint, key and
 /// API version are shared.
-pub const PER_MODEL_ENV: [&str; 9] = [
+pub const PER_MODEL_ENV: [&str; 10] = [
     ENV_DEPLOYMENT,
     ENV_MODEL_NAME,
     ENV_TIER,
@@ -62,6 +64,7 @@ pub const PER_MODEL_ENV: [&str; 9] = [
     ENV_MAX_COMPLETION_TOKENS,
     ENV_CONTEXT_LIMIT,
     ENV_INPUT_PRICE,
+    ENV_CACHED_INPUT_PRICE,
     ENV_OUTPUT_PRICE,
     ENV_TOKENS_PER_MINUTE,
 ];

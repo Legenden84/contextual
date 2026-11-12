@@ -77,6 +77,7 @@ struct ModelRow {
     context_limit: Field,
     max_tokens: Field,
     in_price: Field,
+    cached_price: Field,
     out_price: Field,
     tokens_per_minute: Field,
 }
@@ -101,7 +102,7 @@ fn model_row(
     window: &mut Window,
     cx: &mut Context<SettingsScreen>,
 ) -> ModelRow {
-    const FROM_CATALOG: &str = "Empty: from the model catalog.";
+    const PRICE: &str = "USD. Empty: no cost is shown for this model.";
     ModelRow {
         key,
         focus: cx.focus_handle(),
@@ -121,49 +122,56 @@ fn model_row(
         ),
         model_name: text_field(
             "Model name",
-            "Looked up in the model catalog.",
+            "The underlying model. Empty: the deployment name.",
             opt(m.model_name.clone()),
             window,
             cx,
         ),
         tier: text_field(
             "Tier",
-            "Higher is more capable. Empty: from the model catalog.",
+            "Required. 1 or higher; higher is more capable.",
             opt(m.tier),
             window,
             cx,
         ),
         description: text_field(
             "Good for",
-            "What the routing model chooses from. Empty: from the model catalog.",
+            "A sentence the routing model chooses from.",
             opt(m.description.clone()),
             window,
             cx,
         ),
         context_limit: text_field(
             "Context limit",
-            "Tokens. Empty: from the model catalog.",
+            "Input tokens the model accepts. Empty: 128000.",
             opt(m.context_limit),
             window,
             cx,
         ),
         max_tokens: text_field(
             "Max output tokens",
-            "Per reply. Empty: the default.",
+            "Per reply. Empty: 16384.",
             opt(m.max_completion_tokens),
             window,
             cx,
         ),
         in_price: text_field(
             "Input price / 1M",
-            FROM_CATALOG,
+            PRICE,
             opt(m.input_price_per_1m),
+            window,
+            cx,
+        ),
+        cached_price: text_field(
+            "Cached input price / 1M",
+            "USD. Empty: cached input is charged like other input.",
+            opt(m.cached_input_price_per_1m),
             window,
             cx,
         ),
         out_price: text_field(
             "Output price / 1M",
-            FROM_CATALOG,
+            PRICE,
             opt(m.output_price_per_1m),
             window,
             cx,
@@ -176,11 +184,6 @@ fn model_row(
             cx,
         ),
     }
-}
-
-/// The short name a catalog model is added under: the last part of its id ("terra").
-fn short_name(id: &str) -> String {
-    id.rsplit('-').next().unwrap_or(id).to_lowercase()
 }
 
 pub struct SettingsScreen {
@@ -280,13 +283,13 @@ impl SettingsScreen {
         );
         let model_name = field(
             "Model name",
-            "Shown in the UI; looked up in the model catalog.",
+            "The underlying model. Empty: the deployment name.",
             opt(f.model_name.clone()),
             false,
         );
         let context_limit = field(
             "Context limit",
-            "Tokens; empty: from the model catalog.",
+            "Input tokens the model accepts. Empty: 128000.",
             opt(f.context_limit),
             false,
         );
@@ -298,13 +301,13 @@ impl SettingsScreen {
         );
         let in_price = field(
             "Input price / 1M",
-            "USD; empty: from the model catalog.",
+            "USD. Empty: no cost is shown.",
             opt(f.input_price_per_1m),
             false,
         );
         let out_price = field(
             "Output price / 1M",
-            "USD; empty: from the model catalog.",
+            "USD. Empty: no cost is shown.",
             opt(f.output_price_per_1m),
             false,
         );
@@ -523,6 +526,12 @@ impl SettingsScreen {
                     strict,
                 )?,
                 input_price_per_1m: num(value(&row.in_price), "The input price", &name, strict)?,
+                cached_input_price_per_1m: num(
+                    value(&row.cached_price),
+                    "The cached input price",
+                    &name,
+                    strict,
+                )?,
                 output_price_per_1m: num(value(&row.out_price), "The output price", &name, strict)?,
                 tokens_per_minute: num(
                     value(&row.tokens_per_minute),
@@ -894,7 +903,7 @@ fn section(title: &'static str, cx: &gpui_kit::App) -> impl IntoElement + use<> 
         .child(title)
 }
 
-/// "GPT-6 Astra: 922k context · $10 in / $1 cached / $50 out per 1M · above 272k: $20 / $75."
+/// "GPT-6 Astra: 922k context · $10 in / $1 cached / $50 out per 1M · above 272k: $20 / $75"
 fn catalog_line(m: &contextual_core::models::ModelInfo) -> String {
     use contextual_core::logic::format::fmt_k;
     let usd = |v: f64| format!("${v}");
@@ -964,13 +973,13 @@ impl Render for SettingsScreen {
                 names.extend([cfg.model_name.clone(), cfg.deployment.clone()]);
             }
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
-            match contextual_core::models::find(&a.settings.models, &names) {
-                Some(m) => format!(
-                    "{}. From the model catalog; fields below override it.",
+            // Only when the user described this model under "models" in settings.json.
+            contextual_core::models::find(&a.settings.models, &names).map(|m| {
+                format!(
+                    "{}. From \"models\" in settings.json; fields below override it.",
                     catalog_line(m)
-                ),
-                None => "Not in the model catalog: set the context limit and prices below, or add the model to \"models\" in settings.json.".to_string(),
-            }
+                )
+            })
         };
         let frameworks_note = a.project.as_ref().map(|p| {
             let p = p.read(cx);
@@ -1132,47 +1141,6 @@ impl Render for SettingsScreen {
                     )
             })
             .collect::<Vec<_>>();
-        // Catalog models that are not in the list yet, to add with one press.
-        let catalog_adds = a
-            .settings
-            .models
-            .iter()
-            .chain(
-                contextual_core::models::builtin()
-                    .iter()
-                    .filter(|b| !a.settings.models.iter().any(|m| m.id == b.id)),
-            )
-            .filter(|m| {
-                !self
-                    .models
-                    .iter()
-                    .any(|row| catalog_of(row).is_some_and(|c| c.id == m.id))
-            })
-            .enumerate()
-            .map(|(i, m)| {
-                let id = m.id.clone();
-                Button::new(("add-catalog", i), m.label.clone())
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::Xs)
-                    .on_click(cx.listener(move |t, _, window, cx| {
-                        let short = short_name(&id);
-                        let taken = t.models.iter().any(|row| {
-                            row.name
-                                .input
-                                .read(cx)
-                                .value()
-                                .trim()
-                                .eq_ignore_ascii_case(&short)
-                        });
-                        let preset = ModelSettings {
-                            name: if taken { id.clone() } else { short },
-                            model_name: Some(id.clone()),
-                            ..ModelSettings::default()
-                        };
-                        t.add_model(preset, window, cx);
-                    }))
-            })
-            .collect::<Vec<_>>();
         // The form of the selected model.
         let model_form = self
             .models
@@ -1180,35 +1148,35 @@ impl Render for SettingsScreen {
             .find(|m| Some(m.key) == self.selected_model)
             .map(|row| {
                 let key = row.key;
-                let note = match catalog_of(row) {
-                    Some(m) => format!(
-                        "{}{}. From the model catalog; fields below override it.",
+                // Only when the user described this model under "models" in settings.json.
+                let note = catalog_of(row).map(|m| {
+                    format!(
+                        "{}{}. From \"models\" in settings.json; fields below override it.",
                         catalog_line(m),
                         m.tier.map(|t| format!(" · tier {t}")).unwrap_or_default()
-                    ),
-                    None => {
-                        "Not in the model catalog: set the tier, context limit and prices below."
-                            .to_string()
-                    }
-                };
+                    )
+                });
                 let is_router = self.router_key == Some(key);
                 div()
                     .child(self.field_row(&row.name, cx))
                     .child(self.field_row(&row.deployment, cx))
                     .child(self.field_row(&row.model_name, cx))
-                    .child(
-                        div()
-                            .pl(px(LABEL_W) + sp(4))
-                            .pb(sp(1))
-                            .type_style(contextual_theme::type_style::UI_SMALL)
-                            .text_color(hsla(c.ink_muted))
-                            .child(SharedString::from(note)),
-                    )
+                    .when_some(note, |d, note| {
+                        d.child(
+                            div()
+                                .pl(px(LABEL_W) + sp(4))
+                                .pb(sp(1))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child(SharedString::from(note)),
+                        )
+                    })
                     .child(self.field_row(&row.tier, cx))
                     .child(self.field_row(&row.description, cx))
                     .child(self.field_row(&row.context_limit, cx))
                     .child(self.field_row(&row.max_tokens, cx))
                     .child(self.field_row(&row.in_price, cx))
+                    .child(self.field_row(&row.cached_price, cx))
                     .child(self.field_row(&row.out_price, cx))
                     .child(self.field_row(&row.tokens_per_minute, cx))
                     .child(
@@ -1362,14 +1330,16 @@ impl Render for SettingsScreen {
                     .child(self.field_row(&self.api_version, cx))
                     .child(self.field_row(&self.deployment, cx))
                     .child(self.field_row(&self.model_name, cx))
-                    .child(
-                        div()
-                            .pl(px(LABEL_W) + sp(4))
-                            .pb(sp(1))
-                            .type_style(contextual_theme::type_style::UI_SMALL)
-                            .text_color(hsla(c.ink_muted))
-                            .child(SharedString::from(catalog_note)),
-                    )
+                    .when_some(catalog_note, |d, note| {
+                        d.child(
+                            div()
+                                .pl(px(LABEL_W) + sp(4))
+                                .pb(sp(1))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child(SharedString::from(note)),
+                        )
+                    })
                     .child(self.field_row(&self.context_limit, cx))
                     .child(self.field_row(&self.max_tokens, cx))
                     .child(self.field_row(&self.in_price, cx))
@@ -1434,6 +1404,14 @@ impl Render for SettingsScreen {
                                     .child("No routing model: select a model and press Make routing model."),
                             )
                         })
+                        .when(no_models, |d| {
+                            d.child(
+                                div()
+                                    .pt(sp(3))
+                                    .text_color(hsla(c.ink_muted))
+                                    .child("No models defined. Import an env file that names them, or add one by hand."),
+                            )
+                        })
                         .when(!no_models, |d| {
                             d.child(
                                 div()
@@ -1459,16 +1437,10 @@ impl Render for SettingsScreen {
                                         |t, _, w, cx| t.add_model(ModelSettings::default(), w, cx),
                                     )),
                                 )
-                                .when(!catalog_adds.is_empty(), |d| {
-                                    d.child(
-                                        div()
-                                            .pl(sp(2))
-                                            .type_style(contextual_theme::type_style::UI_SMALL)
-                                            .text_color(hsla(c.ink_muted))
-                                            .child("From the catalog:"),
-                                    )
-                                    .children(catalog_adds)
-                                }),
+                                .child(
+                                    Button::new("models-import-env", "Import .env file…")
+                                        .on_click(cx.listener(|t, _, w, cx| t.browse_env(w, cx))),
+                                ),
                         )
                         .when_some(model_form, |d, form| {
                             d.child(subsection(

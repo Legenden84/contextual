@@ -56,9 +56,8 @@ access other files and the network; their side effects will not be covered by Sa
   the tier rules applied to it).
 - `threads` (saved chats, per project key; `import_legacy` copies the old app's), `settings`
   (`settings.json`, env overrides, `SecretStore`), `recents` (`state.json`), `migrate`
-  (`.env.local` import), `models` (model catalog: context limit and prices per model, from
-  `data/models.json` plus `models` in `settings.json`; with a tier and description per model
-  for routing), `location` and `wsl` (paths to
+  (`.env.local` import), `models` (the user's model descriptions under `models` in `settings.json`: context
+  limit, prices, tier and description; the app ships none), `location` and `wsl` (paths to
   locations, distros, agent deployment).
 
 `llm`, `settings`, `models`, `chat` and `migrate` are behind the default `llm` feature; the agent builds

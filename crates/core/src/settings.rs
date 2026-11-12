@@ -53,8 +53,8 @@ pub struct FoundrySettings {
     pub router: Option<String>,
 }
 
-/// One of several models, as stored. Limit and prices come from the model catalog unless set
-/// here; so do the tier and description.
+/// One of several models, as stored: everything the app knows about it is defined here (or,
+/// for values left out, in a `models` entry of the user's that matches its model name).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSettings {
@@ -76,6 +76,9 @@ pub struct ModelSettings {
     pub context_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_price_per_1m: Option<f64>,
+    /// USD per 1M cached input tokens; unset: charged like other input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_price_per_1m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_price_per_1m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +96,7 @@ impl ModelSettings {
             config::ENV_MAX_COMPLETION_TOKENS => self.max_completion_tokens.map(|n| n.to_string()),
             config::ENV_CONTEXT_LIMIT => self.context_limit.map(|n| n.to_string()),
             config::ENV_INPUT_PRICE => self.input_price_per_1m.map(|n| n.to_string()),
+            config::ENV_CACHED_INPUT_PRICE => self.cached_input_price_per_1m.map(|n| n.to_string()),
             config::ENV_OUTPUT_PRICE => self.output_price_per_1m.map(|n| n.to_string()),
             config::ENV_TOKENS_PER_MINUTE => self.tokens_per_minute.map(|n| n.to_string()),
             _ => None,
@@ -509,8 +513,9 @@ impl Routing {
 /// by `AZURE_OPENAI_<NAME>_…` variables in `env`. `Ok(None)` when no named model is configured
 /// (the single deployment of [`resolve_foundry_config`] applies).
 ///
-/// Every model needs its own deployment and a tier (its own, or its catalog entry's). A model
-/// never takes a missing value from another model: what is missing is reported by variable name.
+/// Every model needs its own deployment and a tier (its own, or that of a `models` entry of the
+/// user's). A model never takes a missing value from another model: what is missing is reported
+/// by variable name.
 pub fn resolve_routing(
     settings: &Settings,
     secrets: &dyn SecretStore,
@@ -603,11 +608,24 @@ pub fn resolve_routing(
                 tier
             }
         };
+        let cached_price = match get(config::ENV_CACHED_INPUT_PRICE) {
+            None => None,
+            Some(raw) => match raw.parse::<f64>() {
+                Ok(n) if n.is_finite() && n > 0.0 => Some(n),
+                _ => {
+                    report(&mut problems.invalid, own(config::ENV_CACHED_INPUT_PRICE));
+                    None
+                }
+            },
+        };
         let description = get(config::ENV_DESCRIPTION)
             .or_else(|| catalog.and_then(|m| m.description.clone()))
             .unwrap_or_default();
         if let (Some(mut config), Some(tier)) = (cfg, tier) {
-            let deployment = settings.deployment(Some(&config));
+            let mut deployment = settings.deployment(Some(&config));
+            if cached_price.is_some() {
+                deployment.cached_price = cached_price;
+            }
             // The same effective limit as the context bar, catalog entries included.
             config.context_limit = Some(deployment.limit);
             models.push(RoutedModel {
@@ -751,8 +769,29 @@ mod tests {
         assert_eq!(reset.presets, default_presets());
     }
 
+    /// A `models` entry of the user's, as it would be in settings.json.
+    fn astra_entry() -> ModelInfo {
+        serde_json::from_value(serde_json::json!({
+            "id": "gpt-6-astra",
+            "label": "GPT-6 Astra",
+            "contextLimit": 922000,
+            "inputPricePer1m": 10.0,
+            "cachedInputPricePer1m": 1.0,
+            "outputPricePer1m": 50.0,
+            "longContext": {
+                "aboveInputTokens": 272000,
+                "inputPricePer1m": 20.0,
+                "cachedInputPricePer1m": 2.0,
+                "outputPricePer1m": 75.0
+            },
+            "tier": 4,
+            "description": "Hard problems"
+        }))
+        .unwrap()
+    }
+
     #[test]
-    fn deployment_takes_limit_and_prices_from_the_catalog() {
+    fn deployment_takes_limit_and_prices_from_the_users_catalog() {
         let cfg = |model: &str| {
             read_foundry_config(|k| match k {
                 config::ENV_ENDPOINT => Some("https://res.openai.azure.com/".into()),
@@ -764,7 +803,18 @@ mod tests {
             })
             .unwrap()
         };
-        let s = Settings::default();
+        // The app knows no model by itself.
+        let d = Settings::default().deployment(Some(&cfg("gpt-6-astra")));
+        assert_eq!(
+            (d.limit, d.model.as_deref()),
+            (FALLBACK_CONTEXT_LIMIT, None)
+        );
+        assert!(!d.priced());
+
+        let s = Settings {
+            models: vec![astra_entry()],
+            ..Settings::default()
+        };
         let d = s.deployment(Some(&cfg("gpt-6-astra")));
         assert_eq!(d.model.as_deref(), Some("GPT-6 Astra"));
         assert_eq!((d.limit, d.in_price, d.out_price), (922_000, 10.0, 50.0));
@@ -773,7 +823,7 @@ mod tests {
         assert!(d.rates(300_000).long_context);
         assert!((d.cost(300_000, 0, 0) - 6.0).abs() < 1e-9);
 
-        // Typed values win; typed prices drop the catalog's cached and long-context rates.
+        // Typed values win; typed prices drop the entry's cached and long-context rates.
         let mut own = cfg("gpt-6-astra");
         own.context_limit = Some(200_000);
         own.input_price_per_1m = Some(5.0);
@@ -781,7 +831,7 @@ mod tests {
         assert_eq!((d.limit, d.in_price, d.out_price), (200_000, 5.0, 0.0));
         assert_eq!((d.cached_price, d.long_context), (None, None));
 
-        // Unknown model: the fallback limit, no prices.
+        // Another model: the fallback limit, no prices.
         let d = s.deployment(Some(&cfg("something-else")));
         assert_eq!(
             (d.limit, d.model.as_deref()),
@@ -850,39 +900,56 @@ mod tests {
             ModelSettings {
                 name: "astra".into(),
                 deployment: Some("gpt-6-astra-code".into()),
-                model_name: Some("gpt-6-astra".into()),
+                tier: Some(4),
+                input_price_per_1m: Some(10.0),
+                cached_input_price_per_1m: Some(1.0),
+                output_price_per_1m: Some(50.0),
                 ..ModelSettings::default()
             },
             ModelSettings {
                 name: "terra".into(),
                 deployment: Some("gpt-6.1-terra-code".into()),
                 model_name: Some("gpt-6.1-terra".into()),
+                tier: Some(2),
+                description: Some("Small fixes".into()),
+                context_limit: Some(922_000),
                 max_completion_tokens: Some(4_096),
+                input_price_per_1m: Some(1.0),
+                output_price_per_1m: Some(5.0),
                 ..ModelSettings::default()
             },
         ];
         let r = resolve_routing(&s, &secrets, &vars(&[])).unwrap().unwrap();
         assert_eq!(r.router, "terra");
-        // Least capable first; tier, description, limit and prices from the catalog.
+        // Least capable first; everything from the model's own values.
         let names: Vec<&str> = r.models.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["terra", "astra"]);
         let terra = r.router();
-        assert_eq!((terra.tier, terra.label()), (2, "GPT-6.1 Terra"));
-        assert_eq!(terra.config.deployment, "gpt-6.1-terra-code");
+        // Without a `models` entry the chat calls a model by its deployment.
+        assert_eq!((terra.tier, terra.label()), (2, "gpt-6.1-terra-code"));
+        assert_eq!(terra.config.model_name, "gpt-6.1-terra");
         assert_eq!(terra.config.endpoint, "https://res.openai.azure.com/");
         assert_eq!(terra.config.api_key, "k");
         assert_eq!(terra.config.max_completion_tokens, 4_096);
-        assert_eq!(terra.deployment.in_price, 1.0);
-        assert!(!terra.description.is_empty());
+        assert_eq!(terra.config.context_limit, Some(922_000));
+        assert_eq!(
+            (terra.deployment.in_price, terra.deployment.cached_price),
+            (1.0, None)
+        );
+        assert_eq!(terra.description, "Small fixes");
         let astra = r.strongest();
-        // The single deployment's values are not handed to a named model.
-        assert_eq!(astra.config.context_limit, Some(922_000));
+        // Neither the single deployment's values nor another model's are handed to it.
+        assert_eq!(astra.config.context_limit, Some(FALLBACK_CONTEXT_LIMIT));
         assert_eq!(astra.config.max_completion_tokens, 16_384);
-        assert_eq!((astra.tier, astra.deployment.in_price), (4, 10.0));
+        assert_eq!(astra.description, "");
+        // 100k in (40k cached), 2k out: the model's own cached price applies.
+        assert_eq!(astra.deployment.cached_price, Some(1.0));
+        assert!((astra.deployment.cost(100_000, 40_000, 2_000) - (0.6 + 0.04 + 0.1)).abs() < 1e-9);
 
         // Variables override a stored model and add new ones.
         let env = vars(&[
             ("AZURE_OPENAI_TERRA_TIER", "3"),
+            ("AZURE_OPENAI_TERRA_CACHED_INPUT_PRICE_PER_1M", "0.05"),
             ("AZURE_OPENAI_LUNA_DEPLOYMENT", "luna-prod"),
             ("AZURE_OPENAI_LUNA_TIER", "1"),
             ("AZURE_OPENAI_LUNA_DESCRIPTION", "Typos"),
@@ -892,7 +959,24 @@ mod tests {
         assert_eq!(r.router().name, "luna");
         assert_eq!(r.router().description, "Typos");
         assert_eq!(r.router().config.model_name, "luna-prod");
-        assert_eq!(r.get("TERRA").map(|m| m.tier), Some(3));
+        let terra = r.get("TERRA").unwrap();
+        assert_eq!((terra.tier, terra.deployment.cached_price), (3, Some(0.05)));
+
+        // A `models` entry of the user's fills in what a model leaves out.
+        let mut s = settings();
+        s.models = vec![astra_entry()];
+        s.foundry.models = vec![ModelSettings {
+            name: "astra".into(),
+            deployment: Some("gpt-6-astra-code".into()),
+            model_name: Some("gpt-6-astra".into()),
+            ..ModelSettings::default()
+        }];
+        let r = resolve_routing(&s, &secrets, &vars(&[])).unwrap().unwrap();
+        let astra = r.router();
+        assert_eq!((astra.tier, astra.label()), (4, "GPT-6 Astra"));
+        assert_eq!(astra.description, "Hard problems");
+        assert_eq!(astra.config.context_limit, Some(922_000));
+        assert!(astra.deployment.long_context.is_some());
     }
 
     #[test]
@@ -901,12 +985,12 @@ mod tests {
         secrets.set(API_KEY_SECRET, "k").unwrap();
         let env = vars(&[
             ("AZURE_OPENAI_TERRA_DEPLOYMENT", "gpt-6.1-terra-code"),
-            ("AZURE_OPENAI_TERRA_MODEL_NAME", "gpt-6.1-terra"),
-            // Not in the catalog and no tier of its own.
+            ("AZURE_OPENAI_TERRA_TIER", "2"),
+            // No tier: the app has none to give it.
             ("AZURE_OPENAI_MINE_DEPLOYMENT", "my-model"),
             ("AZURE_OPENAI_MINE_CONTEXT_LIMIT", "lots"),
+            ("AZURE_OPENAI_MINE_CACHED_INPUT_PRICE_PER_1M", "cheap"),
             ("AZURE_OPENAI_SOL_DEPLOYMENT", "gpt-6.1-sol-code"),
-            ("AZURE_OPENAI_SOL_MODEL_NAME", "gpt-6.1-sol"),
             ("AZURE_OPENAI_SOL_TIER", "high"),
         ]);
         let p = resolve_routing(&settings(), &secrets, &env).unwrap_err();
@@ -916,14 +1000,18 @@ mod tests {
         );
         assert_eq!(
             p.invalid,
-            vec!["AZURE_OPENAI_MINE_CONTEXT_LIMIT", "AZURE_OPENAI_SOL_TIER"]
+            vec![
+                "AZURE_OPENAI_MINE_CONTEXT_LIMIT",
+                "AZURE_OPENAI_MINE_CACHED_INPUT_PRICE_PER_1M",
+                "AZURE_OPENAI_SOL_TIER"
+            ]
         );
 
         // A stored model without a deployment, and a router that is not one of the models.
         let mut s = settings();
         s.foundry.models = vec![ModelSettings {
             name: "terra".into(),
-            model_name: Some("gpt-6.1-terra".into()),
+            tier: Some(2),
             ..ModelSettings::default()
         }];
         s.foundry.router = Some("astra".into());

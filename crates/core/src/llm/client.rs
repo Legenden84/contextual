@@ -17,7 +17,6 @@ use super::pacing::{self, Reservation, WaitReason};
 use super::types::ChatEvent;
 use crate::error::{Error, ErrorCode};
 use crate::logic::context::{BudgetExceeded, FALLBACK_CONTEXT_LIMIT, RequestBudget};
-use crate::models;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -204,17 +203,9 @@ impl FoundryClient {
     }
 
     /// Budget for a request's actual output allowance (drafts and connection tests use less).
-    /// The app supplies its resolved limit, including custom catalog entries. Standalone
-    /// clients fall back to the built-in catalog, then the default context limit.
+    /// The app supplies its resolved limit; a client without one uses the default limit.
     pub fn request_budget(&self, output_tokens: u32) -> RequestBudget {
-        let limit = self
-            .cfg
-            .context_limit
-            .or_else(|| {
-                models::find(&[], &[&self.cfg.model_name, &self.cfg.deployment])
-                    .map(|model| model.context_limit)
-            })
-            .unwrap_or(FALLBACK_CONTEXT_LIMIT);
+        let limit = self.cfg.context_limit.unwrap_or(FALLBACK_CONTEXT_LIMIT);
         RequestBudget::new(limit, u64::from(output_tokens))
     }
 

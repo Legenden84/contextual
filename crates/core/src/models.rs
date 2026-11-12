@@ -1,12 +1,10 @@
-//! The model catalog: context limit and prices per model, so they don't have to be typed into
-//! Settings or environment variables. Built-in entries are in `crates/core/data/models.json`;
-//! `models` in `settings.json` adds entries or replaces built-in ones (same `id`).
+//! The model catalog: context limit, prices, tier and description per model, for models the
+//! user describes once under `models` in `settings.json` instead of per deployment. The app
+//! ships no entries of its own: every model is defined by the user.
 //!
 //! A deployment is matched by its model name, else its deployment name: equal to an entry's
 //! `id` or one of its `aliases` (ignoring case), or the `id` followed by a dated or numbered
 //! version (`gpt-6-astra-2026-05-01`).
-
-use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -64,15 +62,6 @@ impl LongContextPricing {
     }
 }
 
-static BUILTIN: LazyLock<Vec<ModelInfo>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../data/models.json")).expect("data/models.json is valid")
-});
-
-/// The models that ship with the app.
-pub fn builtin() -> &'static [ModelInfo] {
-    &BUILTIN
-}
-
 impl ModelInfo {
     fn matches(&self, name: &str) -> bool {
         let name = name.trim().to_lowercase();
@@ -89,70 +78,61 @@ impl ModelInfo {
     }
 }
 
-/// The entry for a deployment: `custom` entries first, then the built-in ones; the model name
-/// is tried before the deployment name.
-pub fn find<'a>(custom: &'a [ModelInfo], names: &[&str]) -> Option<&'a ModelInfo> {
+/// The entry for a deployment among the user's `catalog` entries; the model name is tried
+/// before the deployment name.
+pub fn find<'a>(catalog: &'a [ModelInfo], names: &[&str]) -> Option<&'a ModelInfo> {
     names
         .iter()
         .filter(|n| !n.trim().is_empty())
-        .find_map(|name| {
-            custom
-                .iter()
-                .chain(
-                    builtin()
-                        .iter()
-                        .filter(|b| !custom.iter().any(|c| c.id == b.id)),
-                )
-                .find(|m| m.matches(name))
-        })
+        .find_map(|name| catalog.iter().find(|m| m.matches(name)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn builtin_catalog_parses_and_matches() {
-        assert!(!builtin().is_empty());
-        let astra = find(&[], &["GPT-6-Astra"]).unwrap();
-        assert_eq!(astra.id, "gpt-6-astra");
-        assert!(find(&[], &["gpt-6-astra-2026-05-01"]).is_some());
-        // Another model with the same prefix isn't taken for it.
-        assert!(find(&[], &["gpt-6-astra-mini"]).is_none());
-        // The deployment name is tried when the model name is unknown.
-        assert_eq!(
-            find(&[], &["my-model", "gpt-6-astra"]).map(|m| m.id.as_str()),
-            Some("gpt-6-astra")
-        );
-        for m in builtin() {
-            assert!(m.context_limit > 0, "{}", m.id);
-            assert!(m.tier.is_some() && m.description.is_some(), "{}", m.id);
-        }
-        // A newer generation with the same family name is its own entry.
-        assert_eq!(find(&[], &["gpt-6.1-terra"]).and_then(|m| m.tier), Some(2));
-        assert_eq!(
-            find(&[], &["gpt-6.1-sol-2026-09-01"]).unwrap().id,
-            "gpt-6.1-sol"
-        );
-    }
-
-    #[test]
-    fn custom_entries_replace_builtin_ones() {
-        let mine = ModelInfo {
-            id: "gpt-6-astra".into(),
-            label: "Astra (EU)".into(),
-            aliases: vec!["astra-eu".into()],
+    fn entry(id: &str) -> ModelInfo {
+        ModelInfo {
+            id: id.into(),
+            label: id.to_uppercase(),
+            aliases: Vec::new(),
             context_limit: 500_000,
             input_price_per_1m: Some(12.0),
             cached_input_price_per_1m: None,
             output_price_per_1m: Some(60.0),
             long_context: None,
-            tier: None,
+            tier: Some(4),
             description: None,
             source: None,
-        };
-        let custom = [mine];
-        assert_eq!(find(&custom, &["gpt-6-astra"]).unwrap().label, "Astra (EU)");
-        assert_eq!(find(&custom, &["astra-eu"]).unwrap().context_limit, 500_000);
+        }
+    }
+
+    #[test]
+    fn nothing_is_known_until_the_user_defines_it() {
+        assert_eq!(find(&[], &["gpt-6-astra"]), None);
+    }
+
+    #[test]
+    fn entries_match_by_id_alias_and_version() {
+        let mut astra = entry("gpt-6-astra");
+        astra.aliases = vec!["astra-eu".into()];
+        let catalog = [astra, entry("gpt-6.1-sol")];
+        assert_eq!(find(&catalog, &["GPT-6-Astra"]).unwrap().id, "gpt-6-astra");
+        assert!(find(&catalog, &["gpt-6-astra-2026-05-01"]).is_some());
+        assert_eq!(
+            find(&catalog, &["astra-eu"]).unwrap().context_limit,
+            500_000
+        );
+        // Another model with the same prefix isn't taken for it.
+        assert!(find(&catalog, &["gpt-6-astra-mini"]).is_none());
+        // The deployment name is tried when the model name is unknown.
+        assert_eq!(
+            find(&catalog, &["my-model", "gpt-6-astra"]).map(|m| m.id.as_str()),
+            Some("gpt-6-astra")
+        );
+        assert_eq!(
+            find(&catalog, &["", "gpt-6.1-sol-2026-09-01"]).unwrap().id,
+            "gpt-6.1-sol"
+        );
     }
 }

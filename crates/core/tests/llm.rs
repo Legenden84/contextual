@@ -499,17 +499,6 @@ async fn budget_uses_explicit_limits_before_the_builtin_catalog() {
 }
 
 #[tokio::test]
-async fn budget_uses_the_builtin_catalog_when_no_limit_is_supplied() {
-    let server = azure_like().await;
-    let client = client(&server.uri(), "gpt-6-astra");
-    let model = contextual_core::models::find(&[], &["gpt-6-astra"]).unwrap();
-    assert_eq!(
-        client.request_budget(2_000),
-        contextual_core::logic::context::RequestBudget::new(model.context_limit, 2_000)
-    );
-}
-
-#[tokio::test]
 async fn budget_uses_the_fallback_for_an_unknown_model() {
     let server = azure_like().await;
     let client = client(&server.uri(), "unknown-model");

@@ -90,6 +90,8 @@ pub fn import_env(text: &str) -> EnvImport {
                     context_limit: num(&key(cfg::ENV_CONTEXT_LIMIT)).and_then(|v| v.parse().ok()),
                     input_price_per_1m: num(&key(cfg::ENV_INPUT_PRICE))
                         .and_then(|v| v.parse().ok()),
+                    cached_input_price_per_1m: num(&key(cfg::ENV_CACHED_INPUT_PRICE))
+                        .and_then(|v| v.parse().ok()),
                     output_price_per_1m: num(&key(cfg::ENV_OUTPUT_PRICE))
                         .and_then(|v| v.parse().ok()),
                     tokens_per_minute: num(&key(cfg::ENV_TOKENS_PER_MINUTE))
@@ -145,6 +147,7 @@ pub fn merge(into: &mut FoundrySettings, from: &FoundrySettings) {
             max_completion_tokens,
             context_limit,
             input_price_per_1m,
+            cached_input_price_per_1m,
             output_price_per_1m,
             tokens_per_minute
         );
@@ -197,7 +200,8 @@ mod tests {
                     AZURE_OPENAI_TERRA_MODEL_NAME=gpt-6.1-terra\n\
                     AZURE_OPENAI_ASTRA_DEPLOYMENT=gpt-6-astra-code\nAZURE_OPENAI_ASTRA_TIER=4\n\
                     AZURE_OPENAI_ASTRA_DESCRIPTION=\"Hard problems\"\n\
-                    AZURE_OPENAI_ASTRA_INPUT_PRICE_PER_1M=twelve\n";
+                    AZURE_OPENAI_ASTRA_INPUT_PRICE_PER_1M=twelve\n\
+                    AZURE_OPENAI_ASTRA_CACHED_INPUT_PRICE_PER_1M=1\n";
         let imp = import_env(text);
         // No unnamed deployment in the file.
         assert_eq!(imp.foundry.deployment, None);
@@ -209,6 +213,7 @@ mod tests {
         assert_eq!(astra.tier, Some(4));
         assert_eq!(astra.description.as_deref(), Some("Hard problems"));
         assert_eq!(astra.input_price_per_1m, None);
+        assert_eq!(astra.cached_input_price_per_1m, Some(1.0));
         assert_eq!(
             imp.skipped,
             vec!["AZURE_OPENAI_ASTRA_INPUT_PRICE_PER_1M".to_string()]

@@ -9,7 +9,8 @@ assistant propose commands" in Settings (`chat.proposeCommands`), read at startu
 (`docs/plans/approved-command-execution.md`).
 
 Several models can be configured (`foundry.models` in settings.json, or `AZURE_OPENAI_<NAME>_…`
-variables; endpoint, key and API version are shared). The routing model (`foundry.router`,
+variables; endpoint, key and API version are shared). No model is built in: deployment, tier,
+limit and prices are what the user imports or types under Settings → Models. The routing model (`foundry.router`,
 `AZURE_OPENAI_ROUTER`) then reads each message first — the project tree and the files it asks
 for, in a conversation of its own — and names the model that answers and the files it starts
 with. Low confidence moves one tier up; a routing that fails stays on the chat's model or goes
@@ -40,8 +41,8 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
     (Responses API with `previous_response_id`, chain reset, chat-completions fallback, SSE),
     drafts and edit repair. `llm`, `settings`, `models`, `chat`, `inspect` and `migrate` sit behind the `llm` feature.
   - `threads.rs`, `settings.rs`, `recents.rs`, `migrate.rs` (`.env.local` import),
-    `models.rs` (model catalog: `data/models.json` + `models` in settings.json; tier and
-    description per model), `settings.rs` also resolves the models to route between,
+    `models.rs` (the user's model descriptions: `models` in settings.json; the app ships
+    none), `settings.rs` also resolves the models to route between,
     `location.rs` / `wsl.rs` (where a project lives, distro discovery, agent deployment).
 - `protocol` — serde wire types (camelCase, like the old `/api` JSON) and JSON-RPC framing.
 - `theme` — `build.rs` generates typed tokens from `docs/design/contextual/tokens.json`.
@@ -73,7 +74,7 @@ Rust is in `~/.cargo/bin`. Development is Linux-only; the app runs through WSLg.
   ones; see `docs/plans/approved-command-execution.md`) with
   `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit|command-share|command-withhold|command-decline|command-quit|command-close`. Point
   `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand; add
-  `AZURE_OPENAI_ROUTER` and `AZURE_OPENAI_<NAME>_DEPLOYMENT` / `_MODEL_NAME` per model to try routing.
+  `AZURE_OPENAI_ROUTER` and `AZURE_OPENAI_<NAME>_DEPLOYMENT` / `_TIER` per model to try routing.
 - Test fixtures were recorded from the old TypeScript app; see `crates/core/tests/fixtures/README.md`.
 
 ## UI design
