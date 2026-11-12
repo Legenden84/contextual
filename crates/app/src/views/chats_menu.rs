@@ -27,12 +27,22 @@ impl ChatsMenu {
     pub fn new(chat: Entity<ChatModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search chats"));
         let model = chat.read(cx);
-        let mut history_key = (model.thread_generation, model.threads_revision);
+        let mut history_key = (
+            model.thread_generation,
+            model.threads_revision,
+            model.streaming(),
+            model.saving || model.command_running(),
+        );
         let subs = vec![
             cx.observe(&chat, move |_, chat, cx| {
                 let model = chat.read(cx);
-                let next = (model.thread_generation, model.threads_revision);
-                // Response deltas do not change saved rows or the active-thread highlight.
+                let next = (
+                    model.thread_generation,
+                    model.threads_revision,
+                    model.streaming(),
+                    model.saving || model.command_running(),
+                );
+                // Update on checkpoints and operation boundaries, not response deltas.
                 if next != history_key {
                     history_key = next;
                     cx.notify();
@@ -96,6 +106,8 @@ impl Render for ChatsMenu {
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
         let current = chat.thread.id.clone();
+        let streaming = chat.streaming();
+        let busy = streaming || chat.saving || chat.command_running();
         let q = self.search.read(cx).value().trim().to_lowercase();
         let threads: Vec<_> = chat
             .threads
@@ -125,8 +137,11 @@ impl Render for ChatsMenu {
                     .py(sp(1))
                     .cursor_pointer()
                     .when(active, |d| d.bg(hsla(c.surface_selected)))
-                    .when(!active, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
+                    .when(!active && !busy, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
                     .on_click(cx.listener(move |m, _, _, cx| {
+                        if busy || active {
+                            return;
+                        }
                         let id = open_id.clone();
                         m.chat.update(cx, |c, cx| c.open_thread(id, cx));
                         m.open = false;
@@ -153,16 +168,21 @@ impl Render for ChatsMenu {
                                         div()
                                             .type_style(contextual_theme::type_style::UI_SMALL)
                                             .text_color(hsla(c.ink_muted))
-                                            .child(SharedString::from(format!(
-                                                "{} {} · {}",
-                                                t.turns,
-                                                if t.turns == 1 { "turn" } else { "turns" },
-                                                ago(&t.updated_at)
-                                            ))),
+                                            .child(SharedString::from(if active && streaming {
+                                                "In progress".to_string()
+                                            } else {
+                                                format!(
+                                                    "{} {} · {}",
+                                                    t.turns,
+                                                    if t.turns == 1 { "turn" } else { "turns" },
+                                                    ago(&t.updated_at)
+                                                )
+                                            })),
                                     ),
                             )
                             .child(
                                 IconButton::new(("rename", i), IconName::Replace, "Rename")
+                                    .disabled(busy)
                                     .on_click(cx.listener(move |m, _, w, cx| {
                                         cx.stop_propagation();
                                         m.start_rename(rename_id.clone(), title.clone(), w, cx)
@@ -170,6 +190,7 @@ impl Render for ChatsMenu {
                             )
                             .child(
                                 IconButton::new(("delete", i), IconName::Delete, "Delete")
+                                    .disabled(busy)
                                     .on_click(cx.listener(move |m, _, _, cx| {
                                         cx.stop_propagation();
                                         let id = delete_id.clone();
@@ -218,6 +239,7 @@ impl Render for ChatsMenu {
                         Button::new("new-chat", "New chat")
                             .size(ButtonSize::Xs)
                             .variant(ButtonVariant::Primary)
+                            .disabled(busy)
                             .on_click(cx.listener(|m, _, _, cx| {
                                 m.chat.update(cx, |c, cx| c.start_fresh(cx));
                                 m.open = false;
@@ -248,7 +270,7 @@ impl Render for ChatsMenu {
                         )
                     }),
             )
-            .when(!empty && q.is_empty(), |d| {
+            .when(!empty && q.is_empty() && !busy, |d| {
                 d.child(
                     div()
                         .flex()

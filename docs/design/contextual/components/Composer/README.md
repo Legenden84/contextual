@@ -54,7 +54,9 @@ or Stopping. Writing a response never means writing project files.
 
 Image preparation uses the same indicator. The native image picker and an over-limit read
 request instead show static states, Choose images and Waiting for your approval. Idle, completed
-and failed operations have no activity mark. There is no duplicate Thinking label in the thread.
+and failed operations have no activity mark. The active assistant reply also shows its observable
+activity beneath the model header, so the response area never looks idle while waiting for text.
+Neither location invents a Thinking label or exposes private model reasoning.
 The mark keeps its animation identity across phase changes and has no independent background
 timer. Settings → Appearance → Reduce motion uses a static mark with the same readable labels.
 

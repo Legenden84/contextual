@@ -229,6 +229,9 @@ impl ChatPanel {
                                 if !waiting {
                                     this.capacity_clock = None;
                                 }
+                                if this.rendered > 0 {
+                                    this.list.splice(this.rendered - 1..this.rendered, 1);
+                                }
                                 cx.notify();
                                 waiting
                             });
@@ -1038,6 +1041,11 @@ fn render_message(
             let parsed = this.replies.get(&m.id, &m.text, prepared);
             let diffs = this.diffs.read(cx).get(&message_key(chat, &m));
             let writing = m.streaming && chat.activity() == Some(ChatActivity::WritingResponse);
+            let activity = if m.streaming && chat.streaming() && ix + 1 == chat.messages.len() {
+                chat.activity_text()
+            } else {
+                None
+            };
             let reduce_motion = this.app.read(cx).settings.reduce_motion;
             let weak = entity.clone();
             let body = render_reply(
@@ -1082,6 +1090,28 @@ fn render_message(
             );
             column
                 .child(header(m.model.as_deref().unwrap_or("Assistant"), &m, cx))
+                .when_some(activity, |d, label| {
+                    d.child(
+                        div()
+                            .mt(sp(2))
+                            .flex()
+                            .items_center()
+                            .gap(sp(2))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(activity_mark(
+                                ElementId::Name(format!("reply-activity-{}", m.id).into()),
+                                !reduce_motion,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .child(SharedString::from(label)),
+                            ),
+                    )
+                })
                 .child(div().mt(sp(2)).children(body))
                 .children(cards)
                 .when_some(m.reads.clone(), |d, log| {

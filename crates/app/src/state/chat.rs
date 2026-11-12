@@ -231,8 +231,11 @@ pub struct ChatModel {
     pub save_error: Option<String>,
     pub toast: Option<Toast>,
     pub threads: Vec<ThreadSummary>,
-    /// Changes when the saved-history listing is published, never on response deltas.
+    /// Changes when a checkpoint or saved-history listing is published, never on deltas.
     pub threads_revision: u64,
+    threads_request: u64,
+    /// Orders this project's history I/O, including early checkpoints and deletion.
+    thread_io_tail: Option<tokio::sync::oneshot::Receiver<()>>,
     /// A read request waiting for the user.
     pub pending: Option<PendingReads>,
     /// The round streaming now, as sent (the Inspect view shows it before it completes).
@@ -330,6 +333,8 @@ impl ChatModel {
             toast: None,
             threads: Vec::new(),
             threads_revision: 0,
+            threads_request: 0,
+            thread_io_tail: None,
             pending: None,
             live: None,
             live_context: None,
@@ -507,6 +512,20 @@ impl ChatModel {
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
         self.activity = ChatActivity::PreparingContext;
+        self.capacity_wait = None;
+        let images = self
+            .attachments
+            .drain(..)
+            .map(|attachment| MessageImage {
+                name: attachment.name,
+                url: attachment.url,
+            })
+            .collect();
+        let user = UiMessage::queued_user(&text, images, &now());
+        let user_id = user.id.clone();
+        self.messages.push(user);
+        // Publish the history row before any file or network I/O finishes.
+        self.save_thread(cx);
         cx.notify();
 
         let p = self.project.read(cx);
@@ -528,24 +547,34 @@ impl ChatModel {
 
         let task = cx.spawn(async move |this, cx| {
             let read = read.await;
-            let Ok(prepared) = this.update(cx, |this, cx| match read {
-                Ok(r) => {
-                    this.record_read(&r.files);
-                    let opts = TurnOptions {
-                        force_all: false,
-                        tree: tree.as_ref().map(|(t, _)| t.clone()),
-                        followup: false,
-                    };
-                    Some(this.prepare(r.files, &selected, &text, rules_on.len(), opts, cx))
-                }
-                Err(e) => {
+            let Ok(prepared) = this.update(cx, |this, cx| {
+                if token.is_cancelled() {
                     this.cancel = None;
-                    this.note(
-                        format!("Not sent: could not read the selected files. {}", e.message),
-                        Tone::Error,
-                    );
+                    this.note(STOPPED, Tone::Warn);
+                    this.save_thread(cx);
                     cx.notify();
-                    None
+                    return None;
+                }
+                match read {
+                    Ok(r) => {
+                        this.record_read(&r.files);
+                        let opts = TurnOptions {
+                            force_all: false,
+                            tree: tree.as_ref().map(|(t, _)| t.clone()),
+                            followup: false,
+                        };
+                        this.prepare(r.files, &selected, &user_id, rules_on.len(), opts, cx)
+                    }
+                    Err(e) => {
+                        this.cancel = None;
+                        this.note(
+                            format!("Not sent: could not read the selected files. {}", e.message),
+                            Tone::Error,
+                        );
+                        this.save_thread(cx);
+                        cx.notify();
+                        None
+                    }
                 }
             }) else {
                 return;
@@ -576,33 +605,35 @@ impl ChatModel {
         }
     }
 
-    /// Builds the user's turn and adds the user message.
+    /// Builds the turn and fills in the context of the already-visible user message.
     fn prepare(
         &mut self,
         files: Vec<contextual_protocol::fs::FileContent>,
         selected: &HashSet<String>,
-        text: &str,
+        user_id: &str,
         rules: usize,
         opts: TurnOptions,
         cx: &mut Context<Self>,
-    ) -> PreparedTurn {
-        let images: Vec<MessageImage> = self
-            .attachments
-            .drain(..)
-            .map(|a| MessageImage {
-                name: a.name,
-                url: a.url,
-            })
-            .collect();
+    ) -> Option<PreparedTurn> {
+        let message = self.messages.iter_mut().find(|message| message.id == user_id)?;
         let tree_sent = opts.tree.is_some();
-        let mut prepared =
-            chat::prepare_turn(&self.thread, &files, selected, text, &images, rules, opts);
+        let mut prepared = chat::prepare_turn(
+            &self.thread,
+            &files,
+            selected,
+            &message.text,
+            message.images.as_deref().unwrap_or_default(),
+            rules,
+            opts,
+        );
         if tree_sent {
             prepared.meta.push_str(" · project tree");
         }
-        self.messages.push(UiMessage::user(text, &prepared, &now()));
+        message.meta = Some(prepared.meta.clone());
+        message.sent = Some(prepared.input.clone());
+        self.save_thread(cx);
         cx.notify();
-        prepared
+        Some(prepared)
     }
 
     async fn stream(
@@ -639,6 +670,7 @@ impl ChatModel {
                     this.messages.retain(|m| m.id != ai_id);
                     this.note(format!("Not sent: {}", error.message), Tone::Error);
                     this.cancel = None;
+                    this.save_thread(cx);
                     cx.notify();
                 });
                 return;
@@ -1030,9 +1062,9 @@ impl ChatModel {
                 this.note(message, Tone::Warn);
             }
             this.cancel = None;
+            this.save_thread(cx);
             cx.notify();
             if completed {
-                this.save_thread(cx);
                 this.prepare_open_commands(cx);
             }
         });
@@ -1890,6 +1922,7 @@ impl ChatModel {
                                 ),
                                 Tone::Error,
                             );
+                            this.save_thread(cx);
                             cx.notify();
                         });
                         return;
@@ -1900,6 +1933,7 @@ impl ChatModel {
                 let _ = this.update(cx, |this, cx| {
                     this.cancel = None;
                     this.note(STOPPED, Tone::Warn);
+                    this.save_thread(cx);
                     cx.notify();
                 });
                 return;
@@ -2023,10 +2057,39 @@ impl ChatModel {
 
     // ------------------------------------------------------------------ threads
 
+    fn thread_io<T, F>(
+        &mut self,
+        cx: &App,
+        operation: F,
+    ) -> impl Future<Output = contextual_core::Result<T>> + 'static + use<T, F>
+    where
+        T: Send + 'static,
+        F: Future<Output = contextual_core::Result<T>> + Send + 'static,
+    {
+        let previous = self.thread_io_tail.take();
+        let (done, next) = tokio::sync::oneshot::channel();
+        self.thread_io_tail = Some(next);
+        runtime::spawn(cx, async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
+            let result = operation.await;
+            let _ = done.send(());
+            result
+        })
+    }
+
+    fn conversation_save_failed(&mut self, cx: &mut Context<Self>) {
+        self.toast = Some(Toast {
+            title: "Could not save the conversation".into(),
+            detail: "It stays open, but the latest messages may be missing after a restart.".into(),
+            error: true,
+            backup_id: None,
+        });
+        cx.notify();
+    }
+
     fn save_thread(&mut self, cx: &mut Context<Self>) {
-        let Some(store) = self.store.clone() else {
-            return;
-        };
         let saved = SavedThread::new(
             self.thread.clone(),
             self.messages
@@ -2044,7 +2107,25 @@ impl ChatModel {
             saved.title(),
             saved.turns() as u64,
         );
-        let job = runtime::spawn(cx, async move {
+        self.threads.retain(|thread| thread.id != id);
+        self.threads.insert(
+            0,
+            ThreadSummary {
+                id: id.clone(),
+                title: title.clone(),
+                updated_at: contextual_core::threads::now_iso(),
+                turns,
+            },
+        );
+        self.threads.truncate(contextual_core::threads::MAX_THREADS);
+        self.threads_revision = self.threads_revision.wrapping_add(1);
+        cx.notify();
+
+        let Some(store) = self.store.clone() else {
+            self.conversation_save_failed(cx);
+            return;
+        };
+        let job = self.thread_io(cx, async move {
             let value = serde_json::to_value(&saved)?;
             store.save(&root, &id, Some(&title), turns, &value).await
         });
@@ -2052,17 +2133,7 @@ impl ChatModel {
             let result = job.await;
             this.update(cx, |this, cx| match result {
                 Ok(()) => this.refresh_threads(cx),
-                Err(_) => {
-                    this.toast = Some(Toast {
-                        title: "Could not save the conversation".into(),
-                        detail:
-                            "It stays open, but won’t be available in chat history after a restart."
-                                .into(),
-                        error: true,
-                        backup_id: None,
-                    });
-                    cx.notify();
-                }
+                Err(_) => this.conversation_save_failed(cx),
             })
             .ok();
         })
@@ -2076,10 +2147,17 @@ impl ChatModel {
             return;
         };
         let root = self.thread_key(cx);
-        let job = runtime::spawn(cx, async move { store.list(&root).await });
+        self.threads_request = self.threads_request.wrapping_add(1);
+        let request = self.threads_request;
+        let revision = self.threads_revision;
+        let job = self.thread_io(cx, async move { store.list(&root).await });
         cx.spawn(async move |this, cx| {
-            let list = job.await.unwrap_or_default();
+            let Ok(list) = job.await else { return };
             this.update(cx, |this, cx| {
+                // A late startup/refresh result must not erase a newly published chat.
+                if this.threads_request != request || this.threads_revision != revision {
+                    return;
+                }
                 this.threads = list;
                 this.threads_revision = this.threads_revision.wrapping_add(1);
                 cx.notify();
@@ -2098,7 +2176,7 @@ impl ChatModel {
         }
         let generation = self.thread_generation;
         let root = self.thread_key(cx);
-        let job = runtime::spawn(cx, async move { store.load(&root, &id).await });
+        let job = self.thread_io(cx, async move { store.load(&root, &id).await });
         cx.spawn(async move |this, cx| {
             let Ok(value) = job.await else { return };
             let Ok(saved) = serde_json::from_value::<SavedThread>(value) else {
@@ -2188,6 +2266,9 @@ impl ChatModel {
     }
 
     pub fn rename_thread(&mut self, id: String, title: String, cx: &mut Context<Self>) {
+        if self.streaming() || self.saving || self.refuse_while_command_runs(cx) {
+            return;
+        }
         let Some(store) = self.store.clone() else {
             return;
         };
@@ -2195,7 +2276,7 @@ impl ChatModel {
         if id == self.thread.id {
             self.thread.title = Some(title.clone());
         }
-        let job = runtime::spawn(cx, async move { store.rename(&root, &id, &title).await });
+        let job = self.thread_io(cx, async move { store.rename(&root, &id, &title).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
             this.update(cx, |this, cx| this.refresh_threads(cx)).ok();
@@ -2204,6 +2285,9 @@ impl ChatModel {
     }
 
     pub fn delete_thread(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.streaming() || self.saving || self.refuse_while_command_runs(cx) {
+            return;
+        }
         let Some(store) = self.store.clone() else {
             return;
         };
@@ -2211,7 +2295,7 @@ impl ChatModel {
         if id == self.thread.id {
             self.start_fresh(cx);
         }
-        let job = runtime::spawn(cx, async move { store.delete(&root, &id).await });
+        let job = self.thread_io(cx, async move { store.delete(&root, &id).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
             this.update(cx, |this, cx| this.refresh_threads(cx)).ok();
@@ -2220,12 +2304,15 @@ impl ChatModel {
     }
 
     pub fn delete_all_threads(&mut self, cx: &mut Context<Self>) {
+        if self.streaming() || self.saving || self.refuse_while_command_runs(cx) {
+            return;
+        }
         let Some(store) = self.store.clone() else {
             return;
         };
         let root = self.thread_key(cx);
         self.start_fresh(cx);
-        let job = runtime::spawn(cx, async move { store.delete_all(&root).await });
+        let job = self.thread_io(cx, async move { store.delete_all(&root).await });
         cx.spawn(async move |this, cx| {
             let _ = job.await;
             this.update(cx, |this, cx| this.refresh_threads(cx)).ok();

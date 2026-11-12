@@ -661,6 +661,14 @@ impl UiMessage {
         }
     }
 
+    /// An accepted prompt, before context has been read or anything sent to the model.
+    pub fn queued_user(text: &str, images: Vec<MessageImage>, time: &str) -> Self {
+        Self {
+            images: (!images.is_empty()).then_some(images),
+            ..Self::new("u", Role::User, text.to_string(), time)
+        }
+    }
+
     /// A sent message: `meta` says what went with it, `sent` is the content as sent.
     pub fn user(text: &str, turn: &PreparedTurn, time: &str) -> Self {
         Self {
@@ -719,7 +727,16 @@ impl SavedThread {
             self.messages
                 .iter()
                 .find(|m| m.role == Role::User)
-                .map(|m| m.text.chars().take(80).collect())
+                .and_then(|m| {
+                    if m.text.trim().is_empty() {
+                        m.images
+                            .as_ref()
+                            .and_then(|images| images.first())
+                            .map(|image| image.name.chars().take(80).collect())
+                    } else {
+                        Some(m.text.chars().take(80).collect())
+                    }
+                })
                 .unwrap_or_else(|| "Conversation".into())
         })
     }
@@ -1323,6 +1340,35 @@ mod tests {
             history(&restored.thread)[0].content,
             MessageContent::Parts(parts)
         );
+    }
+
+    #[test]
+    fn accepted_prompt_can_be_saved_before_a_response_without_committing_a_round() {
+        let user = UiMessage::queued_user("Explain the chat component", Vec::new(), "10:00");
+        let saved = SavedThread::new(ThreadState::fresh(), vec![user]);
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+
+        assert_eq!(restored, saved);
+        assert_eq!(restored.title(), "Explain the chat component");
+        assert_eq!(restored.turns(), 0);
+        assert!(restored.thread.transcript.is_empty());
+        assert!(restored.messages[0].sent.is_none());
+    }
+
+    #[test]
+    fn accepted_image_only_prompt_has_a_history_title() {
+        let user = UiMessage::queued_user(
+            "",
+            vec![MessageImage {
+                name: "screenshot.png".into(),
+                url: "data:image/png;base64,AA==".into(),
+            }],
+            "10:00",
+        );
+        let saved = SavedThread::new(ThreadState::fresh(), vec![user]);
+
+        assert_eq!(saved.title(), "screenshot.png");
     }
 
     #[test]
