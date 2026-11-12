@@ -268,6 +268,18 @@ impl AppModel {
         cx.notify();
     }
 
+    /// Removes a project from recent history without touching its files or saved chats.
+    pub fn remove_recent(
+        &mut self,
+        path: &str,
+        location: &Location,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.remove_recent(path, location);
+        self.save_state();
+        cx.notify();
+    }
+
     /// Scans `path` and opens it as the project. Without a location, it's detected from the path
     /// (`\\wsl.localhost\Ubuntu\…` → WSL, `C:\…` → local…).
     pub fn open_folder(

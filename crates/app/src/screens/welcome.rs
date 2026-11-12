@@ -11,7 +11,7 @@ use gpui_kit::{
 
 use crate::state::AppModel;
 use crate::theme::{ActiveTheme, MONO, TypeExt, hsla, px, sp};
-use crate::ui::{Button, ButtonVariant, LinkButton, folder_glyph};
+use crate::ui::{Button, ButtonVariant, IconButton, LinkButton, folder_glyph};
 
 const WIDTH: f32 = 860.0;
 const LEFT: f32 = 300.0;
@@ -125,6 +125,8 @@ impl Render for WelcomeScreen {
             .map(|(i, r)| {
                 let path = r.path.clone();
                 let location = r.location.clone();
+                let remove_path = r.path.clone();
+                let remove_location = r.location.clone();
                 let app = app.clone();
                 div()
                     .id(("recent", i))
@@ -172,6 +174,18 @@ impl Render for WelcomeScreen {
                             .type_style(contextual_theme::type_style::UI_SMALL)
                             .text_color(hsla(c.ink_muted))
                             .child(SharedString::from(ago(&r.opened_at))),
+                    )
+                    .child(
+                        IconButton::new(
+                            ("remove-recent", i),
+                            IconName::Close,
+                            "Remove from recent projects",
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.app.update(cx, |a, cx| {
+                                a.remove_recent(&remove_path, &remove_location, cx)
+                            });
+                        })),
                     )
             })
             .collect::<Vec<_>>();

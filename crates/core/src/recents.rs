@@ -43,6 +43,13 @@ impl AppState {
         self.recents.truncate(MAX_RECENTS);
         self.last_open = Some(project);
     }
+
+    /// Removes only the history entry matching both path and location.
+    /// The remembered open project is unchanged.
+    pub fn remove_recent(&mut self, path: &str, location: &Location) {
+        self.recents
+            .retain(|r| !(r.path == path && &r.location == location));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +118,73 @@ mod tests {
         assert_eq!(s.recents[0].path, "/p5");
         assert_eq!(s.recents.iter().filter(|r| r.path == "/p5").count(), 1);
         assert_eq!(s.last_open.as_ref().unwrap().path, "/p5");
+    }
+
+    #[test]
+    fn remove_recent_preserves_other_entries_and_order() {
+        let mut s = AppState::default();
+        s.opened(p("/first"));
+        s.opened(p("/middle"));
+        s.opened(p("/last"));
+
+        s.remove_recent("/middle", &Location::Local);
+
+        assert_eq!(s.recents, vec![p("/last"), p("/first")]);
+    }
+
+    #[test]
+    fn remove_recent_matches_location_as_well_as_path() {
+        let ubuntu = RecentProject {
+            location: Location::Wsl {
+                distro: "Ubuntu".into(),
+            },
+            ..p("/project")
+        };
+        let debian = RecentProject {
+            location: Location::Wsl {
+                distro: "Debian".into(),
+            },
+            ..p("/project")
+        };
+        let mut s = AppState::default();
+        s.opened(p("/project"));
+        s.opened(ubuntu.clone());
+        s.opened(debian.clone());
+
+        s.remove_recent("/project", &ubuntu.location);
+
+        assert_eq!(s.recents, vec![debian, p("/project")]);
+    }
+
+    #[test]
+    fn remove_recent_ignores_missing_entries() {
+        let mut s = AppState::default();
+        s.opened(p("/project"));
+        let before = s.clone();
+
+        s.remove_recent("/missing", &Location::Local);
+
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn remove_recent_persists_empty_history_without_changing_last_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::new(dir.path().join("state.json"));
+        let mut s = AppState::default();
+        s.opened(p("/project"));
+        store.save(&s).unwrap();
+
+        s.remove_recent("/project", &Location::Local);
+        store.save(&s).unwrap();
+
+        assert_eq!(
+            store.load(),
+            AppState {
+                recents: Vec::new(),
+                last_open: Some(p("/project")),
+            }
+        );
     }
 
     #[test]
