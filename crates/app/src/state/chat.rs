@@ -875,6 +875,9 @@ impl ChatModel {
                     m.command_turn = turn;
                 }
                 this.thread.file_versions = prepared.versions.clone();
+                if !results_only {
+                    this.thread.discarded_changes.clear();
+                }
                 if let Some(v) = &tree_version {
                     this.thread.tree_version = Some(v.clone());
                 }
@@ -1103,6 +1106,7 @@ impl ChatModel {
             return;
         }
         let (host, root) = (self.host.clone(), self.root(cx));
+        let generation = self.thread_generation;
         let checked = paths.clone();
         let job = runtime::spawn(cx, async move {
             host.read(ReadFiles {
@@ -1115,6 +1119,9 @@ impl ChatModel {
         cx.spawn(async move |this, cx| {
             let read = job.await;
             this.update(cx, |this, cx| {
+                if this.thread_generation != generation {
+                    return;
+                }
                 // A file that cannot be read now counts as changed.
                 let mut disk: BTreeMap<String, Option<String>> =
                     paths.into_iter().map(|path| (path, None)).collect();
@@ -1130,7 +1137,10 @@ impl ChatModel {
                         this.contents.insert(path.clone(), text.clone());
                     }
                 }
-                let checked = chat::revalidate_after_command(&pending, &saved, &disk);
+                // A proposal may have been discarded while the read was in flight.
+                // Revalidate the current set, never resurrect the captured snapshot.
+                let checked =
+                    chat::revalidate_after_command(this.changes_ref(), &this.undo_changes, &disk);
                 if !checked.conflicts.is_empty() {
                     let n = checked.conflicts.len();
                     this.note(
@@ -1274,17 +1284,37 @@ impl ChatModel {
         self.cancel = Some(token.clone());
         self.activity = ChatActivity::WaitingForResponse;
         cx.notify();
-        let turn = Turn {
-            prepared: PreparedTurn {
+        let results_only = self.thread.discarded_changes.is_empty();
+        let prepared = if results_only {
+            PreparedTurn {
                 input: ApiContent::Text(String::new()),
                 versions: self.thread.file_versions.clone(),
                 images: Vec::new(),
                 meta: String::new(),
                 followup: false,
-            },
+            }
+        } else {
+            // A command continuation must also report intervening discard decisions.
+            // No disk contents are invented; the notice asks for a read when needed.
+            let selected = self.thread.file_versions.keys().cloned().collect();
+            chat::prepare_turn(
+                &self.thread,
+                &[],
+                &selected,
+                "",
+                &[],
+                rules_on.len(),
+                TurnOptions {
+                    followup: true,
+                    ..TurnOptions::default()
+                },
+            )
+        };
+        let turn = Turn {
+            prepared,
             tree_version: None,
             rounds: Rounds::default(),
-            results_only: true,
+            results_only,
         };
         let task = cx.spawn(async move |this, cx| {
             Self::stream(this, turn, env, rules_on, token, cx).await;
@@ -2203,7 +2233,43 @@ impl ChatModel {
         .detach();
     }
 
-    // ------------------------------------------------------------------ save / undo
+    // ------------------------------------------------------------------ discard / save / undo
+
+    /// Discards checked proposals, retaining historical replies and the last Save's undo.
+    /// No workspace operation is performed.
+    pub fn discard_included(&mut self, cx: &mut Context<Self>) {
+        if self.streaming() || self.saving || self.command_running() {
+            return;
+        }
+        let paths = self
+            .include
+            .iter()
+            .filter(|(_, included)| **included)
+            .map(|(path, _)| path.clone())
+            .collect();
+        let discarded = chat::discard_pending_changes(&mut self.thread, &paths);
+        if discarded.is_empty() {
+            return;
+        }
+        for path in &discarded {
+            self.contents.remove(path);
+        }
+        let remaining = self.thread.pending_changes.clone().unwrap_or_default();
+        self.set_changes(remaining);
+        self.save_dialog_open = false;
+        self.save_error = None;
+        let n = discarded.len();
+        self.note(
+            format!(
+                "Discarded proposals for {n} {}. Project files were not changed.\n{}",
+                if n == 1 { "file" } else { "files" },
+                discarded.join("\n")
+            ),
+            Tone::Ok,
+        );
+        self.save_thread(cx);
+        cx.notify();
+    }
 
     pub fn toggle_include(&mut self, path: &str, cx: &mut Context<Self>) {
         let on = self.include.get(path).copied().unwrap_or(false);

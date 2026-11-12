@@ -839,55 +839,53 @@ impl Render for WorkspaceScreen {
                             )),
                         )
                     })
-                    .when(has_changes, |d| {
-                        d.child(
-                            Button::new(
-                                "toggle-changes",
-                                if changes_visible {
-                                    "Hide changes"
-                                } else {
-                                    "Changes"
-                                },
-                            )
-                            .size(ButtonSize::Xs)
-                            .variant(ButtonVariant::Ghost)
-                            .on_click(cx.listener(
-                                move |t, _, window, cx| {
-                                    t.compact_project = false;
-                                    if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect)
-                                    {
-                                        t.project.update(cx, |p, cx| {
-                                            p.activate(Tab::Chat);
-                                            cx.notify();
-                                        });
-                                    }
-                                    if compact {
-                                        t.compact_panel =
-                                            (!changes_visible).then_some(DockPanel::Changes);
-                                        if changes_visible {
-                                            t.chat_panel.update(cx, |panel, cx| {
-                                                panel.focus_input(window, cx);
-                                            });
-                                        }
-                                    } else {
-                                        t.docks.toggle_changes(changes_visible);
-                                    }
-                                    cx.notify();
-                                },
-                            )),
+                    .child(
+                        Button::new(
+                            "toggle-changes",
+                            if changes_visible {
+                                "Hide changes"
+                            } else {
+                                "Show changes"
+                            },
                         )
-                    })
+                        .size(ButtonSize::Xs)
+                        .variant(ButtonVariant::Ghost)
+                        .selected(changes_visible)
+                        .disabled(!has_changes)
+                        .on_click(cx.listener(move |t, _, window, cx| {
+                            t.compact_project = false;
+                            if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {
+                                t.project.update(cx, |p, cx| {
+                                    p.activate(Tab::Chat);
+                                    cx.notify();
+                                });
+                            }
+                            if compact {
+                                t.compact_panel =
+                                    (!changes_visible).then_some(DockPanel::Changes);
+                                if changes_visible {
+                                    t.chat_panel.update(cx, |panel, cx| {
+                                        panel.focus_input(window, cx);
+                                    });
+                                }
+                            } else {
+                                t.docks.toggle_changes(changes_visible);
+                            }
+                            cx.notify();
+                        })),
+                    )
                     .child(
                         Button::new(
                             "chats",
                             if history_visible {
                                 "Hide history"
                             } else {
-                                "Chat history"
+                                "Show history"
                             },
                         )
                         .size(ButtonSize::Xs)
                         .variant(ButtonVariant::Ghost)
+                        .selected(history_visible)
                         .on_click(cx.listener(move |t, _, window, cx| {
                             t.compact_project = false;
                             if matches!(t.project.read(cx).active, Tab::Diff | Tab::Inspect) {

@@ -1,5 +1,5 @@
-//! Changes (design spec: ChangesPanel): the files the latest reply proposes, each selectable for
-//! saving, with counts, +/− and conflicts; Open diff and Save N files….
+//! Changes (design spec: ChangesPanel): cumulative proposals selectable for saving or discarding,
+//! with counts, +/− and conflicts.
 
 use contextual_core::logic::types::ChangeStatus;
 use gpui_kit::component::{Icon, IconName};
@@ -48,16 +48,20 @@ impl ChangesPanel {
         let mut generation = model.thread_generation;
         let mut message = model.change_message().map(|m| m.id.clone());
         let mut included = model.include.clone();
+        let mut busy = model.streaming() || model.saving || model.command_running();
         let subs = vec![
             cx.observe(&chat, move |_, chat, cx| {
                 let model = chat.read(cx);
                 let next_message = model.change_message().map(|m| m.id.as_str());
+                let next_busy = model.streaming() || model.saving || model.command_running();
                 // Published proposal contents are immutable under their message identity.
                 // Compare only identity and selection metadata, never old/new file text.
                 if generation != model.thread_generation
                     || message.as_deref() != next_message
                     || included != model.include
+                    || busy != next_busy
                 {
+                    busy = next_busy;
                     generation = model.thread_generation;
                     message = next_message.map(str::to_string);
                     included.clone_from(&model.include);
@@ -80,6 +84,7 @@ impl Render for ChangesPanel {
         let c = &cx.tokens().colors;
         let chat = self.chat.read(cx);
         let changes = chat.changes_ref();
+        let busy = chat.streaming() || chat.saving || chat.command_running();
         let ready = chat
             .change_message()
             .and_then(|m| self.diffs.read(cx).get(&message_key(chat, m)));
@@ -242,6 +247,14 @@ impl Render for ChangesPanel {
             })
             .child(
                 div()
+                    .px(sp(3))
+                    .py(sp(2))
+                    .type_style(contextual_theme::type_style::UI_SMALL)
+                    .text_color(hsla(c.ink_muted))
+                    .child("Discard removes checked proposals only. Project files and original replies are kept."),
+            )
+            .child(
+                div()
                     .flex()
                     .gap(sp(2))
                     .flex_wrap()
@@ -255,9 +268,19 @@ impl Render for ChangesPanel {
                     })))
                     .child(div().flex_1())
                     .child(
+                        Button::new(
+                            "discard",
+                            format!("Discard {picked} {}", if picked == 1 { "file" } else { "files" }),
+                        )
+                        .disabled(picked == 0 || busy)
+                        .on_click(cx.listener(|t, _, _, cx| {
+                            t.chat.update(cx, |c, cx| c.discard_included(cx));
+                        })),
+                    )
+                    .child(
                         Button::new("save", format!("Save {picked} {}…", if picked == 1 { "file" } else { "files" }))
                             .variant(ButtonVariant::Primary)
-                            .disabled(picked == 0)
+                            .disabled(picked == 0 || busy)
                             .on_click(cx.listener(|t, _, _, cx| {
                                 t.chat.update(cx, |c, cx| {
                                     c.save_dialog_open = true;

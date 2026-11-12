@@ -114,6 +114,9 @@ pub struct ThreadState {
     /// An explicit empty list must survive saving so historical changes don't reappear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_changes: Option<Vec<Change>>,
+    /// Discard decisions to report on the next successful conversation round.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discarded_changes: Vec<String>,
     /// Proposed commands and what was observed for them. Observations only: no approval,
     /// preparation, environment or unshared output is ever saved.
     #[serde(default, skip_serializing_if = "CommandHistory::is_empty")]
@@ -134,6 +137,7 @@ impl ThreadState {
             tree_version: None,
             loaded: Vec::new(),
             pending_changes: Some(Vec::new()),
+            discarded_changes: Vec::new(),
             commands: CommandHistory::default(),
         }
     }
@@ -837,6 +841,16 @@ pub fn prepare_turn(
         }
         text = format!("{note}\n\n{text}");
     }
+    if !thread.discarded_changes.is_empty() {
+        text = format!(
+            "# Discarded proposals\n\nThe user discarded the unsaved proposals for:\n- {}\n\n\
+             Discarding did not change any project files. These proposals are no longer pending. \
+             Do not continue from their earlier proposed contents or restore them unless asked. \
+             Use current file context; request a fresh read before editing any affected file \
+             whose current contents are not supplied.\n\n{text}",
+            thread.discarded_changes.join("\n- ")
+        );
+    }
     let force_all = opts.force_all;
     let followup = opts.followup;
     let mut versions = thread.file_versions.clone();
@@ -1068,6 +1082,30 @@ pub fn merge_pending_changes(pending: &[Change], updates: &[Change]) -> Vec<Chan
         merged[index] = next;
     }
     visible_changes(merged)
+}
+
+/// Discards selected pending proposals without changing files or historical replies.
+/// Returns the paths actually discarded. Invalidating their sent hashes ensures that
+/// selected disk copies are supplied again, even if they match an earlier version.
+pub fn discard_pending_changes(thread: &mut ThreadState, paths: &HashSet<String>) -> Vec<String> {
+    let mut discarded = Vec::new();
+    if let Some(pending) = &mut thread.pending_changes {
+        pending.retain(|change| {
+            if paths.contains(&change.path) {
+                discarded.push(change.path.clone());
+                false
+            } else {
+                true
+            }
+        });
+    }
+    for path in &discarded {
+        thread.file_versions.remove(path);
+        if !thread.discarded_changes.contains(path) {
+            thread.discarded_changes.push(path.clone());
+        }
+    }
+    discarded
 }
 
 /// Drops no-op modifications (same content, no conflict).
@@ -1562,6 +1600,89 @@ mod tests {
         let restored: SavedThread =
             serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert!(restored.pending_changes().is_empty());
+    }
+
+    #[test]
+    fn discard_removes_only_selected_proposals_including_conflicts() {
+        let mut thread = ThreadState::fresh();
+        let kept = proposal("keep.txt", ChangeStatus::A, "", "keep");
+        let mut conflict = proposal("conflict.txt", ChangeStatus::M, "old", "new");
+        conflict.conflict = Some("Changed on disk".into());
+        thread.pending_changes = Some(vec![conflict, kept.clone()]);
+        thread.file_versions.insert("conflict.txt".into(), hash_text("old"));
+        thread.file_versions.insert("keep.txt".into(), hash_text("keep"));
+        thread.applied.push("previously-saved.txt".into());
+
+        let discarded = discard_pending_changes(
+            &mut thread,
+            &HashSet::from(["conflict.txt".into(), "unknown.txt".into()]),
+        );
+
+        assert_eq!(discarded, ["conflict.txt"]);
+        assert_eq!(thread.pending_changes, Some(vec![kept]));
+        assert!(!thread.file_versions.contains_key("conflict.txt"));
+        assert_eq!(thread.file_versions["keep.txt"], hash_text("keep"));
+        assert_eq!(thread.applied, ["previously-saved.txt"]);
+    }
+
+    #[test]
+    fn discarded_proposals_stay_discarded_after_reopening_without_erasing_history() {
+        let change = proposal("new.txt", ChangeStatus::A, "", "proposal");
+        let mut message = UiMessage::assistant("model", "10:00");
+        message.changes = Some(vec![change.clone()]);
+        let mut thread = ThreadState::fresh();
+        thread.pending_changes = Some(vec![change]);
+        thread.record_round(
+            ApiContent::Text("Create a file".into()),
+            "system",
+            false,
+            "Original reply".into(),
+            None,
+        );
+        let transcript = thread.transcript.clone();
+
+        discard_pending_changes(&mut thread, &HashSet::from(["new.txt".into()]));
+        let saved = SavedThread::new(thread, vec![message.clone()]);
+        let restored: SavedThread =
+            serde_json::from_value(serde_json::to_value(saved).unwrap()).unwrap();
+
+        assert!(restored.pending_changes().is_empty());
+        assert_eq!(restored.thread.discarded_changes, ["new.txt"]);
+        assert_eq!(restored.thread.transcript, transcript);
+        assert_eq!(restored.messages, [message]);
+    }
+
+    #[test]
+    fn next_turn_reports_discards_and_resends_disk_instead_of_proposed_contents() {
+        let mut thread = ThreadState::fresh();
+        thread.pending_changes = Some(vec![
+            proposal("a.txt", ChangeStatus::M, "disk", "rejected contents"),
+            proposal("new.txt", ChangeStatus::A, "", "rejected creation"),
+            proposal("gone.txt", ChangeStatus::D, "still on disk", ""),
+        ]);
+        thread.file_versions.insert("a.txt".into(), hash_text("disk"));
+        let paths = HashSet::from(["a.txt".into(), "new.txt".into(), "gone.txt".into()]);
+        discard_pending_changes(&mut thread, &paths);
+
+        let turn = prepare_turn(
+            &thread,
+            &[file("a.txt", "disk"), file("gone.txt", "still on disk")],
+            &HashSet::from(["a.txt".into(), "gone.txt".into()]),
+            "Continue",
+            &[],
+            0,
+            TurnOptions::default(),
+        );
+        let text = crate::logic::prompt::content_text(&turn.input);
+
+        assert!(text.contains("# Discarded proposals"));
+        assert!(text.contains("new.txt"));
+        assert!(text.contains("still on disk"));
+        assert!(!text.contains("rejected contents"));
+        assert!(!text.contains("rejected creation"));
+        assert_eq!(turn.meta, "2 of 2 files sent · 0 rules");
+        // Preparing or failing a request must not consume the decision.
+        assert_eq!(thread.discarded_changes.len(), 3);
     }
 
     #[test]

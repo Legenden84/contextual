@@ -9,6 +9,9 @@ The main workspace with a project open, files selected and a finished assistant 
 ## Native workspace tabs
 
 - A persistent header spans the centre and right columns, with Chat pinned first.
+- Adjacent **Show changes / Hide changes** and **Show history / Hide history** buttons
+  control the right panels. Show changes stays visible but disabled without pending
+  proposals. Hiding a panel never discards its contents.
 - File previews, Diff and Inspect open as closable tabs in opening order. Reopening a
   feature selects its existing tab rather than adding a duplicate.
 - Switching tabs preserves the composer draft and the feature view state.
