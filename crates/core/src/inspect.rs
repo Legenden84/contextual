@@ -23,6 +23,10 @@ pub struct LiveRound {
     pub system: String,
     pub followup: bool,
     pub reply: String,
+    /// The model the round is sent to, as the chat names it (several models).
+    pub model: Option<String>,
+    /// The routing model choosing a model, not a round of the conversation itself.
+    pub routing: bool,
 }
 
 /// One part of an input message ("# Context files (3)"), with its approximate size.
@@ -129,6 +133,11 @@ pub struct Round {
     pub results: Vec<RoundResult>,
     /// The command calls in this round's reply, in order.
     pub calls: Vec<RoundCall>,
+    /// The model that replied, as the chat names it; `None` when it was not recorded.
+    pub model: Option<String>,
+    /// The routing model choosing a model for the next message: not part of the conversation
+    /// the answering model sees.
+    pub routing: bool,
 }
 
 /// Top-level sections the app writes into a turn (see `logic::prompt::build_turn`).
@@ -196,6 +205,33 @@ fn round(number: usize, input: &ApiContent, followup: bool) -> Round {
         live: false,
         results: Vec::new(),
         calls: Vec::new(),
+        model: None,
+        routing: false,
+    }
+}
+
+/// The rounds of one routing run, numbered after `out`.
+fn routing_rounds(run: &crate::chat::RoutingRun, out: &mut Vec<Round>) {
+    let mut system: Option<String> = None;
+    let mut msgs = run.transcript.iter().peekable();
+    while let Some(user) = msgs.next() {
+        if user.role != ChatRole::User {
+            continue;
+        }
+        let changed = user.system.is_some();
+        if let Some(s) = &user.system {
+            system = Some(s.clone());
+        }
+        let reply = msgs.next_if(|r| r.role == ChatRole::Assistant);
+        out.push(Round {
+            system: system.clone(),
+            system_changed: changed,
+            reply: reply.map(|r| content_text(&r.content)).unwrap_or_default(),
+            usage: reply.and_then(|r| r.usage),
+            model: Some(run.model.clone()),
+            routing: true,
+            ..round(out.len() + 1, &user.content, user.followup)
+        });
     }
 }
 
@@ -205,8 +241,13 @@ pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
     let mut system: Option<String> = None;
     // The turn whose calls the next results answer.
     let mut asked_turn: Option<String> = None;
-    let mut msgs = thread.transcript.iter().peekable();
-    while let Some(first) = msgs.next() {
+    let mut runs = thread.routing.iter().peekable();
+    let mut msgs = thread.transcript.iter().enumerate().peekable();
+    while let Some((position, first)) = msgs.next() {
+        // How the model for this message was chosen comes before the message.
+        while let Some(run) = runs.next_if(|run| run.at <= position) {
+            routing_rounds(run, &mut out);
+        }
         // A round's input is the answers to earlier calls, then what the user sent. Either
         // part can be missing, but not both.
         let mut results = Vec::new();
@@ -231,7 +272,9 @@ pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
                 output: content_text(&m.content),
                 call_id,
             });
-            message = msgs.next_if(|next| matches!(next.role, ChatRole::Tool | ChatRole::User));
+            message = msgs
+                .next_if(|(_, next)| matches!(next.role, ChatRole::Tool | ChatRole::User))
+                .map(|(_, next)| next);
         }
         let user = message.filter(|m| m.role == ChatRole::User);
         if user.is_none() && results.is_empty() {
@@ -243,7 +286,9 @@ pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
             changed = true;
         }
         let empty = ApiContent::Text(String::new());
-        let reply: Option<&ApiMessage> = msgs.next_if(|r| r.role == ChatRole::Assistant);
+        let reply: Option<&ApiMessage> = msgs
+            .next_if(|(_, r)| r.role == ChatRole::Assistant)
+            .map(|(_, r)| r);
         asked_turn = reply.and_then(|r| r.command_turn.clone());
         let calls = reply
             .map(|r| {
@@ -274,6 +319,7 @@ pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
             usage: reply.and_then(|r| r.usage),
             results,
             calls,
+            model: reply.and_then(|r| r.model.clone()),
             ..round(
                 out.len() + 1,
                 user.map_or(&empty, |m| &m.content),
@@ -281,13 +327,19 @@ pub fn rounds(thread: &ThreadState, live: Option<&LiveRound>) -> Vec<Round> {
             )
         });
     }
+    // A model was chosen and its answer is not recorded (yet).
+    for run in runs {
+        routing_rounds(run, &mut out);
+    }
     if let Some(l) = live {
-        let changed = out.is_empty() || system.as_deref() != Some(l.system.as_str());
+        let changed = out.is_empty() || l.routing || system.as_deref() != Some(l.system.as_str());
         out.push(Round {
             system: Some(l.system.clone()),
             system_changed: changed,
             reply: l.reply.clone(),
             live: true,
+            model: l.model.clone(),
+            routing: l.routing,
             ..round(out.len() + 1, &l.input, l.followup)
         });
     }
@@ -341,6 +393,12 @@ impl Round {
         if let Some(req) = parse_read_request(&self.reply) {
             let n = req.paths.len() + req.folders.len();
             return format!("Asked for {n} {}", if n == 1 { "path" } else { "paths" });
+        }
+        if self.routing {
+            return match crate::logic::route::parse_route(&self.reply) {
+                Some(route) => format!("Chose {}", route.model),
+                None => "Did not choose a model".into(),
+            };
         }
         let n = touched_paths(&self.reply).len();
         if n > 0 {
@@ -408,6 +466,8 @@ mod tests {
             system: "sys B".into(),
             followup: false,
             reply: "Wor".into(),
+            model: None,
+            routing: false,
         };
         let r = rounds(&t, Some(&live));
         assert_eq!(r.len(), 3);
@@ -422,6 +482,78 @@ mod tests {
         );
         assert!(r[2].live && r[2].system_changed);
         assert_eq!(r[2].reply_label(), "Streaming…");
+    }
+
+    #[test]
+    fn routing_rounds_come_before_the_message_they_chose_a_model_for() {
+        use crate::chat::RoutingRun;
+        let run = |at: usize, replies: &[&str]| {
+            let mut scout = ThreadState::fresh();
+            for (i, reply) in replies.iter().enumerate() {
+                scout.record_round(
+                    ApiContent::Text(format!("# Request\n\nscout input {i}")),
+                    "router prompt",
+                    i > 0,
+                    reply.to_string(),
+                    None,
+                );
+            }
+            RoutingRun {
+                at,
+                model: "GPT-6.1 Terra".into(),
+                transcript: scout.transcript,
+            }
+        };
+        let mut t = ThreadState::fresh();
+        t.routing.push(run(
+            0,
+            &["```read\nsrc/a.rs\n```", "```route\nmodel: sol\n```"],
+        ));
+        t.record_round(
+            ApiContent::Text("# Request\n\nFix it".into()),
+            "sys",
+            false,
+            "Fixed.".into(),
+            None,
+        );
+        t.mark_reply_model("GPT-6.1 Sol");
+        t.routing.push(run(2, &["no decision"]));
+        t.record_round(
+            ApiContent::Text("# Request\n\nAnd the test".into()),
+            "sys",
+            false,
+            "Done.".into(),
+            None,
+        );
+        // Chosen, but the answer has not been recorded.
+        t.routing.push(run(4, &["```route\nmodel: astra\n```"]));
+
+        let r = rounds(&t, None);
+        let shape: Vec<(usize, bool, Option<&str>, String)> = r
+            .iter()
+            .map(|r| (r.number, r.routing, r.model.as_deref(), r.reply_label()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (1, true, Some("GPT-6.1 Terra"), "Asked for 1 path".into()),
+                (2, true, Some("GPT-6.1 Terra"), "Chose sol".into()),
+                (3, false, Some("GPT-6.1 Sol"), "Answered".into()),
+                (
+                    4,
+                    true,
+                    Some("GPT-6.1 Terra"),
+                    "Did not choose a model".into()
+                ),
+                (5, false, None, "Answered".into()),
+                (6, true, Some("GPT-6.1 Terra"), "Chose astra".into()),
+            ]
+        );
+        // The routing model's prompt is its own, and does not replace the conversation's.
+        assert_eq!(r[0].system.as_deref(), Some("router prompt"));
+        assert!(r[0].system_changed && !r[1].system_changed);
+        assert_eq!(r[2].system.as_deref(), Some("sys"));
+        assert_eq!(r[4].system.as_deref(), Some("sys"));
     }
 
     #[test]

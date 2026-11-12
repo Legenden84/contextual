@@ -27,7 +27,7 @@ use gpui_kit::{
 };
 
 use crate::runtime;
-use crate::state::chat::{CenterView, ChatActivity, ChatModel, SendEnv};
+use crate::state::chat::{CenterView, ChatActivity, ChatModel, RoutingEnv, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, ListZoom, TypeExt, control_height, hsla, px, shadow, sp};
 use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark, completed_mark};
@@ -431,13 +431,20 @@ impl ChatPanel {
             return None;
         };
         let p = self.project.read(cx);
+        let chat = self.chat.read(cx);
+        let deployment = a.deployment();
         let env = SendEnv {
             config,
-            deployment: a.deployment(),
+            label: deployment.name.clone(),
+            deployment,
             output_prompt: a.settings.workspace.output_prompt.clone(),
             auto: true,
             skill_index: p.skill_index(),
-            commands: self.chat.read(cx).commands_enabled,
+            commands: chat.commands_enabled,
+            routing: a.routing.clone().map(|routing| RoutingEnv {
+                routing,
+                pinned: chat.pinned_model.clone(),
+            }),
         };
         Some((env, p.rules_on()))
     }
@@ -928,6 +935,48 @@ impl ChatPanel {
             .into_any_element()
     }
 
+    /// Several models: "Auto" (the routing model chooses for each message) or the model
+    /// picked for this chat. Pressing it moves to the next choice.
+    fn model_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let routing = self.app.read(cx).routing.clone()?;
+        let chat = self.chat.read(cx);
+        let pinned = chat
+            .pinned_model
+            .as_deref()
+            .and_then(|name| routing.get(name));
+        let label = pinned.map_or_else(|| "Auto".to_string(), |m| m.label().to_string());
+        let tip = match pinned {
+            None => format!(
+                "Model: Auto. {} reads each message first and chooses the model that answers it. Press to pick a model yourself.",
+                routing.router().label()
+            ),
+            Some(m) => format!(
+                "Model: {}, for every message in this chat. Press for the next model or Auto.",
+                m.label()
+            ),
+        };
+        let disabled = chat.streaming();
+        Some(
+            div()
+                .id("model-control-tooltip")
+                .flex_none()
+                .tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                })
+                .child(
+                    Button::new("model-control", label)
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Xs)
+                        .disabled(disabled)
+                        .on_click(cx.listener(move |t, _, _, cx| {
+                            t.chat
+                                .update(cx, |chat, cx| chat.cycle_pinned_model(&routing, cx));
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn paste(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
         let mut sources = Vec::new();
         for entry in item.entries() {
@@ -1117,6 +1166,7 @@ fn render_message(
                 .when_some(m.reads.clone(), |d, log| {
                     d.child(read_row(this, &m.id, &log, entity, cx))
                 })
+                .when_some(m.route.clone(), |d, log| d.child(route_row(&log, cx)))
                 .when(!changes.is_empty() && !m.streaming, |d| {
                     d.child(
                         div()
@@ -1283,6 +1333,69 @@ fn read_row(
         .into_any_element()
 }
 
+/// "Chose GPT-6.1 Sol · 3 files handed over", with the routing model's reason below it.
+fn route_row(log: &contextual_core::chat::RouteLog, cx: &App) -> AnyElement {
+    let c = &cx.tokens().colors;
+    let failed = log.failed.is_some();
+    let detail = log.detail().trim().to_string();
+    div()
+        .mt(sp(2))
+        .flex()
+        .flex_col()
+        .gap(sp(1))
+        .type_style(contextual_theme::type_style::UI_SMALL)
+        .text_color(hsla(c.ink_muted))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(sp(1))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_color(hsla(if failed { c.warning } else { c.ink_muted }))
+                        .child(
+                            Icon::new(if failed {
+                                IconName::TriangleAlert
+                            } else {
+                                IconName::Bot
+                            })
+                            .size(sp(4)),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .text_color(hsla(c.ink))
+                        .child(SharedString::from(log.summary())),
+                ),
+        )
+        .when(!detail.is_empty(), |d| {
+            d.child(
+                div()
+                    .pl(sp(6))
+                    .whitespace_normal()
+                    .child(SharedString::from(detail)),
+            )
+        })
+        .when(!log.files.is_empty(), |d| {
+            d.child(
+                div()
+                    .pl(sp(6))
+                    .flex()
+                    .flex_col()
+                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                    .children(
+                        log.files
+                            .iter()
+                            .map(|p| div().child(SharedString::from(p.clone()))),
+                    ),
+            )
+        })
+        .into_any_element()
+}
+
 fn header(who: &str, m: &UiMessage, cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()
@@ -1341,6 +1454,7 @@ impl Render for ChatPanel {
         let weak = entity.clone();
         let paste_target = entity.clone();
         let attachment_control = self.attachment_control(cx);
+        let model_control = self.model_control(cx);
         let inspect_control = self.inspect_control(cx);
 
         let thread = if empty {
@@ -1598,6 +1712,7 @@ impl Render for ChatPanel {
                                             .items_center()
                                             .gap(sp(1))
                                             .child(attachment_control)
+                                            .children(model_control)
                                             .child(
                                                 div()
                                                     .flex_1()

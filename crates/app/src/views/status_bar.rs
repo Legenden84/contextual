@@ -1,4 +1,4 @@
- //! 24px status bar: branch, Foundry connection, scanning, Settings.
+//! 24px status bar: branch, Foundry connection, scanning, Settings.
 
 use contextual_core::logic::foundry_status::{FoundryStatus, Tone, describe_foundry};
 use gpui_kit::component::{Icon, IconName};
@@ -35,7 +35,14 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
         _ => c.ink_muted,
     };
     let foundry_text = match &a.foundry {
-        FoundryStatus::Ready { .. } => format!("Foundry · {}", a.deployment().name),
+        FoundryStatus::Ready { .. } => match &a.routing {
+            Some(routing) if routing.models.len() > 1 => format!(
+                "Foundry · {} models, {} chooses",
+                routing.models.len(),
+                routing.router().label()
+            ),
+            _ => format!("Foundry · {}", a.deployment().name),
+        },
         _ => label.text.clone(),
     };
     let foundry = div()

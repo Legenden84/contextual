@@ -22,5 +22,6 @@ pub mod markdown;
 pub mod pr;
 pub mod prompt;
 pub mod reads;
+pub mod route;
 pub mod tree;
 pub mod types;

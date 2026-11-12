@@ -185,8 +185,9 @@ pub fn context_bar(
     let c = &cx.tokens().colors;
     let a = app.read(cx);
     let p = project.read(cx);
-    let deployment = a.deployment();
     let chat = chat.map(|c| c.read(cx));
+    // Several models: the limit and prices of the one this chat is on.
+    let deployment = a.deployment_for(chat.and_then(|chat| chat.thread.model.as_deref()));
     let mut t = cache.get(a, p, chat, &deployment);
     let live = chat.and_then(|chat| chat.live_context);
     if let Some(live) = live {

@@ -1,7 +1,9 @@
 //! Settings (design spec: ScreenSettings): persistent group navigation beside the Foundry
 //! connection, exclusions, output-format prompt and appearance form.
 
-use contextual_core::settings::{FoundrySettings, Settings, ThemePreference};
+use contextual_core::llm::config::ConfigProblems;
+use contextual_core::logic::foundry_status::FoundryStatus;
+use contextual_core::settings::{FoundrySettings, ModelSettings, Settings, ThemePreference};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -13,7 +15,7 @@ use gpui_kit::{
 
 use crate::state::{AppModel, ConnectionTest};
 use crate::theme::{ActiveTheme, TypeExt, control_height, hsla, px, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, Switch};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, LinkButton, Switch, Tag, TagTone};
 use crate::views::env_file_dialog::{EnvFileDialog, EnvFileEvent};
 use crate::views::presets_editor::PresetsEditor;
 
@@ -26,6 +28,7 @@ const SETTINGS_MAX_W: f32 = contextual_theme::layout::EXPLORER_WIDTH
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsGroup {
     Foundry,
+    Models,
     Exclusions,
     OutputFormat,
     Commands,
@@ -33,8 +36,9 @@ enum SettingsGroup {
 }
 
 impl SettingsGroup {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Foundry,
+        Self::Models,
         Self::Exclusions,
         Self::OutputFormat,
         Self::Commands,
@@ -44,6 +48,7 @@ impl SettingsGroup {
     fn label(self) -> &'static str {
         match self {
             Self::Foundry => "Azure AI Foundry",
+            Self::Models => "Models",
             Self::Exclusions => "Exclusions",
             Self::OutputFormat => "Output format",
             Self::Commands => "Commands",
@@ -58,10 +63,130 @@ struct Field {
     input: Entity<InputState>,
 }
 
+/// One of several models to route between, as the form edits it.
+struct ModelRow {
+    /// Stable identity for element ids while rows are added and removed.
+    key: usize,
+    /// Keyboard focus of the model's row in the list.
+    focus: FocusHandle,
+    name: Field,
+    deployment: Field,
+    model_name: Field,
+    tier: Field,
+    description: Field,
+    context_limit: Field,
+    max_tokens: Field,
+    in_price: Field,
+    out_price: Field,
+    tokens_per_minute: Field,
+}
+
+fn text_field(
+    label: &'static str,
+    hint: &'static str,
+    value: String,
+    window: &mut Window,
+    cx: &mut Context<SettingsScreen>,
+) -> Field {
+    Field {
+        label,
+        hint,
+        input: cx.new(|cx| InputState::new(window, cx).default_value(value)),
+    }
+}
+
+fn model_row(
+    key: usize,
+    m: &ModelSettings,
+    window: &mut Window,
+    cx: &mut Context<SettingsScreen>,
+) -> ModelRow {
+    const FROM_CATALOG: &str = "Empty: from the model catalog.";
+    ModelRow {
+        key,
+        focus: cx.focus_handle(),
+        name: text_field(
+            "Name",
+            "Short name, e.g. terra. Used by the routing model and the model control.",
+            m.name.clone(),
+            window,
+            cx,
+        ),
+        deployment: text_field(
+            "Deployment",
+            "Sent as the model name on every request.",
+            opt(m.deployment.clone()),
+            window,
+            cx,
+        ),
+        model_name: text_field(
+            "Model name",
+            "Looked up in the model catalog.",
+            opt(m.model_name.clone()),
+            window,
+            cx,
+        ),
+        tier: text_field(
+            "Tier",
+            "Higher is more capable. Empty: from the model catalog.",
+            opt(m.tier),
+            window,
+            cx,
+        ),
+        description: text_field(
+            "Good for",
+            "What the routing model chooses from. Empty: from the model catalog.",
+            opt(m.description.clone()),
+            window,
+            cx,
+        ),
+        context_limit: text_field(
+            "Context limit",
+            "Tokens. Empty: from the model catalog.",
+            opt(m.context_limit),
+            window,
+            cx,
+        ),
+        max_tokens: text_field(
+            "Max output tokens",
+            "Per reply. Empty: the default.",
+            opt(m.max_completion_tokens),
+            window,
+            cx,
+        ),
+        in_price: text_field(
+            "Input price / 1M",
+            FROM_CATALOG,
+            opt(m.input_price_per_1m),
+            window,
+            cx,
+        ),
+        out_price: text_field(
+            "Output price / 1M",
+            FROM_CATALOG,
+            opt(m.output_price_per_1m),
+            window,
+            cx,
+        ),
+        tokens_per_minute: text_field(
+            "Tokens per minute",
+            "This deployment's quota; requests wait until they fit. Empty: no pacing.",
+            opt(m.tokens_per_minute),
+            window,
+            cx,
+        ),
+    }
+}
+
+/// The short name a catalog model is added under: the last part of its id ("terra").
+fn short_name(id: &str) -> String {
+    id.rsplit('-').next().unwrap_or(id).to_lowercase()
+}
+
 pub struct SettingsScreen {
     app: Entity<AppModel>,
     active_group: SettingsGroup,
-    group_focus: [FocusHandle; 5],
+    group_focus: [FocusHandle; 6],
     endpoint: Field,
     api_key: Field,
     api_version: Field,
@@ -72,6 +197,13 @@ pub struct SettingsScreen {
     in_price: Field,
     out_price: Field,
     tokens_per_minute: Field,
+    /// Several models to route between (replacing the single deployment above).
+    models: Vec<ModelRow>,
+    next_model_key: usize,
+    /// The model that chooses (a row's key).
+    router_key: Option<usize>,
+    /// The model whose form is shown (a row's key).
+    selected_model: Option<usize>,
     max_kb: Field,
     new_exclusion: Entity<InputState>,
     output_prompt: Entity<TextareaState>,
@@ -188,6 +320,17 @@ impl SettingsScreen {
             s.workspace.max_file_size_kb.to_string(),
             false,
         );
+        let models: Vec<ModelRow> = f
+            .models
+            .iter()
+            .enumerate()
+            .map(|(key, m)| model_row(key, m, window, cx))
+            .collect();
+        let router_key = f.router.as_deref().and_then(|router| {
+            f.models
+                .iter()
+                .position(|m| m.name.trim().eq_ignore_ascii_case(router.trim()))
+        });
         let new_exclusion =
             cx.new(|cx| InputState::new(window, cx).placeholder("Add a glob, e.g. **/*.min.js"));
         let output_prompt = cx.new(|cx| {
@@ -217,7 +360,14 @@ impl SettingsScreen {
             });
         }
         Self {
-            active_group: SettingsGroup::Foundry,
+            // `CONTEXTUAL_DEV_OPEN=models` with `--settings`: start on the Models group.
+            active_group: if cfg!(debug_assertions)
+                && std::env::var("CONTEXTUAL_DEV_OPEN").as_deref() == Ok("models")
+            {
+                SettingsGroup::Models
+            } else {
+                SettingsGroup::Foundry
+            },
             group_focus: SettingsGroup::ALL.map(|_| cx.focus_handle()),
             endpoint,
             api_key,
@@ -229,6 +379,10 @@ impl SettingsScreen {
             in_price,
             out_price,
             tokens_per_minute,
+            next_model_key: models.len(),
+            selected_model: models.first().map(|m| m.key),
+            models,
+            router_key,
             max_kb,
             new_exclusion,
             output_prompt,
@@ -278,6 +432,8 @@ impl SettingsScreen {
                 self.text(&self.tokens_per_minute, cx),
                 self.tokens_per_minute.label,
             )?,
+            models: self.models_from_form(true, cx)?,
+            router: self.router_name(cx),
         };
         s.workspace.exclusions = self.exclusions.clone();
         s.workspace.presets = self.presets.read(cx).presets(cx);
@@ -297,6 +453,160 @@ impl SettingsScreen {
                 .or_else(|| self.imported_key.clone())
         };
         Ok((s, key))
+    }
+
+    /// The name typed for the routing model, lower case.
+    fn router_name(&self, cx: &Context<Self>) -> Option<String> {
+        let row = self
+            .models
+            .iter()
+            .find(|m| Some(m.key) == self.router_key)?;
+        self.text(&row.name, cx).map(|name| name.to_lowercase())
+    }
+
+    /// The models as typed. `strict`: a model without a name, a name used twice and a value
+    /// that is not a number are errors; otherwise such models and values are left out.
+    fn models_from_form(
+        &self,
+        strict: bool,
+        cx: &Context<Self>,
+    ) -> Result<Vec<ModelSettings>, String> {
+        fn num<T: std::str::FromStr>(
+            v: Option<String>,
+            what: &str,
+            name: &str,
+            strict: bool,
+        ) -> Result<Option<T>, String> {
+            match v.map(|s| s.parse::<T>()) {
+                None => Ok(None),
+                Some(Ok(n)) => Ok(Some(n)),
+                Some(Err(_)) if strict => Err(format!("{what} of {name} must be a number.")),
+                Some(Err(_)) => Ok(None),
+            }
+        }
+        let mut models: Vec<ModelSettings> = Vec::new();
+        for row in &self.models {
+            let name = match self.text(&row.name, cx) {
+                Some(name) => name.to_lowercase(),
+                None if strict => return Err("Every model needs a name.".into()),
+                None => continue,
+            };
+            if models.iter().any(|m| m.name == name) {
+                if strict {
+                    return Err(format!("Two models are named {name}."));
+                }
+                continue;
+            }
+            let value = |f: &Field| self.text(f, cx);
+            let tier = match num::<u8>(value(&row.tier), "The tier", &name, strict)? {
+                Some(0) if strict => {
+                    return Err(format!("The tier of {name} must be 1 or higher."));
+                }
+                Some(0) => None,
+                tier => tier,
+            };
+            models.push(ModelSettings {
+                deployment: value(&row.deployment),
+                model_name: value(&row.model_name),
+                tier,
+                description: value(&row.description),
+                context_limit: num(
+                    value(&row.context_limit),
+                    "The context limit",
+                    &name,
+                    strict,
+                )?,
+                max_completion_tokens: num(
+                    value(&row.max_tokens),
+                    "The max output tokens",
+                    &name,
+                    strict,
+                )?,
+                input_price_per_1m: num(value(&row.in_price), "The input price", &name, strict)?,
+                output_price_per_1m: num(value(&row.out_price), "The output price", &name, strict)?,
+                tokens_per_minute: num(
+                    value(&row.tokens_per_minute),
+                    "The tokens per minute",
+                    &name,
+                    strict,
+                )?,
+                name,
+            });
+        }
+        Ok(models)
+    }
+
+    /// Replaces the list (after an import), keeping the selection and routing model by name.
+    fn set_models(
+        &mut self,
+        models: &[ModelSettings],
+        router: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self
+            .models
+            .iter()
+            .find(|m| Some(m.key) == self.selected_model)
+            .and_then(|row| self.text(&row.name, cx))
+            .map(|name| name.to_lowercase());
+        let first = self.next_model_key;
+        self.models = models
+            .iter()
+            .enumerate()
+            .map(|(i, m)| model_row(first + i, m, window, cx))
+            .collect();
+        self.next_model_key = first + models.len();
+        let key_of = |name: Option<&str>| {
+            let name = name?.trim();
+            models
+                .iter()
+                .position(|m| m.name.trim().eq_ignore_ascii_case(name))
+                .map(|i| first + i)
+        };
+        self.router_key = key_of(router);
+        self.selected_model =
+            key_of(selected.as_deref()).or_else(|| self.models.first().map(|m| m.key));
+    }
+
+    /// Adds a model and shows its form. The first model becomes the routing model.
+    fn add_model(&mut self, preset: ModelSettings, window: &mut Window, cx: &mut Context<Self>) {
+        let key = self.next_model_key;
+        self.next_model_key += 1;
+        self.models.push(model_row(key, &preset, window, cx));
+        self.selected_model = Some(key);
+        if self.router_key.is_none() {
+            self.router_key = Some(key);
+        }
+        cx.notify();
+    }
+
+    fn remove_model(&mut self, key: usize, cx: &mut Context<Self>) {
+        let Some(at) = self.models.iter().position(|m| m.key == key) else {
+            return;
+        };
+        self.models.remove(at);
+        // The neighbour takes the selection; the routing model is not replaced silently.
+        if self.selected_model == Some(key) {
+            self.selected_model = self
+                .models
+                .get(at)
+                .or_else(|| self.models.last())
+                .map(|m| m.key);
+        }
+        if self.router_key == Some(key) {
+            self.router_key = None;
+        }
+        cx.notify();
+    }
+
+    fn select_model(&mut self, key: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_model = Some(key);
+        // Move focus off an input of the form that is about to be replaced.
+        if let Some(row) = self.models.iter().find(|m| m.key == key) {
+            row.focus.focus(window, cx);
+        }
+        cx.notify();
     }
 
     /// Opens the env-file picker at the path typed so far.
@@ -360,8 +670,31 @@ impl SettingsScreen {
             n += 1;
         }
         self.imported_key = imp.api_key;
+        // Models are matched by name: the file updates the ones it names and adds new ones.
+        let named = f.models.len();
+        if named > 0 || f.router.is_some() {
+            let mut current = FoundrySettings {
+                models: self.models_from_form(false, cx).unwrap_or_default(),
+                router: self.router_name(cx),
+                ..FoundrySettings::default()
+            };
+            contextual_core::migrate::merge(
+                &mut current,
+                &FoundrySettings {
+                    models: f.models.clone(),
+                    router: f.router.clone(),
+                    ..FoundrySettings::default()
+                },
+            );
+            self.set_models(&current.models, current.router.as_deref(), window, cx);
+        }
         let mut msg = format!(
-            "Imported {n} values from the env file. Review them, then use the save icon in the header (the API key goes to the keychain)."
+            "Imported {n} values{} from the env file. Review them, then use the save icon in the header (the API key goes to the keychain).",
+            match named {
+                0 => String::new(),
+                1 => " and 1 model".into(),
+                n => format!(" and {n} models"),
+            }
         );
         if !imp.skipped.is_empty() {
             msg.push_str(&format!(
@@ -581,7 +914,6 @@ fn catalog_line(m: &contextual_core::models::ModelInfo) -> String {
             usd(l.output_price_per_1m)
         ));
     }
-    line.push_str(". From the model catalog; fields below override it.");
     line
 }
 
@@ -633,7 +965,10 @@ impl Render for SettingsScreen {
             }
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
             match contextual_core::models::find(&a.settings.models, &names) {
-                Some(m) => catalog_line(m),
+                Some(m) => format!(
+                    "{}. From the model catalog; fields below override it.",
+                    catalog_line(m)
+                ),
                 None => "Not in the model catalog: set the context limit and prices below, or add the model to \"models\" in settings.json.".to_string(),
             }
         };
@@ -689,6 +1024,224 @@ impl Render for SettingsScreen {
                 .on_click(cx.listener(move |this, _, w, cx| this.set_theme(t, w, cx)))
         })
         .collect::<Vec<_>>();
+
+        let routing_problem = match &a.foundry {
+            FoundryStatus::Unconfigured { missing, invalid }
+                if !a.settings.foundry.models.is_empty() =>
+            {
+                Some(
+                    ConfigProblems {
+                        missing: missing.clone(),
+                        invalid: invalid.clone(),
+                    }
+                    .message()
+                    .replace(" See .env.example.", ""),
+                )
+            }
+            _ => None,
+        };
+        let typed = |f: &Field| f.input.read(cx).value().trim().to_string();
+        let catalog_of = |row: &ModelRow| {
+            let names = [typed(&row.model_name), typed(&row.deployment)];
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            contextual_core::models::find(&a.settings.models, &names)
+        };
+        // One row per model: name, what it is, its tier, and which one chooses.
+        let model_list = self
+            .models
+            .iter()
+            .map(|row| {
+                let key = row.key;
+                let active = self.selected_model == Some(key);
+                let catalog = catalog_of(row);
+                let name = typed(&row.name);
+                let what = catalog
+                    .map(|m| m.label.clone())
+                    .or_else(|| Some(typed(&row.deployment)).filter(|d| !d.is_empty()))
+                    .unwrap_or_default();
+                let tier = Some(typed(&row.tier))
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| catalog.and_then(|m| m.tier).map(|t| t.to_string()));
+                div()
+                    .id(("model-row", key))
+                    .track_focus(&row.focus)
+                    .tab_index(0)
+                    .flex()
+                    .items_center()
+                    .gap(sp(3))
+                    .h(control_height())
+                    .px(sp(3))
+                    .rounded(px(contextual_theme::radius::SM))
+                    .border_1()
+                    .border_color(hsla(contextual_theme::Rgba {
+                        a: 0.0,
+                        ..c.focus_ring
+                    }))
+                    .when(active, |d| d.bg(hsla(c.surface_selected)))
+                    .when(!active, |d| d.hover(|s| s.bg(hsla(c.surface_hover))))
+                    .focus(|s| s.border_color(hsla(c.focus_ring)))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |t, _, window, cx| t.select_model(key, window, cx)))
+                    .on_key_down(cx.listener(move |t, e: &KeyDownEvent, window, cx| {
+                        if matches!(e.keystroke.key.as_str(), "enter" | "space") {
+                            cx.stop_propagation();
+                            t.select_model(key, window, cx);
+                        }
+                    }))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(hsla(if name.is_empty() {
+                                c.ink_muted
+                            } else {
+                                c.ink_strong
+                            }))
+                            .child(SharedString::from(if name.is_empty() {
+                                "New model".to_string()
+                            } else {
+                                name
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(SharedString::from(what)),
+                    )
+                    .when(self.router_key == Some(key), |d| {
+                        d.child(Tag::new("chooses").tone(TagTone::Skill))
+                    })
+                    .child(
+                        div()
+                            .flex_none()
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(if tier.is_some() {
+                                c.ink_muted
+                            } else {
+                                c.warning
+                            }))
+                            .child(SharedString::from(match tier {
+                                Some(t) => format!("Tier {t}"),
+                                None => "No tier".to_string(),
+                            })),
+                    )
+            })
+            .collect::<Vec<_>>();
+        // Catalog models that are not in the list yet, to add with one press.
+        let catalog_adds = a
+            .settings
+            .models
+            .iter()
+            .chain(
+                contextual_core::models::builtin()
+                    .iter()
+                    .filter(|b| !a.settings.models.iter().any(|m| m.id == b.id)),
+            )
+            .filter(|m| {
+                !self
+                    .models
+                    .iter()
+                    .any(|row| catalog_of(row).is_some_and(|c| c.id == m.id))
+            })
+            .enumerate()
+            .map(|(i, m)| {
+                let id = m.id.clone();
+                Button::new(("add-catalog", i), m.label.clone())
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Xs)
+                    .on_click(cx.listener(move |t, _, window, cx| {
+                        let short = short_name(&id);
+                        let taken = t.models.iter().any(|row| {
+                            row.name
+                                .input
+                                .read(cx)
+                                .value()
+                                .trim()
+                                .eq_ignore_ascii_case(&short)
+                        });
+                        let preset = ModelSettings {
+                            name: if taken { id.clone() } else { short },
+                            model_name: Some(id.clone()),
+                            ..ModelSettings::default()
+                        };
+                        t.add_model(preset, window, cx);
+                    }))
+            })
+            .collect::<Vec<_>>();
+        // The form of the selected model.
+        let model_form = self
+            .models
+            .iter()
+            .find(|m| Some(m.key) == self.selected_model)
+            .map(|row| {
+                let key = row.key;
+                let note = match catalog_of(row) {
+                    Some(m) => format!(
+                        "{}{}. From the model catalog; fields below override it.",
+                        catalog_line(m),
+                        m.tier.map(|t| format!(" · tier {t}")).unwrap_or_default()
+                    ),
+                    None => {
+                        "Not in the model catalog: set the tier, context limit and prices below."
+                            .to_string()
+                    }
+                };
+                let is_router = self.router_key == Some(key);
+                div()
+                    .child(self.field_row(&row.name, cx))
+                    .child(self.field_row(&row.deployment, cx))
+                    .child(self.field_row(&row.model_name, cx))
+                    .child(
+                        div()
+                            .pl(px(LABEL_W) + sp(4))
+                            .pb(sp(1))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(SharedString::from(note)),
+                    )
+                    .child(self.field_row(&row.tier, cx))
+                    .child(self.field_row(&row.description, cx))
+                    .child(self.field_row(&row.context_limit, cx))
+                    .child(self.field_row(&row.max_tokens, cx))
+                    .child(self.field_row(&row.in_price, cx))
+                    .child(self.field_row(&row.out_price, cx))
+                    .child(self.field_row(&row.tokens_per_minute, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(sp(3))
+                            .pt(sp(2))
+                            .pl(px(LABEL_W) + sp(4))
+                            .type_style(contextual_theme::type_style::UI_SMALL)
+                            .text_color(hsla(c.ink_muted))
+                            .child(if is_router {
+                                div()
+                                    .child("This model reads each message first and chooses.")
+                                    .into_any_element()
+                            } else {
+                                Button::new("make-router", "Make routing model")
+                                    .on_click(cx.listener(move |t, _, _, cx| {
+                                        t.router_key = Some(key);
+                                        cx.notify();
+                                    }))
+                                    .into_any_element()
+                            })
+                            .child(LinkButton::new(
+                                ("remove-model", key),
+                                "Remove model",
+                                cx.listener(move |t, _, _, cx| t.remove_model(key, cx)),
+                            )),
+                    )
+            });
+        let no_models = self.models.is_empty();
+        let no_router = !no_models && self.router_key.is_none();
 
         let env_dialog = self.env_dialog.as_ref().map(|(d, _)| d.clone());
         let header = div()
@@ -846,6 +1399,85 @@ impl Render for SettingsScreen {
                             .text_color(hsla(c.ink_muted))
                             .child("Test uses the saved settings: save first."),
                     )
+                    .when(!no_models, |d| {
+                        d.child(
+                            div()
+                                .pt(sp(3))
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child("Models are defined under Models: the deployment, model name, limits and prices on this page are not used."),
+                        )
+                    })
+                    })
+                    .when(active_group == SettingsGroup::Models, |d| {
+                        d.child(
+                            div()
+                                .type_style(contextual_theme::type_style::UI_SMALL)
+                                .text_color(hsla(c.ink_muted))
+                                .child("With two or more models, the routing model reads each message first and chooses the model that answers it. Models share the endpoint, API key and API version under Azure AI Foundry and replace its single deployment."),
+                        )
+                        .when_some(routing_problem, |d, problem| {
+                            d.child(
+                                div()
+                                    .pt(sp(2))
+                                    .type_style(contextual_theme::type_style::UI_SMALL)
+                                    .text_color(hsla(c.warning))
+                                    .child(SharedString::from(problem)),
+                            )
+                        })
+                        .when(no_router, |d| {
+                            d.child(
+                                div()
+                                    .pt(sp(2))
+                                    .type_style(contextual_theme::type_style::UI_SMALL)
+                                    .text_color(hsla(c.warning))
+                                    .child("No routing model: select a model and press Make routing model."),
+                            )
+                        })
+                        .when(!no_models, |d| {
+                            d.child(
+                                div()
+                                    .mt(sp(3))
+                                    .p(sp(1))
+                                    .flex()
+                                    .flex_col()
+                                    .rounded(px(contextual_theme::radius::MD))
+                                    .border_1()
+                                    .border_color(hsla(c.border))
+                                    .children(model_list),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(sp(2))
+                                .pt(sp(3))
+                                .child(
+                                    Button::new("add-model", "Add model").on_click(cx.listener(
+                                        |t, _, w, cx| t.add_model(ModelSettings::default(), w, cx),
+                                    )),
+                                )
+                                .when(!catalog_adds.is_empty(), |d| {
+                                    d.child(
+                                        div()
+                                            .pl(sp(2))
+                                            .type_style(contextual_theme::type_style::UI_SMALL)
+                                            .text_color(hsla(c.ink_muted))
+                                            .child("From the catalog:"),
+                                    )
+                                    .children(catalog_adds)
+                                }),
+                        )
+                        .when_some(model_form, |d, form| {
+                            d.child(subsection(
+                                "Selected model",
+                                "Saved with the rest of the settings.",
+                                cx,
+                            ))
+                            .child(form)
+                        })
                     })
                     .when(active_group == SettingsGroup::Exclusions, |d| {
                         d.child(subsection("All projects", "Left out of every project.", cx))

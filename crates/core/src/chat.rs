@@ -51,6 +51,10 @@ pub struct ApiMessage {
     #[serde(rename = "toolCallId")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Assistant turns: the model that wrote the reply, as the chat names it (recorded when
+    /// several models are configured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl ApiMessage {
@@ -64,8 +68,23 @@ impl ApiMessage {
             tool_calls: Vec::new(),
             command_turn: None,
             tool_call_id: None,
+            model: None,
         }
     }
+}
+
+/// The rounds the routing model spent choosing a model for one message of the user. They are
+/// kept for the Inspect view; the model that answers never sees them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingRun {
+    /// Length of the conversation's transcript when it ran: the rounds belong before the
+    /// message at this position.
+    pub at: usize,
+    /// The routing model, as the chat names it.
+    pub model: String,
+    /// What it was sent and what it replied, like [`ThreadState::transcript`].
+    pub transcript: Vec<ApiMessage>,
 }
 
 /// What will be returned to the model for one call when the conversation continues.
@@ -121,6 +140,13 @@ pub struct ThreadState {
     /// preparation, environment or unshared output is ever saved.
     #[serde(default, skip_serializing_if = "CommandHistory::is_empty")]
     pub commands: CommandHistory,
+    /// Several models: the name of the one that answered last. Another model is sent the
+    /// whole transcript, because a stored response belongs to one deployment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Several models: how each message's model was chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routing: Vec<RoutingRun>,
 }
 
 impl ThreadState {
@@ -139,7 +165,39 @@ impl ThreadState {
             pending_changes: Some(Vec::new()),
             discarded_changes: Vec::new(),
             commands: CommandHistory::default(),
+            model: None,
+            routing: Vec::new(),
         }
+    }
+
+    /// The model that answers from now on. A change of model drops the stored response id,
+    /// so the next request carries the whole transcript.
+    pub fn use_model(&mut self, name: &str) {
+        if self.model.as_deref() != Some(name) {
+            if self.model.is_some() || self.response_id.is_some() {
+                self.response_id = None;
+            }
+            self.model = Some(name.to_string());
+        }
+    }
+
+    /// Records which model wrote the last reply.
+    pub fn mark_reply_model(&mut self, label: &str) {
+        if let Some(reply) = self
+            .transcript
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == ChatRole::Assistant)
+        {
+            reply.model = Some(label.to_string());
+        }
+    }
+
+    /// Estimated tokens of the transcript (what another model would be sent again).
+    pub fn history_tokens(&self) -> u64 {
+        history(self)
+            .iter()
+            .fold(0u64, |total, m| total.saturating_add(m.estimated_tokens()))
     }
 
     /// The system prompt recorded last (what later turns were sent unless they record another).
@@ -523,6 +581,60 @@ pub struct UiMessage {
     /// Assistant: the model turn whose command proposals belong under this reply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_turn: Option<String>,
+    /// Assistant (the routing model): which model it chose for the user's message, and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<RouteLog>,
+}
+
+/// How the model for one message was chosen (shown as one row under the routing model's name).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteLog {
+    /// The model that answers, as the chat names it.
+    pub model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    /// The files the routing model handed over.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// The model the routing model named, when it was unsure and the app moved one tier up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_from: Option<String>,
+    /// Routing did not produce a decision; `model` is the fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<String>,
+    /// The conversation moved to another model than the one that answered before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switched_from: Option<String>,
+}
+
+impl RouteLog {
+    /// "Chose GPT-6.1 Sol · one tier above GPT-6.1 Terra (unsure) · 3 files handed over"
+    pub fn summary(&self) -> String {
+        let mut parts = vec![match &self.failed {
+            Some(_) => format!("Could not choose a model · using {}", self.model),
+            None => format!("Chose {}", self.model),
+        }];
+        if let Some(from) = &self.raised_from {
+            parts.push(format!("one tier above {from} (unsure)"));
+        }
+        if let Some(from) = &self.switched_from {
+            parts.push(format!("switched from {from}"));
+        }
+        let n = self.files.len();
+        if n > 0 {
+            parts.push(format!(
+                "{n} {} handed over",
+                if n == 1 { "file" } else { "files" }
+            ));
+        }
+        parts.join(" · ")
+    }
+
+    /// The reason, or why routing failed.
+    pub fn detail(&self) -> &str {
+        self.failed.as_deref().unwrap_or(&self.reason)
+    }
 }
 
 /// What a read request fetched (shown as one row under the reply).
@@ -658,6 +770,7 @@ impl UiMessage {
             cost: None,
             reads: None,
             command_turn: None,
+            route: None,
         }
     }
 
@@ -1655,8 +1768,12 @@ mod tests {
         let mut conflict = proposal("conflict.txt", ChangeStatus::M, "old", "new");
         conflict.conflict = Some("Changed on disk".into());
         thread.pending_changes = Some(vec![conflict, kept.clone()]);
-        thread.file_versions.insert("conflict.txt".into(), hash_text("old"));
-        thread.file_versions.insert("keep.txt".into(), hash_text("keep"));
+        thread
+            .file_versions
+            .insert("conflict.txt".into(), hash_text("old"));
+        thread
+            .file_versions
+            .insert("keep.txt".into(), hash_text("keep"));
         thread.applied.push("previously-saved.txt".into());
 
         let discarded = discard_pending_changes(
@@ -1706,7 +1823,9 @@ mod tests {
             proposal("new.txt", ChangeStatus::A, "", "rejected creation"),
             proposal("gone.txt", ChangeStatus::D, "still on disk", ""),
         ]);
-        thread.file_versions.insert("a.txt".into(), hash_text("disk"));
+        thread
+            .file_versions
+            .insert("a.txt".into(), hash_text("disk"));
         let paths = HashSet::from(["a.txt".into(), "new.txt".into(), "gone.txt".into()]);
         discard_pending_changes(&mut thread, &paths);
 
@@ -1742,6 +1861,83 @@ mod tests {
         assert_eq!(restored[0].old, "disk");
         assert_eq!(restored[0].new, "latest");
         assert_eq!(restored[1], pending[1]);
+    }
+
+    #[test]
+    fn another_model_is_sent_the_whole_transcript() {
+        let mut t = ThreadState::fresh();
+        // The first model of a chat has nothing to drop.
+        t.use_model("terra");
+        assert_eq!(t.model.as_deref(), Some("terra"));
+        t.record_round(
+            ApiContent::Text("hi".into()),
+            "sys",
+            false,
+            "hello".into(),
+            None,
+        );
+        t.mark_reply_model("GPT-6.1 Terra");
+        t.response_id = Some("resp_1".into());
+        assert_eq!(t.transcript[0].model, None);
+        assert_eq!(t.transcript[1].model.as_deref(), Some("GPT-6.1 Terra"));
+        // Same model: the stored response is reused.
+        t.use_model("terra");
+        assert_eq!(t.response_id.as_deref(), Some("resp_1"));
+        t.use_model("astra");
+        assert_eq!(
+            (t.response_id.as_deref(), t.model.as_deref()),
+            (None, Some("astra"))
+        );
+        assert!(t.history_tokens() > 0);
+
+        // A chat from before several models were configured: its stored response belongs to
+        // the single deployment.
+        let mut old = ThreadState::fresh();
+        old.response_id = Some("resp_old".into());
+        old.use_model("terra");
+        assert_eq!(old.response_id, None);
+
+        // Round-trips; chats saved earlier read without the new fields.
+        t.routing.push(RoutingRun {
+            at: 2,
+            model: "GPT-6.1 Terra".into(),
+            transcript: Vec::new(),
+        });
+        let json = serde_json::to_value(&t).unwrap();
+        assert_eq!(json["model"], "astra");
+        assert_eq!(json["routing"][0]["at"], 2);
+        assert_eq!(serde_json::from_value::<ThreadState>(json).unwrap(), t);
+        let legacy = serde_json::to_value(ThreadState::fresh()).unwrap();
+        assert!(legacy.get("model").is_none() && legacy.get("routing").is_none());
+    }
+
+    #[test]
+    fn route_rows_say_what_was_chosen() {
+        let mut log = RouteLog {
+            model: "GPT-6.1 Sol".into(),
+            reason: "Spans the parser and two callers.".into(),
+            files: vec!["a.rs".into(), "b.rs".into()],
+            ..RouteLog::default()
+        };
+        assert_eq!(log.summary(), "Chose GPT-6.1 Sol · 2 files handed over");
+        assert_eq!(log.detail(), "Spans the parser and two callers.");
+        log.raised_from = Some("GPT-6.1 Terra".into());
+        log.switched_from = Some("GPT-6 Luna".into());
+        log.files.truncate(1);
+        assert_eq!(
+            log.summary(),
+            "Chose GPT-6.1 Sol · one tier above GPT-6.1 Terra (unsure) · switched from GPT-6 Luna · 1 file handed over"
+        );
+        let failed = RouteLog {
+            model: "GPT-6 Astra".into(),
+            failed: Some("The routing model did not name a model.".into()),
+            ..RouteLog::default()
+        };
+        assert_eq!(
+            failed.summary(),
+            "Could not choose a model · using GPT-6 Astra"
+        );
+        assert_eq!(failed.detail(), "The routing model did not name a model.");
     }
 
     #[test]

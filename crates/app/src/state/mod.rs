@@ -16,7 +16,8 @@ use contextual_core::logic::foundry_status::{FoundryStatus, ReadyHealth};
 use contextual_core::logic::types::Deployment;
 use contextual_core::recents::{AppState, RecentProject, StateStore};
 use contextual_core::settings::{
-    API_KEY_SECRET, SecretStore, Settings, SettingsStore, resolve_foundry_config_from_env,
+    API_KEY_SECRET, Routing, SecretStore, Settings, SettingsStore, foundry_env,
+    resolve_foundry_config_from_env, resolve_routing,
 };
 use contextual_protocol::fs::Scan;
 use gpui_kit::{AppContext, Context, Entity, EventEmitter};
@@ -56,6 +57,9 @@ pub struct AppModel {
     pub secrets: Arc<AppSecrets>,
     pub foundry: FoundryStatus,
     pub config: Option<FoundryConfig>,
+    /// Several models are configured: all of them, and the one that picks between them
+    /// (`config` is that one's).
+    pub routing: Option<Routing>,
     pub connection_test: ConnectionTest,
     hosts: hosts::Hosts,
     /// Host of the open project (local, or the agent in its WSL distro).
@@ -99,6 +103,7 @@ impl AppModel {
             secrets: Arc::new(AppSecrets::new()),
             foundry: FoundryStatus::Checking,
             config: None,
+            routing: None,
             connection_test: ConnectionTest::Idle,
             hosts: hosts::Hosts::new(propose_commands),
             project_host: None,
@@ -142,11 +147,27 @@ impl AppModel {
 
     /// Re-resolves the Foundry config from settings, env vars and the keychain.
     fn refresh_foundry(&mut self) {
-        match resolve_foundry_config_from_env(&self.settings, self.secrets.as_ref()) {
-            Ok(mut cfg) => {
-                // Every client gets the same effective limit as the context bar, including
-                // custom model entries. This only changes the runtime config, not Settings.
-                cfg.context_limit = Some(self.settings.deployment(Some(&cfg)).limit);
+        self.routing = None;
+        // Named models replace the single deployment.
+        let resolved =
+            match resolve_routing(&self.settings, self.secrets.as_ref(), &foundry_env()) {
+                Ok(Some(routing)) => {
+                    let config = routing.router().config.clone();
+                    self.routing = Some(routing);
+                    Ok(config)
+                }
+                Ok(None) => resolve_foundry_config_from_env(&self.settings, self.secrets.as_ref())
+                    .map(|mut cfg| {
+                        // Every client gets the same effective limit as the context bar,
+                        // including custom model entries. This only changes the runtime
+                        // config, not Settings.
+                        cfg.context_limit = Some(self.settings.deployment(Some(&cfg)).limit);
+                        cfg
+                    }),
+                Err(problems) => Err(problems),
+            };
+        match resolved {
+            Ok(cfg) => {
                 self.foundry = FoundryStatus::Ready {
                     health: ReadyHealth {
                         endpoint: cfg.endpoint.clone(),
@@ -162,8 +183,19 @@ impl AppModel {
         }
     }
 
+    /// Limit and prices of the deployment in `config` (the routing model when several models
+    /// are configured).
     pub fn deployment(&self) -> Deployment {
         self.settings.deployment(self.config.as_ref())
+    }
+
+    /// Limit and prices for a chat: those of the model it is on, when several are configured.
+    pub fn deployment_for(&self, model: Option<&str>) -> Deployment {
+        self.routing
+            .as_ref()
+            .zip(model)
+            .and_then(|(routing, name)| routing.get(name))
+            .map_or_else(|| self.deployment(), |m| m.deployment.clone())
     }
 
     pub fn has_api_key(&self) -> bool {
@@ -269,12 +301,7 @@ impl AppModel {
     }
 
     /// Removes a project from recent history without touching its files or saved chats.
-    pub fn remove_recent(
-        &mut self,
-        path: &str,
-        location: &Location,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn remove_recent(&mut self, path: &str, location: &Location, cx: &mut Context<Self>) {
         self.state.remove_recent(path, location);
         self.save_state();
         cx.notify();

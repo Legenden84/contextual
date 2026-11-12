@@ -4,6 +4,7 @@
 //! reply. `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<message>|switch:<branch>`
 //! opens that view, or runs that Source Control action, at startup.
 //! `CONTEXTUAL_DEV_OPEN=envfile` with `--settings` opens the env-file picker in Settings.
+//! `CONTEXTUAL_DEV_OPEN=models` with `--settings` starts Settings on the Models group.
 //!
 //! With `CONTEXTUAL_DEV_COMMANDS=1`,
 //! `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit` presses that

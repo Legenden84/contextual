@@ -585,7 +585,18 @@ impl InspectScreen {
                     .text_color(hsla(c.ink_muted))
                     .child(SharedString::from(format!("Round {}", r.number)))
                     .when(r.followup, |d| d.child(Tag::new("app")))
-                    .when(r.live, |d| d.child(Tag::new("live").tone(TagTone::Skill))),
+                    .when(r.routing, |d| d.child(Tag::new("routing")))
+                    .when(r.live, |d| d.child(Tag::new("live").tone(TagTone::Skill)))
+                    .when_some(r.model.clone(), |d, model| {
+                        d.child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .child(SharedString::from(model)),
+                        )
+                    }),
             )
             .child(
                 div()

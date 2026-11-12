@@ -1,5 +1,56 @@
 [
   {
+    "id": "gpt-6-luna",
+    "label": "GPT-6 Luna",
+    "contextLimit": 922000,
+    "inputPricePer1m": 0.1,
+    "cachedInputPricePer1m": 0.01,
+    "outputPricePer1m": 0.5,
+    "longContext": {
+      "aboveInputTokens": 272000,
+      "inputPricePer1m": 0.2,
+      "cachedInputPricePer1m": 0.02,
+      "outputPricePer1m": 0.75
+    },
+    "tier": 1,
+    "description": "Smallest and fastest. Trivial, mechanical edits in one file: renames, typos, constants, comments.",
+    "source": "https://developers.openai.com/api/docs/pricing"
+  },
+  {
+    "id": "gpt-6.1-terra",
+    "label": "GPT-6.1 Terra",
+    "contextLimit": 922000,
+    "inputPricePer1m": 1.0,
+    "cachedInputPricePer1m": 0.05,
+    "outputPricePer1m": 5.0,
+    "longContext": {
+      "aboveInputTokens": 272000,
+      "inputPricePer1m": 2.0,
+      "cachedInputPricePer1m": 0.1,
+      "outputPricePer1m": 7.5
+    },
+    "tier": 2,
+    "description": "Quick and efficient. Day-to-day tasks with a clear, local solution: small features and fixes in a few files, questions about the code.",
+    "source": "https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/gpt-6-1-terra-now-generally-available-in-microsoft-foundry-build-agents-that-see/4567769"
+  },
+  {
+    "id": "gpt-6.1-sol",
+    "label": "GPT-6.1 Sol",
+    "contextLimit": 922000,
+    "inputPricePer1m": 2.0,
+    "cachedInputPricePer1m": 0.1,
+    "outputPricePer1m": 10.0,
+    "longContext": {
+      "aboveInputTokens": 272000,
+      "inputPricePer1m": 4.0,
+      "cachedInputPricePer1m": 0.2,
+      "outputPricePer1m": 15.0
+    },
+    "tier": 3,
+    "description": "General-purpose coding model. Features and bug fixes that span several files or need careful reading of existing code.",
+    "source": "https://developers.openai.com/api/docs/pricing"
+  },
+  {
     "id": "gpt-6-astra",
     "label": "GPT-6 Astra",
     "contextLimit": 922000,
@@ -12,6 +63,8 @@
       "cachedInputPricePer1m": 2.0,
       "outputPricePer1m": 75.0
     },
+    "tier": 4,
+    "description": "Most capable. Hard, open-ended work: architecture changes, subtle bugs with an unclear cause, large refactorings.",
     "source": "https://azure.microsoft.com/en-us/blog/gpt-6-astra-sol-and-luna-for-production-agents-in-microsoft-foundry/"
   }
 ]

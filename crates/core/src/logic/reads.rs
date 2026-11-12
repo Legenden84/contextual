@@ -64,7 +64,7 @@ impl ReadRequest {
     }
 }
 
-fn clean_path(line: &str) -> Option<String> {
+pub(crate) fn clean_path(line: &str) -> Option<String> {
     let line = line
         .trim()
         .trim_start_matches(['-', '*'])
@@ -98,14 +98,19 @@ pub fn parse_read_request(reply: &str) -> Option<ReadRequest> {
 
 /// Bodies of ```` ```read ```` fences.
 fn read_blocks(reply: &str) -> Vec<String> {
+    fenced_blocks(reply, "read")
+}
+
+/// Bodies of the fences whose info string is `info`.
+pub(crate) fn fenced_blocks(reply: &str, info: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current: Option<Vec<&str>> = None;
     for line in reply.lines() {
         let t = line.trim();
         match &mut current {
             None => {
-                if let Some(info) = t.strip_prefix("```")
-                    && info.trim().eq_ignore_ascii_case("read")
+                if let Some(found) = t.strip_prefix("```")
+                    && found.trim().eq_ignore_ascii_case(info)
                 {
                     current = Some(Vec::new());
                 }
@@ -488,6 +493,23 @@ pub fn within_limits(
 /// The text of the follow-up turn that answers a read request (the files themselves are attached
 /// as context files).
 pub fn followup_text(r: &Resolved, held_back: Option<&Resolved>, last_round: bool) -> String {
+    let mut parts = answer_parts(r);
+    if let Some(h) = held_back {
+        parts.push(format!(
+            "Not sent, the user declined (too much for one message): {}.",
+            held_paths(h)
+        ));
+    }
+    parts.push(if last_round {
+        "No more files can be read for this message. Answer the original request with what you have, and say what is missing if that limits the answer.".into()
+    } else {
+        "Continue with the original request: ask for more with a read block if needed, otherwise answer.".into()
+    });
+    format!("# Requested context\n\n{}", parts.join("\n\n"))
+}
+
+/// What a read request got, part by part (the files themselves are attached as context files).
+pub(crate) fn answer_parts(r: &Resolved) -> Vec<String> {
     let mut parts = Vec::new();
     let sent: Vec<&String> = r.files.iter().chain(&r.skill_files).collect();
     if !sent.is_empty() {
@@ -518,23 +540,16 @@ pub fn followup_text(r: &Resolved, held_back: Option<&Resolved>, last_round: boo
                 .join(", ")
         ));
     }
-    if let Some(h) = held_back {
-        parts.push(format!(
-            "Not sent, the user declined (too much for one message): {}.",
-            h.files
-                .iter()
-                .chain(&h.skill_files)
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    parts.push(if last_round {
-        "No more files can be read for this message. Answer the original request with what you have, and say what is missing if that limits the answer.".into()
-    } else {
-        "Continue with the original request: ask for more with a read block if needed, otherwise answer.".into()
-    });
-    format!("# Requested context\n\n{}", parts.join("\n\n"))
+    parts
+}
+
+pub(crate) fn held_paths(h: &Resolved) -> String {
+    h.files
+        .iter()
+        .chain(&h.skill_files)
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The follow-up when a reply changed files the model was never sent.

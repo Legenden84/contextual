@@ -43,6 +43,66 @@ pub const ENV_INPUT_PRICE: &str = "AZURE_OPENAI_INPUT_PRICE_PER_1M";
 pub const ENV_OUTPUT_PRICE: &str = "AZURE_OPENAI_OUTPUT_PRICE_PER_1M";
 pub const ENV_TOKENS_PER_MINUTE: &str = "AZURE_OPENAI_TOKENS_PER_MINUTE";
 
+/// Several models: the name of the one that reads the request first and picks the model
+/// that answers it.
+pub const ENV_ROUTER: &str = "AZURE_OPENAI_ROUTER";
+/// Per model only (`AZURE_OPENAI_<NAME>_TIER`, `…_DESCRIPTION`); never read without a name.
+pub const ENV_TIER: &str = "AZURE_OPENAI_TIER";
+pub const ENV_DESCRIPTION: &str = "AZURE_OPENAI_DESCRIPTION";
+
+const ENV_PREFIX: &str = "AZURE_OPENAI_";
+
+/// The variables each model has for itself when several are configured. The endpoint, key and
+/// API version are shared.
+pub const PER_MODEL_ENV: [&str; 9] = [
+    ENV_DEPLOYMENT,
+    ENV_MODEL_NAME,
+    ENV_TIER,
+    ENV_DESCRIPTION,
+    ENV_MAX_COMPLETION_TOKENS,
+    ENV_CONTEXT_LIMIT,
+    ENV_INPUT_PRICE,
+    ENV_OUTPUT_PRICE,
+    ENV_TOKENS_PER_MINUTE,
+];
+
+/// The variable holding `base` for the model `name`:
+/// `model_env("terra", ENV_DEPLOYMENT)` is `AZURE_OPENAI_TERRA_DEPLOYMENT`.
+pub fn model_env(name: &str, base: &str) -> String {
+    let name: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let rest = base.strip_prefix(ENV_PREFIX).unwrap_or(base);
+    format!("{ENV_PREFIX}{name}_{rest}")
+}
+
+/// The model names a set of variables defines: every `AZURE_OPENAI_<NAME>_DEPLOYMENT`, lower
+/// case, in the order given.
+pub fn model_names<'a>(keys: impl IntoIterator<Item = &'a String>) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for key in keys {
+        let name = key
+            .strip_prefix(ENV_PREFIX)
+            .and_then(|rest| rest.strip_suffix("_DEPLOYMENT"))
+            .filter(|name| !name.is_empty())
+            .map(str::to_ascii_lowercase);
+        if let Some(name) = name
+            && !names.contains(&name)
+        {
+            names.push(name);
+        }
+    }
+    names
+}
+
 pub const REQUIRED_ENV: [&str; 4] = [ENV_ENDPOINT, ENV_API_KEY, ENV_API_VERSION, ENV_DEPLOYMENT];
 /// Every variable the loader reads.
 pub const ALL_ENV: [&str; 10] = [
@@ -304,6 +364,31 @@ mod tests {
             p.message(),
             "Foundry is not configured: missing AZURE_OPENAI_API_KEY, OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENT; invalid AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_CONTEXT_LIMIT, AZURE_OPENAI_INPUT_PRICE_PER_1M. See .env.example."
         );
+    }
+
+    #[test]
+    fn per_model_variables_are_named_after_the_model() {
+        assert_eq!(
+            model_env("terra", ENV_DEPLOYMENT),
+            "AZURE_OPENAI_TERRA_DEPLOYMENT"
+        );
+        assert_eq!(
+            model_env("My-Model", ENV_INPUT_PRICE),
+            "AZURE_OPENAI_MY_MODEL_INPUT_PRICE_PER_1M"
+        );
+        assert_eq!(model_env("sol", ENV_TIER), "AZURE_OPENAI_SOL_TIER");
+        let keys: Vec<String> = [
+            "AZURE_OPENAI_DEPLOYMENT",
+            "AZURE_OPENAI_TERRA_DEPLOYMENT",
+            "AZURE_OPENAI_TERRA_TIER",
+            "AZURE_OPENAI_SOL_DEPLOYMENT",
+            "OTHER_ASTRA_DEPLOYMENT",
+        ]
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
+        // The unnamed deployment is the single-model configuration, not a model called "".
+        assert_eq!(model_names(&keys), vec!["terra", "sol"]);
     }
 
     #[test]

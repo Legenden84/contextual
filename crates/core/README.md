@@ -51,11 +51,14 @@ access other files and the network; their side effects will not be covered by Sa
 - `chat` — a turn: which files to attach, the saved-thread JSON, notes after a reply.
 - `logic` — pure functions shared by the UI (diff, markdown, changes, edits, prompt, tree,
   context totals, images, PR helpers; `reads`: the model picks its files — the `read` protocol,
-  the project tree and skill index it is sent, checking requests and the per-message limits).
+  the project tree and skill index it is sent, checking requests and the per-message limits;
+  `route`: several models — the routing model's prompt, the `route` block it answers with and
+  the tier rules applied to it).
 - `threads` (saved chats, per project key; `import_legacy` copies the old app's), `settings`
   (`settings.json`, env overrides, `SecretStore`), `recents` (`state.json`), `migrate`
   (`.env.local` import), `models` (model catalog: context limit and prices per model, from
-  `data/models.json` plus `models` in `settings.json`), `location` and `wsl` (paths to
+  `data/models.json` plus `models` in `settings.json`; with a tier and description per model
+  for routing), `location` and `wsl` (paths to
   locations, distros, agent deployment).
 
 `llm`, `settings`, `models`, `chat` and `migrate` are behind the default `llm` feature; the agent builds

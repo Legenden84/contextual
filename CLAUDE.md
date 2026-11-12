@@ -8,6 +8,14 @@ their effects are not covered by Save/Undo. That is off unless the user turns on
 assistant propose commands" in Settings (`chat.proposeCommands`), read at startup
 (`docs/plans/approved-command-execution.md`).
 
+Several models can be configured (`foundry.models` in settings.json, or `AZURE_OPENAI_<NAME>_…`
+variables; endpoint, key and API version are shared). The routing model (`foundry.router`,
+`AZURE_OPENAI_ROUTER`) then reads each message first — the project tree and the files it asks
+for, in a conversation of its own — and names the model that answers and the files it starts
+with. Low confidence moves one tier up; a routing that fails stays on the chat's model or goes
+to the most capable one. Another model than the chat's last one is sent the whole transcript.
+The composer's model control pins a model for a chat instead.
+
 Native Rust app on GPUI for **Windows and macOS**; on Windows it also opens projects inside WSL
 through a deployed agent. Architecture, decisions and progress: `docs/plans/cross-platform-rust-port.md`.
 
@@ -21,16 +29,19 @@ through a deployed agent. Architecture, decisions and progress: `docs/plans/cros
     `SupervisedHost` (lazy start, restart with backoff; read-only calls retried, mutations never).
   - `logic/` — pure functions: diff, markdown/response parsing, changes, SEARCH/REPLACE edits,
     `reads` (the model picks files: `read` blocks, project tree, skill index, limits),
+    `route` (several models: routing prompt, `route` block, tier rules),
     prompt (incl. `FILE_FORMAT`, appended to the system prompt and not shown in Settings), tree
     sums, context totals, images, PR helpers.
   - `chat.rs` — turn preparation (only files new or changed since sent, by hash), saved-thread
     format (reads the old app's JSON; each round keeps its system prompt when it changed, whether
-    the app wrote it, and usage), notes, save bookkeeping. `inspect.rs` — the chat round by round
+    the app wrote it, usage and, with several models, the model; routing rounds are kept beside
+    the transcript), notes, save bookkeeping. `inspect.rs` — the chat round by round
     for the Inspect view. `llm/` — Foundry client on reqwest
     (Responses API with `previous_response_id`, chain reset, chat-completions fallback, SSE),
     drafts and edit repair. `llm`, `settings`, `models`, `chat`, `inspect` and `migrate` sit behind the `llm` feature.
   - `threads.rs`, `settings.rs`, `recents.rs`, `migrate.rs` (`.env.local` import),
-    `models.rs` (model catalog: `data/models.json` + `models` in settings.json),
+    `models.rs` (model catalog: `data/models.json` + `models` in settings.json; tier and
+    description per model), `settings.rs` also resolves the models to route between,
     `location.rs` / `wsl.rs` (where a project lives, distro discovery, agent deployment).
 - `protocol` — serde wire types (camelCase, like the old `/api` JSON) and JSON-RPC framing.
 - `theme` — `build.rs` generates typed tokens from `docs/design/contextual/tokens.json`.
@@ -55,13 +66,14 @@ Rust is in `~/.cargo/bin`. Development is Linux-only; the app runs through WSLg.
 - Checking flows without clicking (debug builds only, `crates/app/src/dev.rs`):
   `CONTEXTUAL_DEV_SEND="…" CONTEXTUAL_DEV_AFTER=diff|split|save|undo|chats|inspect`,
   `CONTEXTUAL_DEV_OPEN=scm|settings|branches|pr|inspect|gitdiff:<path>|commit:<msg>|switch:<branch>`
-  (`envfile` with `--settings`: the env-file picker),
+  (`envfile` with `--settings`: the env-file picker; `models` with `--settings`: the Models group),
   `CONTEXTUAL_DEV_REMOTE=1` (serve projects through a local agent: the WSL code path),
   `CONTEXTUAL_DEV_COMMANDS=1` (turns command proposals on for one run without changing
   Settings: in-process for local projects, through `contextual-agent --commands` for WSL
   ones; see `docs/plans/approved-command-execution.md`) with
   `CONTEXTUAL_DEV_AFTER=command-run|command-stop|command-reject|command-edit|command-share|command-withhold|command-decline|command-quit|command-close`. Point
-  `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand.
+  `AZURE_OPENAI_*` at a local mock (`http://localhost:<port>/`) when no key is at hand; add
+  `AZURE_OPENAI_ROUTER` and `AZURE_OPENAI_<NAME>_DEPLOYMENT` / `_MODEL_NAME` per model to try routing.
 - Test fixtures were recorded from the old TypeScript app; see `crates/core/tests/fixtures/README.md`.
 
 ## UI design

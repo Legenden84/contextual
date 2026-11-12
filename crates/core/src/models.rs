@@ -30,6 +30,13 @@ pub struct ModelInfo {
     pub output_price_per_1m: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub long_context: Option<LongContextPricing>,
+    /// How capable the model is next to the others the app routes between: higher is more
+    /// capable (and usually more expensive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<u8>,
+    /// What the model is good for; the routing model chooses from this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Where the numbers come from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -119,7 +126,14 @@ mod tests {
         );
         for m in builtin() {
             assert!(m.context_limit > 0, "{}", m.id);
+            assert!(m.tier.is_some() && m.description.is_some(), "{}", m.id);
         }
+        // A newer generation with the same family name is its own entry.
+        assert_eq!(find(&[], &["gpt-6.1-terra"]).and_then(|m| m.tier), Some(2));
+        assert_eq!(
+            find(&[], &["gpt-6.1-sol-2026-09-01"]).unwrap().id,
+            "gpt-6.1-sol"
+        );
     }
 
     #[test]
@@ -133,6 +147,8 @@ mod tests {
             cached_input_price_per_1m: None,
             output_price_per_1m: Some(60.0),
             long_context: None,
+            tier: None,
+            description: None,
             source: None,
         };
         let custom = [mine];

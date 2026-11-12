@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use contextual_core::chat::{
-    self, MessageImage, PreparedTurn, ReadLog, STOPPED, SavedThread, ThreadState, Tone,
-    TurnOptions, UiMessage, Usage,
+    self, MessageImage, PreparedTurn, ReadLog, Role, RouteLog, RoutingRun, STOPPED, SavedThread,
+    ThreadState, Tone, TurnOptions, UiMessage, Usage,
 };
 use contextual_core::commands::execution::{ExecutionProgress, ExecutionResult};
 use contextual_core::commands::history::{RecordStatus, ShareChoice, SharedResult};
@@ -28,7 +28,9 @@ use contextual_core::logic::markdown::Block;
 use contextual_core::logic::prompt::ApiContent;
 use contextual_core::logic::prompt::{system_prompt, with_commands, with_reads};
 use contextual_core::logic::reads::{self, LIMITS, ReadRequest, Resolved};
+use contextual_core::logic::route::{self, Candidate, Current, Earlier};
 use contextual_core::logic::types::{Change, ChangeStatus, Deployment, Rule};
+use contextual_core::settings::{RoutedModel, Routing};
 use contextual_core::threads::{ThreadStore, ThreadSummary};
 use contextual_protocol::commands::PrepareCommand;
 use contextual_protocol::fs::{Apply, ApplyChange, ChangeStatus as WireStatus, ReadFiles, Undo};
@@ -51,6 +53,8 @@ pub enum CenterView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChatActivity {
     PreparingContext,
+    /// The routing model is reading the request to choose the model that answers it.
+    ChoosingModel,
     WaitingForResponse,
     WritingResponse,
     ReadingFiles,
@@ -64,6 +68,7 @@ impl ChatActivity {
     pub fn label(self) -> &'static str {
         match self {
             Self::PreparingContext => "Preparing context",
+            Self::ChoosingModel => "Choosing a model",
             Self::WaitingForResponse => "Waiting for response",
             Self::WritingResponse => "Writing response",
             Self::ReadingFiles => "Reading files",
@@ -110,6 +115,52 @@ pub struct SendEnv {
     pub skill_index: String,
     /// Offer the command-proposal tool in this turn (development switch).
     pub commands: bool,
+    /// What the chat calls the model that `config` reaches.
+    pub label: String,
+    /// Several models are configured: the turn's model is chosen when it is sent.
+    pub routing: Option<RoutingEnv>,
+}
+
+/// Several models, as a turn needs them.
+#[derive(Clone)]
+pub struct RoutingEnv {
+    pub routing: Routing,
+    /// The model the user picked for this chat; `None`: the routing model chooses.
+    pub pinned: Option<String>,
+}
+
+impl SendEnv {
+    /// Sends the rest of the turn to `model`.
+    fn use_model(&mut self, model: &RoutedModel) {
+        self.config = model.config.clone();
+        self.deployment = model.deployment.clone();
+        self.label = model.label().to_string();
+    }
+}
+
+fn candidates(routing: &Routing) -> Vec<Candidate> {
+    routing
+        .models
+        .iter()
+        .map(|m| Candidate {
+            name: m.name.clone(),
+            label: m.label().to_string(),
+            tier: m.tier,
+            description: m.description.clone(),
+            in_price: m.deployment.in_price,
+            out_price: m.deployment.out_price,
+            limit: m.deployment.limit,
+        })
+        .collect()
+}
+
+/// What one request to a model came to.
+struct Collected {
+    reply: String,
+    usage: Option<Usage>,
+    /// The response id and API of a reply that completed.
+    done: Option<(Option<String>, ApiKind)>,
+    failure: Option<String>,
 }
 
 /// Called when a command may have changed files.
@@ -242,6 +293,8 @@ pub struct ChatModel {
     pub live: Option<LiveRound>,
     /// Small, incremental gauge estimate; never persisted or added to stored history.
     pub live_context: Option<LiveContextTokens>,
+    /// Several models: the one the user picked for this chat (`None`: chosen per message).
+    pub pinned_model: Option<String>,
     /// Approved commands can run for this project's host (development switch).
     pub commands_enabled: bool,
     /// Identifies this opening of the project to the host's command preparation.
@@ -338,6 +391,7 @@ impl ChatModel {
             pending: None,
             live: None,
             live_context: None,
+            pinned_model: None,
             commands_enabled: false,
             project_epoch: format!(
                 "project-{}",
@@ -528,24 +582,76 @@ impl ChatModel {
         self.save_thread(cx);
         cx.notify();
 
-        let p = self.project.read(cx);
-        let root = p.root.clone();
-        // Ticked files, plus the skills and skill files the model loaded in this chat.
-        let mut selected = p.selected.clone();
-        selected.extend(self.thread.loaded.iter().cloned());
-        let mut paths: Vec<String> = selected.iter().cloned().collect();
-        paths.sort();
-        let tree = (env.auto && self.thread.tree_version.as_deref() != Some(&p.model_tree_version))
-            .then(|| (p.model_tree.clone(), p.model_tree_version.clone()));
-        let host = self.host.clone();
-        let read_req = ReadFiles {
-            root: root.clone(),
-            paths,
-            condense: true,
-        };
-        let read = runtime::spawn(cx, async move { host.read(read_req).await });
-
+        let pictures = self
+            .messages
+            .last()
+            .and_then(|m| m.images.as_ref())
+            .map_or(0, Vec::len);
         let task = cx.spawn(async move |this, cx| {
+            let mut env = env;
+            // Several models: choose the one that answers before anything is read for it.
+            let mut handed_over: Vec<String> = Vec::new();
+            if let Some(r) = env.routing.clone() {
+                let pinned = r.pinned.as_deref().and_then(|name| r.routing.get(name));
+                let chosen = match pinned {
+                    Some(model) => Some(model.clone()),
+                    None => Self::choose_model(&this, &text, pictures, &r.routing, &token, cx)
+                        .await
+                        .map(|(model, files)| {
+                            handed_over = files;
+                            model
+                        }),
+                };
+                if let Some(model) = chosen {
+                    env.use_model(&model);
+                    if this
+                        .update(cx, |this, _| this.thread.use_model(&model.name))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+            let Ok(job) = this.update(cx, |this, cx| {
+                if token.is_cancelled() {
+                    this.cancel = None;
+                    this.note(STOPPED, Tone::Warn);
+                    this.save_thread(cx);
+                    cx.notify();
+                    return None;
+                }
+                this.activity = ChatActivity::PreparingContext;
+                if !handed_over.is_empty() {
+                    this.project.update(cx, |p, cx| {
+                        p.add_model_picks(&handed_over);
+                        cx.notify();
+                    });
+                }
+                let p = this.project.read(cx);
+                let root = p.root.clone();
+                // Ticked files, plus the skills and skill files the model loaded in this chat.
+                let mut selected = p.selected.clone();
+                selected.extend(this.thread.loaded.iter().cloned());
+                let mut paths: Vec<String> = selected.iter().cloned().collect();
+                paths.sort();
+                let tree = (env.auto
+                    && this.thread.tree_version.as_deref() != Some(&p.model_tree_version))
+                .then(|| (p.model_tree.clone(), p.model_tree_version.clone()));
+                let host = this.host.clone();
+                let read_req = ReadFiles {
+                    root,
+                    paths,
+                    condense: true,
+                };
+                let read = runtime::spawn(cx, async move { host.read(read_req).await });
+                cx.notify();
+                Some((read, selected, tree))
+            }) else {
+                return;
+            };
+            let Some((read, selected, tree)) = job else {
+                return;
+            };
             let read = read.await;
             let Ok(prepared) = this.update(cx, |this, cx| {
                 if token.is_cancelled() {
@@ -591,6 +697,401 @@ impl ChatModel {
         self._tasks.push(task);
     }
 
+    /// One request to a model, collected: the reply is not shown in the chat, only in the
+    /// Inspect view's live round. Capacity waits are reported like those of a reply.
+    async fn collect(
+        this: &gpui_kit::WeakEntity<Self>,
+        config: FoundryConfig,
+        req: ConversationRequest,
+        token: &CancellationToken,
+        cx: &mut gpui_kit::AsyncApp,
+    ) -> Collected {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(runtime::STREAM_QUEUE_CAPACITY);
+        let stream_token = token.clone();
+        let streamer = cx.update(|cx| {
+            runtime::spawn(cx, async move {
+                let client = FoundryClient::new(config)?;
+                let events = client.stream_conversation(req, stream_token.clone());
+                runtime::forward_chat_events(events, tx, stream_token).await;
+                Ok(())
+            })
+        });
+        let mut out = Collected {
+            reply: String::new(),
+            usage: None,
+            done: None,
+            failure: None,
+        };
+        while let Some(event) = rx.recv().await {
+            let alive = match event {
+                ChatEvent::Waiting { seconds, reason } => this
+                    .update(cx, |this, cx| {
+                        this.capacity_wait = Some(CapacityWait {
+                            until: std::time::Instant::now()
+                                + std::time::Duration::from_secs(seconds),
+                            reason,
+                        });
+                        cx.notify();
+                    })
+                    .is_ok(),
+                ChatEvent::Delta { text } => {
+                    out.reply.push_str(&text);
+                    this.update(cx, |this, cx| {
+                        if !text.is_empty() {
+                            this.capacity_wait = None;
+                        }
+                        if let Some(live) = this.live.as_mut() {
+                            live.reply.push_str(&text);
+                        }
+                        cx.notify();
+                    })
+                    .is_ok()
+                }
+                ChatEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    cached_tokens,
+                } => {
+                    out.usage = Some(Usage {
+                        input_tokens,
+                        output_tokens,
+                        cached_tokens,
+                    });
+                    true
+                }
+                ChatEvent::Done {
+                    response_id, api, ..
+                } => {
+                    out.done = Some((response_id, api));
+                    true
+                }
+                ChatEvent::Error { message } => {
+                    out.failure = Some(message);
+                    true
+                }
+                // No tools are offered to a collected request.
+                ChatEvent::ToolCall { .. } | ChatEvent::ToolsUnsupported { .. } => true,
+            };
+            if !alive {
+                token.cancel();
+                break;
+            }
+        }
+        let _ = this.update(cx, |this, _| this.capacity_wait = None);
+        if let Err(e) = streamer.await
+            && out.failure.is_none()
+        {
+            out.failure = Some(e.message);
+        }
+        if out.failure.is_none() && (out.done.is_none() || out.reply.is_empty()) {
+            out.failure = Some("The model sent no reply.".into());
+        }
+        out
+    }
+
+    /// Several models: the routing model reads the request (the project tree, and the files
+    /// it asks for) and names the model that answers it, with the files that model starts
+    /// with. Its rounds are a conversation of their own: they are kept for the Inspect view
+    /// and shown as one row in the chat, and the model that answers never sees them.
+    ///
+    /// When routing does not end in a decision, the chat stays on its model, or goes to the
+    /// most capable one: never to a cheaper guess. `None` when the turn was stopped.
+    async fn choose_model(
+        this: &gpui_kit::WeakEntity<Self>,
+        request: &str,
+        pictures: usize,
+        routing: &Routing,
+        token: &CancellationToken,
+        cx: &mut gpui_kit::AsyncApp,
+    ) -> Option<(RoutedModel, Vec<String>)> {
+        let router = routing.router().clone();
+        let all = candidates(routing);
+        // What the routing model is told about the conversation, which it is not sent.
+        let (offered, current, tree, first, scout_id) = this
+            .update(cx, |this, cx| {
+                let history_tokens = this.thread.history_tokens();
+                let offered = route::offerable(&all, history_tokens);
+                let current = this.thread.model.clone().map(|name| Current {
+                    name,
+                    history_tokens,
+                });
+                // Everything before the message being sent.
+                let before = this.messages.len().saturating_sub(1);
+                let earlier: Vec<Earlier<'_>> = this.messages[..before]
+                    .iter()
+                    .filter(|m| m.route.is_none() && m.role != Role::Note)
+                    .map(|m| Earlier {
+                        user: m.role == Role::User,
+                        text: &m.text,
+                    })
+                    .collect();
+                let in_context: Vec<String> = this.thread.file_versions.keys().cloned().collect();
+                let first = route::scout_request(request, pictures, &earlier, &in_context);
+                let tree = this.project.read(cx).model_tree.clone();
+                let mut message = UiMessage::assistant(router.label(), &now());
+                message.reads = None;
+                let id = message.id.clone();
+                if offered.len() > 1 {
+                    this.messages.push(message);
+                    this.activity = ChatActivity::ChoosingModel;
+                    cx.notify();
+                }
+                (offered, current, tree, first, id)
+            })
+            .ok()?;
+        if let [only] = offered.as_slice() {
+            // Nothing to choose between.
+            return routing.get(&only.name).map(|m| (m.clone(), Vec::new()));
+        }
+        let system = route::router_prompt(&offered, current.as_ref());
+        let mut scout = ThreadState::fresh();
+        let mut prepared = chat::prepare_turn(
+            &scout,
+            &[],
+            &HashSet::new(),
+            &first,
+            &[],
+            0,
+            TurnOptions {
+                tree: Some(tree),
+                ..TurnOptions::default()
+            },
+        );
+        let mut usage_total: Option<Usage> = None;
+        let mut log = ReadLog::default();
+        let (mut files_read, mut tokens_read) = (0usize, 0u64);
+        let mut decision: Option<route::Decision> = None;
+        let mut failure: Option<String> = None;
+        for round in 0..=LIMITS.rounds {
+            let alive = this.update(cx, |this, cx| {
+                this.live = Some(LiveRound {
+                    input: prepared.input.clone(),
+                    system: system.clone(),
+                    followup: prepared.followup,
+                    reply: String::new(),
+                    model: Some(router.label().to_string()),
+                    routing: true,
+                });
+                cx.notify();
+            });
+            if alive.is_err() {
+                return None;
+            }
+            let req = ConversationRequest {
+                system: system.clone(),
+                history: chat::history(&scout),
+                input: chat::to_message_content(&prepared.input),
+                previous_response_id: scout.response_id.clone(),
+                command_tool: false,
+                tool_results: Vec::new(),
+            };
+            let got = Self::collect(this, router.config.clone(), req, token, cx).await;
+            if token.is_cancelled() {
+                break;
+            }
+            if let Some(u) = got.usage {
+                let total = usage_total.get_or_insert_with(Usage::default);
+                total.input_tokens += u.input_tokens;
+                total.output_tokens += u.output_tokens;
+                total.cached_tokens += u.cached_tokens;
+            }
+            if let Some(message) = got.failure {
+                failure = Some(message);
+                break;
+            }
+            scout.record_round(
+                prepared.input.clone(),
+                &system,
+                prepared.followup,
+                got.reply.clone(),
+                got.usage,
+            );
+            scout.file_versions = prepared.versions.clone();
+            if let Some((response_id, api)) = got.done {
+                scout.response_id = response_id;
+                scout.api = Some(api);
+            }
+            if let Some(answer) = route::parse_route(&got.reply) {
+                match route::decide(&answer, &offered) {
+                    Some(d) => decision = Some(d),
+                    None => {
+                        failure = Some(format!(
+                            "The routing model named \"{}\", which is not one of the configured models.",
+                            answer.model
+                        ));
+                    }
+                }
+                break;
+            }
+            let Some(request) = reads::parse_read_request(&got.reply) else {
+                failure = Some("The routing model did not name a model.".into());
+                break;
+            };
+            if round == LIMITS.rounds {
+                failure = Some("The routing model kept asking for files.".into());
+                break;
+            }
+            // Answer the read request like a model's, within the same limits per message.
+            let sent: BTreeSet<String> = scout.file_versions.keys().cloned().collect();
+            let Ok((now_ok, held, root, host)) = this.update(cx, |this, cx| {
+                let p = this.project.read(cx);
+                let resolved = reads::resolve(&request, p.tree(), &p.rules, &p.skills_never, &sent);
+                let (now_ok, held) =
+                    reads::within_limits(resolved, files_read, tokens_read, LIMITS);
+                let root = p.root.clone();
+                let step = ReadLog::from_resolved(&now_ok);
+                log.files.extend(step.files);
+                log.skills.extend(step.skills);
+                log.folders.extend(step.folders);
+                log.refused.extend(step.refused);
+                if let Some(h) = &held {
+                    log.held_back
+                        .extend(h.files.iter().chain(&h.skill_files).cloned());
+                }
+                if let Some(m) = this.messages.iter_mut().find(|m| m.id == scout_id) {
+                    m.reads = Some(log.clone());
+                }
+                cx.notify();
+                (now_ok, held, root, this.host.clone())
+            }) else {
+                return None;
+            };
+            let paths: Vec<String> = now_ok
+                .files
+                .iter()
+                .chain(&now_ok.skill_files)
+                .cloned()
+                .collect();
+            let files = if paths.is_empty() {
+                Vec::new()
+            } else {
+                let read_req = ReadFiles {
+                    root,
+                    paths: paths.clone(),
+                    condense: true,
+                };
+                let job =
+                    cx.update(|cx| runtime::spawn(cx, async move { host.read(read_req).await }));
+                match job.await {
+                    Ok(r) => r.files,
+                    Err(e) => {
+                        failure = Some(format!(
+                            "Could not read the files the routing model asked for. {}",
+                            e.message
+                        ));
+                        break;
+                    }
+                }
+            };
+            let read_tokens: u64 = files
+                .iter()
+                .map(|f| f.content.as_deref().map_or(0, estimate_tokens))
+                .sum();
+            files_read += now_ok.reads();
+            tokens_read += read_tokens;
+            log.tokens += read_tokens;
+            log.completed = files.iter().all(|file| file.error.is_none());
+            let mut selected: HashSet<String> = sent.into_iter().collect();
+            selected.extend(paths);
+            let text = route::scout_followup(&now_ok, held.as_ref(), round + 1 == LIMITS.rounds);
+            prepared = chat::prepare_turn(
+                &scout,
+                &files,
+                &selected,
+                &text,
+                &[],
+                0,
+                TurnOptions {
+                    followup: true,
+                    ..TurnOptions::default()
+                },
+            );
+        }
+
+        let stopped = token.is_cancelled();
+        this.update(cx, |this, cx| {
+            this.live = None;
+            // The rounds were sent, whatever came of them: Inspect shows them.
+            if !scout.transcript.is_empty() {
+                this.thread.routing.push(RoutingRun {
+                    at: this.thread.transcript.len(),
+                    model: router.label().to_string(),
+                    transcript: std::mem::take(&mut scout.transcript),
+                });
+            }
+            let position = this.messages.iter().position(|m| m.id == scout_id);
+            if stopped {
+                // The caller reports the stop; a row that chose nothing is not kept.
+                if let Some(i) = position {
+                    this.messages.remove(i);
+                }
+                cx.notify();
+                return None;
+            }
+            let previous = this.thread.model.clone();
+            let (model, files, reason, raised_from) = match decision {
+                Some(d) => (
+                    routing.get(&d.model)?.clone(),
+                    d.files,
+                    d.reason,
+                    d.raised_from,
+                ),
+                None => {
+                    let name = &route::fallback(&offered, previous.as_deref())?.name;
+                    (routing.get(name)?.clone(), Vec::new(), String::new(), None)
+                }
+            };
+            // Only files of this project that may be sent, within what one message may read.
+            let (files, skill_files) = {
+                let p = this.project.read(cx);
+                let sent: BTreeSet<String> = this.thread.file_versions.keys().cloned().collect();
+                let request = ReadRequest {
+                    paths: files,
+                    folders: Vec::new(),
+                };
+                let resolved = reads::resolve(&request, p.tree(), &p.rules, &p.skills_never, &sent);
+                let (ok, _) = reads::within_limits(resolved, 0, 0, LIMITS);
+                (ok.files, ok.skill_files)
+            };
+            for f in skill_files {
+                if !this.thread.loaded.contains(&f) {
+                    this.thread.loaded.push(f);
+                }
+            }
+            let label_of = |name: &str| {
+                routing
+                    .get(name)
+                    .map_or_else(|| name.to_string(), |m| m.label().to_string())
+            };
+            if let Some(m) = position.and_then(|i| this.messages.get_mut(i)) {
+                m.streaming = false;
+                m.reads = (log != ReadLog::default()).then(|| log.clone());
+                m.route = Some(RouteLog {
+                    model: model.label().to_string(),
+                    reason,
+                    files: files.clone(),
+                    raised_from: raised_from.as_deref().map(label_of),
+                    failed: failure.clone(),
+                    switched_from: previous
+                        .as_deref()
+                        .filter(|name| *name != model.name)
+                        .map(label_of),
+                });
+                if let Some(u) = usage_total {
+                    let (meta, cost) = chat::usage_meta(&u, &router.deployment);
+                    m.meta = Some(meta);
+                    m.usage = Some(u);
+                    m.cost = cost;
+                }
+            }
+            this.save_thread(cx);
+            cx.notify();
+            Some((model, files))
+        })
+        .ok()
+        .flatten()
+    }
+
     /// Remembers file contents as sent (diff originals) and which were condensed references.
     fn record_read(&mut self, files: &[contextual_protocol::fs::FileContent]) {
         for f in files {
@@ -615,7 +1116,10 @@ impl ChatModel {
         opts: TurnOptions,
         cx: &mut Context<Self>,
     ) -> Option<PreparedTurn> {
-        let message = self.messages.iter_mut().find(|message| message.id == user_id)?;
+        let message = self
+            .messages
+            .iter_mut()
+            .find(|message| message.id == user_id)?;
         let tree_sent = opts.tree.is_some();
         let mut prepared = chat::prepare_turn(
             &self.thread,
@@ -651,7 +1155,7 @@ impl ChatModel {
             results_only,
         } = turn;
         let Ok((base, ai_id, staged)) = this.update(cx, |this, cx| {
-            let ai = UiMessage::assistant(&env.deployment.name, &now());
+            let ai = UiMessage::assistant(&env.label, &now());
             let id = ai.id.clone();
             this.messages.push(ai);
             this.activity = ChatActivity::WaitingForResponse;
@@ -693,6 +1197,8 @@ impl ChatModel {
                 system: system.clone(),
                 followup: prepared.followup,
                 reply: String::new(),
+                model: env.routing.as_ref().map(|_| env.label.clone()),
+                routing: false,
             });
             cx.notify();
         });
@@ -896,6 +1402,9 @@ impl ChatModel {
                 }
             }
             if completed && let Some((_, response_id, api, _)) = &done {
+                if env.routing.is_some() {
+                    this.thread.mark_reply_model(&env.label);
+                }
                 this.thread.response_id = response_id.clone();
                 this.thread.api = Some(*api);
                 let turn = this
@@ -1311,6 +1820,7 @@ impl ChatModel {
         {
             return;
         }
+        let env = self.on_thread_model(env);
         self.pending = None;
         let token = CancellationToken::new();
         self.cancel = Some(token.clone());
@@ -1352,6 +1862,40 @@ impl ChatModel {
             Self::stream(this, turn, env, rules_on, token, cx).await;
         });
         self._tasks.push(task);
+    }
+
+    /// Several models: a turn that continues the last reply (command results) goes to the
+    /// model that wrote it. If that model is no longer configured, the most capable one
+    /// takes over, with the whole transcript.
+    fn on_thread_model(&mut self, mut env: SendEnv) -> SendEnv {
+        let model = env.routing.as_ref().map(|r| {
+            self.thread
+                .model
+                .as_deref()
+                .and_then(|name| r.routing.get(name))
+                .unwrap_or_else(|| r.routing.strongest())
+                .clone()
+        });
+        if let Some(model) = model {
+            self.thread.use_model(&model.name);
+            env.use_model(&model);
+        }
+        env
+    }
+
+    /// Several models: the next choice of the model picker, in the order Auto, then each
+    /// model from the least capable. Applies from the next message.
+    pub fn cycle_pinned_model(&mut self, routing: &Routing, cx: &mut Context<Self>) {
+        let at = self
+            .pinned_model
+            .as_deref()
+            .and_then(|name| routing.models.iter().position(|m| m.name == name));
+        self.pinned_model = match at {
+            None => routing.models.first(),
+            Some(i) => routing.models.get(i + 1),
+        }
+        .map(|m| m.name.clone());
+        cx.notify();
     }
 
     /// Transient state of one command card.
@@ -2044,6 +2588,7 @@ impl ChatModel {
         self.live_context = None;
         self.context_revision = self.context_revision.wrapping_add(1);
         self.thread_generation = self.thread_generation.wrapping_add(1);
+        self.pinned_model = None;
         self.messages.clear();
         self.reply_preview = None;
         self.include.clear();
@@ -2224,6 +2769,7 @@ impl ChatModel {
                 this.set_changes(changes);
                 this.context_revision = this.context_revision.wrapping_add(1);
                 this.thread_generation = this.thread_generation.wrapping_add(1);
+                this.pinned_model = None;
                 this.reply_preview = None;
                 this.messages = saved
                     .messages
