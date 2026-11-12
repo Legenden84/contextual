@@ -207,7 +207,7 @@ fn inset(cx: &App) -> gpui_kit::Div {
 }
 
 /// The end of what was captured, in one block: output, then error output.
-fn output(progress: &ExecutionProgress, cx: &App) -> Option<AnyElement> {
+fn output(progress: &ExecutionProgress, call: &CallId, cx: &App) -> Option<AnyElement> {
     let c = &cx.tokens().colors;
     let (out, err) = (&progress.stdout, &progress.stderr);
     if out.text.is_empty() && err.text.is_empty() {
@@ -235,12 +235,20 @@ fn output(progress: &ExecutionProgress, cx: &App) -> Option<AnyElement> {
         if hidden > 0 {
             rows.push(faint(format!("… {hidden} earlier lines")));
         }
-        rows.extend(lines[hidden..].iter().map(|part| {
+        rows.push(
             div()
                 .whitespace_normal()
-                .child(text(*part))
-                .into_any_element()
-        }));
+                .child(crate::views::markdown::selectable_plain(
+                    format!(
+                        "command-output-{}-{}-{}",
+                        call.turn,
+                        call.call,
+                        if error { "stderr" } else { "stdout" }
+                    ),
+                    &lines[hidden..].join("\n"),
+                ))
+                .into_any_element(),
+        );
     }
     Some(inset(cx).children(rows).into_any_element())
 }
@@ -795,7 +803,9 @@ fn render(
         return frame(&card, header, body, cx);
     }
 
-    let captured = live.as_ref().and_then(|progress| output(progress, cx));
+    let captured = live
+        .as_ref()
+        .and_then(|progress| output(progress, &call, cx));
     let fold = captured.as_ref().map(|_| collapsed);
     let header = card_header(panel, &call, &card, fold, animate, cx);
     let can_run = matches!(

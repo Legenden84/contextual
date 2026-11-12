@@ -1052,7 +1052,10 @@ fn render_message(
                 Some(Tone::Warn) => c.warning,
                 _ => c.ink_muted,
             }))
-            .child(SharedString::from(m.text.clone())),
+            .child(crate::views::markdown::selectable_plain(
+                format!("{}-note", m.id),
+                &m.text,
+            )),
         Role::User => column.child(
             div()
                 .p(sp(4))
@@ -1063,7 +1066,10 @@ fn render_message(
                     div()
                         .mt(sp(2))
                         .whitespace_normal()
-                        .child(SharedString::from(m.text.clone())),
+                        .child(crate::views::markdown::selectable_plain(
+                            format!("{}-prompt", m.id),
+                            &m.text,
+                        )),
                 )
                 .when_some(m.images.as_ref().filter(|i| !i.is_empty()), |d, imgs| {
                     d.child(

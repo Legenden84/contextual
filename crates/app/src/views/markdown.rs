@@ -270,6 +270,16 @@ fn inline_text(id: String, inline: &[Inline]) -> impl IntoElement + use<> {
     TextView::markdown(ElementId::Name(id.into()), selectable_markdown(inline)).selectable(true)
 }
 
+/// Display literal text without allowing it to introduce Markdown formatting or links.
+/// Explicit breaks keep multiline messages and command output on separate lines.
+pub(crate) fn selectable_plain(id: String, text: &str) -> impl IntoElement + use<> {
+    let source = selectable_markdown(&[Inline::Text {
+        text: text.to_owned(),
+    }])
+    .replace('\n', "  \n");
+    TextView::markdown(ElementId::Name(id.into()), source).selectable(true)
+}
+
 fn list(id: &str, items: &[ListItem], cx: &App) -> impl IntoElement + use<> {
     let c = &cx.tokens().colors;
     div()

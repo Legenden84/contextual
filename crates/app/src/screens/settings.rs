@@ -69,6 +69,8 @@ struct ModelRow {
     key: usize,
     /// Keyboard focus of the model's row in the list.
     focus: FocusHandle,
+    /// Refresh the list when its displayed values or sort order change.
+    _list_subs: Vec<Subscription>,
     name: Field,
     deployment: Field,
     model_name: Field,
@@ -103,37 +105,46 @@ fn model_row(
     cx: &mut Context<SettingsScreen>,
 ) -> ModelRow {
     const PRICE: &str = "USD. Empty: no cost is shown for this model.";
+    let name = text_field(
+        "Name",
+        "Short name, e.g. terra. Used by the routing model and the model control.",
+        m.name.clone(),
+        window,
+        cx,
+    );
+    let deployment = text_field(
+        "Deployment",
+        "Sent as the model name on every request.",
+        opt(m.deployment.clone()),
+        window,
+        cx,
+    );
+    let model_name = text_field(
+        "Model name",
+        "The underlying model. Empty: the deployment name.",
+        opt(m.model_name.clone()),
+        window,
+        cx,
+    );
+    let tier = text_field(
+        "Tier",
+        "Required. 1 or higher; higher is more capable.",
+        opt(m.tier),
+        window,
+        cx,
+    );
+    let list_subs = [&name, &deployment, &model_name, &tier]
+        .into_iter()
+        .map(|field| cx.observe(&field.input, |_, _, cx| cx.notify()))
+        .collect();
     ModelRow {
         key,
         focus: cx.focus_handle(),
-        name: text_field(
-            "Name",
-            "Short name, e.g. terra. Used by the routing model and the model control.",
-            m.name.clone(),
-            window,
-            cx,
-        ),
-        deployment: text_field(
-            "Deployment",
-            "Sent as the model name on every request.",
-            opt(m.deployment.clone()),
-            window,
-            cx,
-        ),
-        model_name: text_field(
-            "Model name",
-            "The underlying model. Empty: the deployment name.",
-            opt(m.model_name.clone()),
-            window,
-            cx,
-        ),
-        tier: text_field(
-            "Tier",
-            "Required. 1 or higher; higher is more capable.",
-            opt(m.tier),
-            window,
-            cx,
-        ),
+        _list_subs: list_subs,
+        name,
+        deployment,
+        model_name,
+        tier,
         description: text_field(
             "Good for",
             "A sentence the routing model chooses from.",
@@ -233,6 +244,14 @@ pub struct SettingsScreen {
 
 fn opt<T: ToString>(v: Option<T>) -> String {
     v.map(|v| v.to_string()).unwrap_or_default()
+}
+
+/// Sort valid tiers numerically, with missing or invalid tiers last.
+fn tier_sort_key(tier: Option<&str>) -> (bool, Option<u8>) {
+    let tier = tier
+        .and_then(|t| t.parse::<u8>().ok())
+        .filter(|&t| t > 0);
+    (tier.is_none(), tier)
 }
 
 impl SettingsScreen {
@@ -1055,11 +1074,22 @@ impl Render for SettingsScreen {
             let names: Vec<&str> = names.iter().map(String::as_str).collect();
             contextual_core::models::find(&a.settings.models, &names)
         };
-        // One row per model: name, what it is, its tier, and which one chooses.
-        let model_list = self
+        // Sort only the displayed rows, leaving saved order and row identities intact.
+        let mut sorted_models: Vec<_> = self
             .models
             .iter()
             .map(|row| {
+                let tier = Some(typed(&row.tier))
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| catalog_of(row).and_then(|m| m.tier).map(|t| t.to_string()));
+                (row, tier)
+            })
+            .collect();
+        sorted_models.sort_by_key(|(_, tier)| tier_sort_key(tier.as_deref()));
+        // One row per model: name, what it is, its tier, and which one chooses.
+        let model_list = sorted_models
+            .into_iter()
+            .map(|(row, tier)| {
                 let key = row.key;
                 let active = self.selected_model == Some(key);
                 let catalog = catalog_of(row);
@@ -1068,9 +1098,6 @@ impl Render for SettingsScreen {
                     .map(|m| m.label.clone())
                     .or_else(|| Some(typed(&row.deployment)).filter(|d| !d.is_empty()))
                     .unwrap_or_default();
-                let tier = Some(typed(&row.tier))
-                    .filter(|t| !t.is_empty())
-                    .or_else(|| catalog.and_then(|m| m.tier).map(|t| t.to_string()));
                 div()
                     .id(("model-row", key))
                     .track_focus(&row.focus)
@@ -1123,7 +1150,7 @@ impl Render for SettingsScreen {
                             .child(SharedString::from(what)),
                     )
                     .when(self.router_key == Some(key), |d| {
-                        d.child(Tag::new("chooses").tone(TagTone::Skill))
+                        d.child(Tag::new("Routing model").tone(TagTone::Skill))
                     })
                     .child(
                         div()
@@ -1627,4 +1654,26 @@ fn find_env_local(recents: &[contextual_core::recents::RecentProject]) -> String
         }
     }
     String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tier_sort_key;
+
+    #[test]
+    fn tiers_sort_numerically_with_missing_and_invalid_last() {
+        let mut rows = [
+            ("missing", None),
+            ("ten", Some("10")),
+            ("invalid", Some("high")),
+            ("two", Some("2")),
+            ("zero", Some("0")),
+            ("also two", Some("2")),
+        ];
+        rows.sort_by_key(|(_, tier)| tier_sort_key(*tier));
+        assert_eq!(
+            rows.map(|(name, _)| name),
+            ["two", "also two", "ten", "missing", "invalid", "zero"]
+        );
+    }
 }
