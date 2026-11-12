@@ -88,6 +88,17 @@ The main workspace with a project open, files selected and a finished assistant 
   Branch and pull-request reviews name their repository; a PR review keeps that scope
   until closed. Never combine commits or pushes across repositories.
 - Keep branch selection, commit, push/publish and pull-request comparison together.
+- The branch picker places a trash-can control at the right end of each local branch
+  row, disabled for the current branch. Remote rows have no deletion action.
+- Deletion requires inline confirmation on that same row: “Delete locally?”, an
+  icon-only trash-can confirmation with a descriptive tooltip, and a cancel control.
+  Escape cancels the review; typing a filter clears it. Enter in the filter never
+  confirms deletion.
+- Explain that deletion is local only, leaves the remote unchanged, and is not covered
+  by Save/Undo. Use Git's safe deletion check, never force deletion; Git also refuses
+  branches checked out in other worktrees. Keep failures visible in the picker.
+- Disable branch actions while a mutation runs. Successful deletion keeps the picker
+  open and refreshes its list without accepting pre-deletion snapshots.
 - Give the next action emphasis: commit with pending changes, push/publish with a clean
   working tree, or compare once the branch is pushed. Comparison remains available before
   pushing; it does not push or create a PR.

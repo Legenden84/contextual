@@ -120,6 +120,7 @@ contract!(
     apply_then_undo,
     conflict_round_trips_exactly,
     git_stage_commit,
+    git_delete_local_branch,
     sibling_repositories,
     list_dirs,
     command_preparation,
@@ -273,6 +274,54 @@ async fn git_stage_commit<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(ma
         .await
         .unwrap();
     assert!(st.staged.is_empty() && st.changes.is_empty());
+}
+
+async fn git_delete_local_branch<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(make: F) {
+    use contextual_protocol::git::{BranchesRequest, DeleteBranchRequest};
+
+    let f = Fixture::new();
+    let host = make(&f).await;
+    git(f.project.path(), &["branch", "finished"]);
+    host.git_delete_branch(DeleteBranchRequest {
+        root: f.root(),
+        name: "finished".into(),
+    })
+    .await
+    .unwrap();
+
+    let branches = host
+        .git_branches(BranchesRequest {
+            root: f.root(),
+            fetch: false,
+        })
+        .await
+        .unwrap();
+    assert!(!branches.local.iter().any(|branch| branch.name == "finished"));
+    assert_eq!(branches.current.as_deref(), Some("main"));
+
+    let error = host
+        .git_delete_branch(DeleteBranchRequest {
+            root: f.root(),
+            name: "main".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Conflict);
+
+    let other = Fixture::new();
+    git(other.project.path(), &["branch", "protected"]);
+    let error = host
+        .git_delete_branch(DeleteBranchRequest {
+            root: other.root(),
+            name: "protected".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Forbidden);
+    git(
+        other.project.path(),
+        &["show-ref", "--verify", "refs/heads/protected"],
+    );
 }
 
 async fn sibling_repositories<F: AsyncFnOnce(&Fixture) -> Arc<dyn WorkspaceHost>>(make: F) {

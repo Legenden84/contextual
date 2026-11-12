@@ -9,8 +9,8 @@ use contextual_core::host::WorkspaceHost;
 use contextual_core::llm::{FoundryClient, FoundryConfig};
 use contextual_protocol::fs::Repository;
 use contextual_protocol::git::{
-    BranchList, BranchesRequest, CommitRequest, CreateBranchRequest, GitStatus, PathsRequest,
-    RootRequest, SwitchRequest,
+    BranchList, BranchesRequest, CommitRequest, CreateBranchRequest, DeleteBranchRequest,
+    GitStatus, PathsRequest, RootRequest, SwitchRequest,
 };
 use gpui_kit::{Context, Entity, EventEmitter, Subscription};
 use tokio_util::sync::CancellationToken;
@@ -40,6 +40,8 @@ pub struct ScmModel {
     pub branches: Option<BranchList>,
     pub branch_picker_open: bool,
     pub branch_error: Option<String>,
+    /// Invalidates branch reads begun before a scope change or branch mutation.
+    branch_generation: u64,
     seen_rescans: u64,
     refreshing: bool,
     refresh_pending: bool,
@@ -79,6 +81,7 @@ impl ScmModel {
             branches: None,
             branch_picker_open: false,
             branch_error: None,
+            branch_generation: 0,
             seen_rescans,
             refreshing: false,
             refresh_pending: false,
@@ -110,6 +113,7 @@ impl ScmModel {
     }
 
     fn reset_scope(&mut self) {
+        self.branch_generation += 1;
         self.status = None;
         self.branches = None;
         self.branch_picker_open = false;
@@ -387,6 +391,8 @@ impl ScmModel {
         }
         self.branch_picker_open = true;
         self.branch_error = None;
+        self.branch_generation += 1;
+        self.branches = None;
         // Local list first (fast), then again after a quiet fetch.
         self.load_branches(false, cx);
         self.load_branches(true, cx);
@@ -394,6 +400,9 @@ impl ScmModel {
     }
 
     pub fn close_branch_picker(&mut self, cx: &mut Context<Self>) {
+        if self.busy == Some("Branch") {
+            return;
+        }
         self.branch_picker_open = false;
         cx.notify();
     }
@@ -401,13 +410,16 @@ impl ScmModel {
     fn load_branches(&mut self, fetch: bool, cx: &mut Context<Self>) {
         let (host, root) = (self.host.clone(), self.root(cx));
         let requested_root = root.clone();
+        let generation = self.branch_generation;
         let job = runtime::spawn(cx, async move {
             host.git_branches(BranchesRequest { root, fetch }).await
         });
         cx.spawn(async move |this, cx| {
             if let Ok(list) = job.await {
                 this.update(cx, |this, cx| {
-                    if this.repository_root() != Some(requested_root.as_str()) {
+                    if this.repository_root() != Some(requested_root.as_str())
+                        || this.branch_generation != generation
+                    {
                         return;
                     }
                     this.branches = Some(list);
@@ -415,6 +427,56 @@ impl ScmModel {
                 })
                 .ok();
             }
+        })
+        .detach();
+    }
+
+    /// Deletes a local branch after the picker's explicit confirmation, keeping it open.
+    pub fn delete_branch(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.busy.is_some()
+            || !self.branch_picker_open
+            || self.active_root.is_none()
+            || !self.branches.as_ref().is_some_and(|list| {
+                list.current.as_deref() != Some(name.as_str())
+                    && list.local.iter().any(|branch| branch.name == name)
+            })
+        {
+            return;
+        }
+        self.busy = Some("Branch");
+        self.branch_error = None;
+        self.done = None;
+        self.branch_generation += 1;
+        let generation = self.branch_generation;
+        let (host, root) = (self.host.clone(), self.root(cx));
+        let requested_root = root.clone();
+        let deleted_name = name.clone();
+        let job = runtime::spawn(cx, async move {
+            host.git_delete_branch(DeleteBranchRequest { root, name }).await
+        });
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = job.await;
+            this.update(cx, |this, cx| {
+                this.busy = None;
+                if this.repository_root() == Some(requested_root.as_str())
+                    && this.branch_generation == generation
+                {
+                    match result {
+                        Ok(()) => {
+                            if let Some(list) = &mut this.branches {
+                                list.local.retain(|branch| branch.name != deleted_name);
+                            }
+                            this.done = Some(format!("Deleted local branch {deleted_name}."));
+                        }
+                        Err(error) => this.branch_error = Some(error.message),
+                    }
+                    this.load_branches(false, cx);
+                }
+                this.refresh(cx);
+                cx.notify();
+            })
+            .ok();
         })
         .detach();
     }
@@ -430,6 +492,7 @@ impl ScmModel {
         }
         self.busy = Some("Branch");
         self.branch_error = None;
+        self.branch_generation += 1;
         cx.notify();
         let job = runtime::spawn(cx, job);
         cx.spawn(async move |this, cx| {

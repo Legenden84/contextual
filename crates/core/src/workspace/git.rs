@@ -550,6 +550,43 @@ impl Git {
         self.branches_at(&root, fetch).await
     }
 
+    /// Deletes an exact local branch name using Git's merged-branch safety check.
+    ///
+    /// Never deletes remote refs, forces deletion, or switches the working tree.
+    /// Git also refuses branches checked out in this or another worktree.
+    pub async fn delete_branch(&self, root_input: &str, name: &str) -> Result<()> {
+        let root = self.repo_root(root_input).await?;
+        if name.is_empty() || name.starts_with('-') {
+            return Err(Error::invalid("Choose a valid local branch name."));
+        }
+        // Validate a literal ref, not --branch shorthand such as @{-1}.
+        let reference = format!("refs/heads/{name}");
+        self.must(
+            &["check-ref-format", &reference],
+            &root,
+            "Branch name check",
+        )
+        .await?;
+        self.must(
+            &["show-ref", "--verify", "--", &reference],
+            &root,
+            "Finding the local branch",
+        )
+        .await?;
+        if self.status_at(&root).await?.branch.as_deref() == Some(name) {
+            return Err(Error::conflict(
+                "Switch to another branch before deleting the current branch.",
+            ));
+        }
+        self.must(
+            &["branch", "-d", "--", name],
+            &root,
+            &format!("Deleting local branch {name}"),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Switches to a branch. A remote branch without a local copy is checked out as a new tracking branch.
     pub async fn switch_branch(&self, root_input: &str, name: &str) -> Result<GitStatus> {
         let root = self.repo_root(root_input).await?;

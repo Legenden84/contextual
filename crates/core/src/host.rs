@@ -116,6 +116,7 @@ impl dyn WorkspaceHost {
     typed!(git_branches, Branches, contextual_protocol::git::BranchesRequest => Branches(BranchList));
     typed!(git_switch, Switch, contextual_protocol::git::SwitchRequest => Status(GitStatus));
     typed!(git_create_branch, CreateBranch, contextual_protocol::git::CreateBranchRequest => Status(GitStatus));
+    typed!(git_delete_branch, DeleteBranch, contextual_protocol::git::DeleteBranchRequest => DeleteBranch(()));
     typed!(pr_compare, Compare, contextual_protocol::git::CompareRequest => Compare(Comparison));
     typed!(pr_diff, PrDiff, contextual_protocol::git::PrDiffRequest => PrDiff(PrDiff));
     typed!(pr_create, CreatePr, contextual_protocol::git::CreatePrRequest => CreatePr(PrResult));
@@ -143,6 +144,10 @@ pub async fn run_git(git: &Git, call: GitCall) -> Result<GitReply> {
             git.create_branch(&r.root, &r.name, r.from.as_deref())
                 .await?,
         ),
+        GitCall::DeleteBranch(r) => {
+            git.delete_branch(&r.root, &r.name).await?;
+            GitReply::DeleteBranch(())
+        }
         GitCall::Compare(r) => GitReply::Compare(
             git.compare(&r.root, r.base.as_deref(), r.head.as_deref())
                 .await?,

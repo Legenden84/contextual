@@ -1,5 +1,5 @@
 //! Branch quick pick (VS Code-style), opened from the branch name in the status bar or Source
-//! Control: filter, switch to a local or remote branch, or create one from the current branch.
+ //! Control: filter, switch, create, or explicitly delete a local branch.
 
 use contextual_protocol::git::BranchInfo;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -14,6 +14,7 @@ use gpui_kit::{
 use crate::state::AppModel;
 use crate::state::scm::ScmModel;
 use crate::theme::{ActiveTheme, TypeExt, hsla, px, shadow, sp};
+use crate::ui::IconButton;
 
 const W: f32 = 620.0;
 const ROW_H: f32 = 26.0;
@@ -31,6 +32,7 @@ pub struct BranchPicker {
     scm: Entity<ScmModel>,
     input: Entity<InputState>,
     creating: bool,
+    confirm_delete: Option<String>,
     _subs: Vec<Subscription>,
 }
 
@@ -49,8 +51,14 @@ impl BranchPicker {
             cx.subscribe(
                 &input,
                 |this: &mut Self, input, e: &InputEvent, cx| match e {
-                    InputEvent::Change => cx.notify(),
+                    InputEvent::Change => {
+                        this.confirm_delete = None;
+                        cx.notify();
+                    }
                     InputEvent::PressEnter { .. } => {
+                        if this.confirm_delete.is_some() || this.scm.read(cx).busy.is_some() {
+                            return;
+                        }
                         let q = input.read(cx).value().trim().to_string();
                         if this.creating {
                             if !q.is_empty() {
@@ -73,6 +81,7 @@ impl BranchPicker {
             scm,
             input,
             creating: false,
+            confirm_delete: None,
             _subs: subs,
         }
     }
@@ -109,6 +118,10 @@ impl BranchPicker {
     }
 
     fn choose(&mut self, item: Item, cx: &mut Context<Self>) {
+        if self.scm.read(cx).busy.is_some() {
+            return;
+        }
+        self.confirm_delete = None;
         let current = self
             .scm
             .read(cx)
@@ -135,6 +148,79 @@ impl BranchPicker {
 
     fn close(&mut self, cx: &mut Context<Self>) {
         self.scm.update(cx, |s, cx| s.close_branch_picker(cx));
+    }
+
+    fn delete_controls(
+        &self,
+        branch: &BranchInfo,
+        current: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let c = &cx.tokens().colors;
+        let is_current = current == Some(branch.name.as_str());
+        let busy = self.scm.read(cx).busy.is_some();
+        let confirming = self.confirm_delete.as_deref() == Some(branch.name.as_str());
+        let name = branch.name.clone();
+        let label = if is_current {
+            "Switch to another branch before deleting this branch".to_string()
+        } else if confirming {
+            format!("Confirm deletion of local branch {name}")
+        } else {
+            format!("Delete local branch {name}")
+        };
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(sp(1))
+            .when(confirming, |d| {
+                d.child(
+                    div()
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(c.danger))
+                        .child("Delete locally?"),
+                )
+                .child(
+                    IconButton::new(
+                        SharedString::from(format!("cancel-delete:{}", branch.name)),
+                        IconName::Close,
+                        "Cancel branch deletion",
+                    )
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.confirm_delete = None;
+                        cx.notify();
+                    })),
+                )
+            })
+            .child(
+                IconButton::with_glyph(
+                    SharedString::from(format!(
+                        "{}:{}",
+                        if confirming { "confirm-delete" } else { "delete-branch" },
+                        branch.name
+                    )),
+                    div()
+                        .when(confirming && !busy, |d| d.text_color(hsla(c.danger)))
+                        .child(Icon::new(IconName::Delete).size(sp(4))),
+                    label,
+                )
+                .disabled(busy || is_current)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if confirming {
+                        // A stale click must not confirm a different or cancelled review.
+                        if this.confirm_delete.as_deref() != Some(name.as_str()) {
+                            return;
+                        }
+                        this.confirm_delete = None;
+                        this.scm.update(cx, |scm, cx| scm.delete_branch(name.clone(), cx));
+                    } else {
+                        this.confirm_delete = Some(name.clone());
+                    }
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
     }
 
     fn row(
@@ -205,7 +291,11 @@ impl BranchPicker {
                 }))
                 .child(
                     div()
-                        .flex_none()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .type_style(contextual_theme::type_style::CODE_SMALL)
                         .text_color(hsla(c.ink))
                         .child(SharedString::from(b.name.clone())),
                 )
@@ -228,11 +318,15 @@ impl BranchPicker {
                         .justify_end()
                         .type_style(contextual_theme::type_style::UI_SMALL)
                         .text_color(hsla(c.ink_muted))
-                        .child(SharedString::from(format!(
-                            "{} · {} · {}",
-                            b.sha, b.subject, b.when
-                        ))),
+                        .child(SharedString::from(
+                            if self.confirm_delete.as_deref() == Some(b.name.as_str()) && !remote {
+                                String::new()
+                            } else {
+                                format!("{} · {} · {}", b.sha, b.subject, b.when)
+                            },
+                        )),
                 )
+                .when(!remote, |d| d.child(self.delete_controls(b, current, cx)))
                 .into_any_element(),
         }
     }
@@ -264,7 +358,9 @@ impl Render for BranchPicker {
             .on_mouse_down(gpui_kit::MouseButton::Left, cx.listener(|t, _, _, cx| t.close(cx)))
             .on_key_down(cx.listener(|t, e: &KeyDownEvent, _, cx| {
                 if e.keystroke.key == "escape" {
-                    if t.creating {
+                    if t.confirm_delete.take().is_some() {
+                        cx.notify();
+                    } else if t.creating {
                         t.creating = false;
                         cx.notify();
                     } else {
@@ -320,6 +416,18 @@ impl Render for BranchPicker {
                                         d.child(div().px(sp(3)).py(sp(1)).type_style(contextual_theme::type_style::UI_SMALL).text_color(hsla(c.ink_muted)).child("Loading branches…"))
                                     }))
                                 }
+                            })
+                            .when(self.confirm_delete.is_some(), |d| {
+                                d.child(
+                                    div()
+                                        .px(sp(3))
+                                        .py(sp(2))
+                                        .border_t_1()
+                                        .border_color(hsla(c.border))
+                                        .type_style(contextual_theme::type_style::UI_SMALL)
+                                        .text_color(hsla(c.ink_muted))
+                                        .child("Local branch only; the remote is unchanged. Git refuses unmerged branches. Not covered by Save/Undo."),
+                                )
                             })
                             .when(busy || error.is_some(), |d| {
                                 d.child(

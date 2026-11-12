@@ -472,6 +472,87 @@ async fn git_actions_do_not_fall_back_to_an_ancestor_repository() {
 }
 
 #[tokio::test]
+async fn delete_branch_preserves_remote_and_working_tree() {
+    let (_guard, _tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    git_cmd(&root, &["branch", "finished"]);
+    git_cmd(&root, &["push", "origin", "finished"]);
+    let before = git.status(&root).await.unwrap();
+    let remote_before = git_cmd(&root, &["ls-remote", "origin", "refs/heads/finished"]);
+
+    git.delete_branch(&root, "finished").await.unwrap();
+
+    let branches = git.list_branches(&root, false).await.unwrap();
+    assert!(!branches.local.iter().any(|branch| branch.name == "finished"));
+    assert!(
+        branches.remote.iter().any(|branch| branch.name == "origin/finished")
+    );
+    assert_eq!(git.status(&root).await.unwrap(), before);
+    assert_eq!(
+        git_cmd(&root, &["ls-remote", "origin", "refs/heads/finished"]),
+        remote_before
+    );
+}
+
+#[tokio::test]
+async fn delete_branch_refuses_current_branch() {
+    let (_guard, _tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    let current = git.status(&root).await.unwrap().branch.unwrap();
+
+    let error = git.delete_branch(&root, &current).await.unwrap_err();
+
+    assert!(error.message.contains("Switch to another branch"));
+    assert_eq!(
+        git.status(&root).await.unwrap().branch.as_deref(),
+        Some(current.as_str())
+    );
+}
+
+#[tokio::test]
+async fn delete_branch_refuses_unmerged_commits() {
+    let (_guard, _tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    git_cmd(&root, &["stash", "-u", "-q"]);
+    let original = git_cmd(&root, &["branch", "--show-current"]);
+    git_cmd(&root, &["switch", "-c", "unmerged"]);
+    git_cmd(&root, &["commit", "--allow-empty", "-m", "Keep this commit"]);
+    let tip = git_cmd(&root, &["rev-parse", "HEAD"]);
+    git_cmd(&root, &["switch", &original]);
+
+    assert!(git.delete_branch(&root, "unmerged").await.is_err());
+    assert_eq!(git_cmd(&root, &["rev-parse", "refs/heads/unmerged"]), tip);
+}
+
+#[tokio::test]
+async fn delete_branch_refuses_branches_in_other_worktrees() {
+    let (_guard, tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    let worktree = format!("{tmp}/other-worktree");
+    git_cmd(&root, &["worktree", "add", "-b", "occupied", &worktree]);
+    let tip = git_cmd(&root, &["rev-parse", "refs/heads/occupied"]);
+
+    assert!(git.delete_branch(&root, "occupied").await.is_err());
+    assert_eq!(git_cmd(&root, &["rev-parse", "refs/heads/occupied"]), tip);
+}
+
+#[tokio::test]
+async fn delete_branch_rejects_options_shorthand_and_remote_only_names() {
+    let (_guard, _tmp, root) = scripted_repo();
+    let git = Git::new(FakeGh::new(GhMode::Script));
+    let before = git.list_branches(&root, false).await.unwrap();
+
+    for name in ["", "-D", "--all", "@{-1}", "bad..name", "origin/main"] {
+        assert!(
+            git.delete_branch(&root, name).await.is_err(),
+            "must reject {name:?}"
+        );
+    }
+
+    assert_eq!(git.list_branches(&root, false).await.unwrap(), before);
+}
+
+#[tokio::test]
 async fn stage_rejects_paths_outside_the_project() {
     let (_guard, _tmp, root) = scripted_repo();
     let git = Git::new(FakeGh::new(GhMode::Script));

@@ -236,6 +236,14 @@ pub struct SwitchRequest {
     pub name: String,
 }
 
+/// Deletes only the named local branch, without forcing unmerged deletion.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBranchRequest {
+    pub root: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateBranchRequest {
@@ -303,6 +311,7 @@ pub enum GitCall {
     Branches(BranchesRequest),
     Switch(SwitchRequest),
     CreateBranch(CreateBranchRequest),
+    DeleteBranch(DeleteBranchRequest),
     Compare(CompareRequest),
     PrDiff(PrDiffRequest),
     CreatePr(CreatePrRequest),
@@ -319,6 +328,7 @@ impl GitCall {
             GitCall::Branches(r) => &r.root,
             GitCall::Switch(r) => &r.root,
             GitCall::CreateBranch(r) => &r.root,
+            GitCall::DeleteBranch(r) => &r.root,
             GitCall::Compare(r) => &r.root,
             GitCall::PrDiff(r) => &r.root,
             GitCall::CreatePr(r) => &r.root,
@@ -336,6 +346,7 @@ pub enum GitReply {
     Commit(CommitResult),
     Push(PushResult),
     Branches(BranchList),
+    DeleteBranch(()),
     Compare(Comparison),
     PrDiff(PrDiff),
     CreatePr(PrResult),
@@ -383,6 +394,26 @@ mod tests {
                 .unwrap();
         assert_eq!(req.pr.new_branch.as_deref(), Some("x"));
         assert!(!req.pr.draft);
+    }
+
+    #[test]
+    fn delete_branch_wire_shape() {
+        let call = GitCall::DeleteBranch(DeleteBranchRequest {
+            root: "/r".into(),
+            name: "feature/finished".into(),
+        });
+        let value = serde_json::to_value(&call).unwrap();
+        assert_eq!(
+            value,
+            json!({"op": "deleteBranch", "root": "/r", "name": "feature/finished"})
+        );
+        assert_eq!(call.root(), "/r");
+        assert_eq!(serde_json::from_value::<GitCall>(value).unwrap(), call);
+
+        let reply = GitReply::DeleteBranch(());
+        let value = serde_json::to_value(&reply).unwrap();
+        assert_eq!(value, json!({"op": "deleteBranch", "result": null}));
+        assert_eq!(serde_json::from_value::<GitReply>(value).unwrap(), reply);
     }
 
     #[test]
