@@ -45,7 +45,7 @@ pub struct SourceControl {
     scm: Entity<ScmModel>,
     message: Entity<TextareaState>,
     message_root: Option<String>,
-    messages: HashMap<String, String>,
+    messages: HashMap<String, Entity<TextareaState>>,
     /// Repository-qualified section ids; collapsing one group leaves the others alone.
     closed_sections: HashSet<String>,
     _subs: Vec<Subscription>,
@@ -64,29 +64,40 @@ impl SourceControl {
                 .auto_grow(3, 10)
                 .placeholder("Message (Ctrl+Enter to commit)")
         });
+        let message_root = scm.read(cx).repository_root().map(str::to_owned);
+        let input_root = message_root.clone();
         let subs = vec![
             cx.observe(&scm, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
             cx.subscribe_in(
                 &message,
                 window,
-                |this, _, e: &InputEvent, window, cx| match e {
+                move |this, _, e: &InputEvent, window, cx| match e {
                     InputEvent::Change => cx.notify(),
                     InputEvent::PressEnter {
                         secondary: true, ..
-                    } => this.commit(window, cx),
+                    } => {
+                        if let Some(root) = &input_root {
+                            this.commit_repository(root, cx);
+                        } else {
+                            this.commit(window, cx);
+                        }
+                    }
                     _ => {}
                 },
             ),
         ];
-        let message_root = scm.read(cx).repository_root().map(str::to_owned);
+        let messages = message_root
+            .iter()
+            .map(|root| (root.clone(), message.clone()))
+            .collect();
         Self {
             app,
             project,
             scm,
             message,
             message_root,
-            messages: HashMap::new(),
+            messages,
             closed_sections: HashSet::new(),
             _subs: subs,
         }
@@ -97,18 +108,48 @@ impl SourceControl {
         if self.message_root == root {
             return;
         }
-        if let Some(previous) = self.message_root.take() {
-            self.messages
-                .insert(previous, self.message.read(cx).value().to_string());
+        if let Some(root) = &root {
+            self.message = self.repository_message(root, window, cx);
         }
-        let text = root
-            .as_ref()
-            .and_then(|root| self.messages.get(root))
-            .cloned()
-            .unwrap_or_default();
         self.message_root = root;
-        self.message
-            .update(cx, |message, cx| message.set_value(text, window, cx));
+    }
+
+    fn repository_message(
+        &mut self,
+        root: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextareaState> {
+        if let Some(message) = self.messages.get(root) {
+            return message.clone();
+        }
+        let message = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(3, 10)
+                .placeholder("Message (Ctrl+Enter to commit)")
+        });
+        let input_root = root.to_string();
+        self._subs.push(cx.subscribe_in(
+            &message,
+            window,
+            move |this, _, event: &InputEvent, _, cx| match event {
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter {
+                    secondary: true, ..
+                } => this.commit_repository(&input_root, cx),
+                _ => {}
+            },
+        ));
+        self.messages.insert(root.to_string(), message.clone());
+        message
+    }
+
+    fn commit_repository(&mut self, root: &str, cx: &mut Context<Self>) {
+        let Some(message) = self.messages.get(root) else {
+            return;
+        };
+        let text = message.read(cx).value().trim().to_string();
+        self.scm.update(cx, |scm, cx| scm.commit_in(root, text, cx));
     }
 
     fn repositories(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -181,17 +222,107 @@ impl SourceControl {
 
     fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_message_scope(window, cx);
-        let text = self.message.read(cx).value().trim().to_string();
-        let s = self.scm.read(cx);
-        let has = s
-            .status
-            .as_ref()
-            .is_some_and(|st| !st.staged.is_empty() || !st.changes.is_empty());
-        if text.is_empty() || !has || s.busy.is_some() {
-            return;
+        if let Some(root) = self.message_root.clone() {
+            self.commit_repository(&root, cx);
         }
-        self.message.update(cx, |m, cx| m.set_value("", window, cx));
-        self.scm.update(cx, |s, cx| s.commit(text, cx));
+    }
+
+    fn repository_actions(
+        &mut self,
+        repository: &Repository,
+        status: &contextual_protocol::git::GitStatus,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let message = self.repository_message(&repository.root, window, cx);
+        let scm = self.scm.read(cx);
+        let busy = scm.busy.is_some();
+        let has_changes = !status.staged.is_empty() || !status.changes.is_empty();
+        let all = status.staged.is_empty() && !status.changes.is_empty();
+        let can_commit = !busy
+            && has_changes
+            && status.conflicts.is_empty()
+            && !message.read(cx).value().trim().is_empty();
+        let show_push = status.branch.is_some()
+            && (status.ahead > 0 || status.upstream.is_none());
+        let clean = !has_changes && status.conflicts.is_empty();
+        let branch = status.branch.as_deref().unwrap_or("(detached)");
+        let destination = status
+            .upstream
+            .clone()
+            .unwrap_or_else(|| format!("origin/{branch} (publish)"));
+        let commit_root = repository.root.clone();
+        let push_root = repository.root.clone();
+        let c = &cx.tokens().colors;
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(sp(2))
+            .px(sp(3))
+            .py(sp(3))
+            .child(
+                div()
+                    .type_style(contextual_theme::type_style::CODE_SMALL)
+                    .text_color(hsla(c.ink))
+                    .child(SharedString::from(format!("Branch: {branch}"))),
+            )
+            .when(status.branch.is_some(), |d| {
+                d.child(
+                    div()
+                        .type_style(contextual_theme::type_style::CODE_SMALL)
+                        .text_color(hsla(c.ink_muted))
+                        .child(SharedString::from(format!("Push to: {destination}"))),
+                )
+            })
+            .child(Textarea::new(&message))
+            .child(
+                Button::new("repository-commit", if all { "Commit all" } else { "Commit" })
+                    .icon(IconName::Check)
+                    .variant(if has_changes {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Secondary
+                    })
+                    .disabled(!can_commit)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.commit_repository(&commit_root, cx);
+                    })),
+            )
+            .when(all, |d| {
+                d.child(
+                    div()
+                        .type_style(contextual_theme::type_style::UI_SMALL)
+                        .text_color(hsla(c.ink_muted))
+                        .child("Nothing staged. Commit all includes every change in this repository."),
+                )
+            })
+            .when(show_push, |d| {
+                d.child(
+                    Button::new(
+                        "repository-push",
+                        if status.upstream.is_none() {
+                            "Publish branch".to_string()
+                        } else {
+                            format!(
+                                "Push {} {}",
+                                status.ahead,
+                                if status.ahead == 1 { "commit" } else { "commits" }
+                            )
+                        },
+                    )
+                    .icon(IconName::ArrowUp)
+                    .variant(if clean {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Secondary
+                    })
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.scm.update(cx, |scm, cx| scm.push_in(&push_root, cx));
+                    })),
+                )
+            })
     }
 
     fn row(
@@ -386,7 +517,11 @@ impl SourceControl {
             })
     }
 
-    fn grouped_changes(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn grouped_changes(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let c = &cx.tokens().colors;
         let scm = self.scm.read(cx);
         let repositories = scm.repositories.clone();
@@ -401,6 +536,14 @@ impl SourceControl {
 
         for repository in &repositories {
             let status = statuses.get(&repository.root);
+            let actions = if grouped {
+                status.map(|status| {
+                    self.repository_actions(repository, status, window, cx)
+                        .into_any_element()
+                })
+            } else {
+                None
+            };
             let pending = status.map(status_change_count).unwrap_or_default();
             let name = if repository.path.is_empty() {
                 self.project.read(cx).name.clone()
@@ -459,7 +602,8 @@ impl SourceControl {
                                 )),
                         );
                     };
-                    d.when(!status.conflicts.is_empty(), |d| {
+                    d.when_some(actions, |d, actions| d.child(actions))
+                    .when(!status.conflicts.is_empty(), |d| {
                         d.child(
                             div()
                                 .mx(sp(3))
@@ -525,6 +669,9 @@ impl Render for SourceControl {
         let repositories = self.repositories(cx);
         let c = &cx.tokens().colors;
         let s = self.scm.read(cx);
+        let per_repository = s.repositories.len() > 1
+            || s.repositories.first().is_some_and(|repository| !repository.path.is_empty());
+        let repository_name = s.repository_name(cx);
         let configured = self.app.read(cx).config.is_some();
         let has_changes = s
             .status
@@ -595,15 +742,17 @@ impl Render for SourceControl {
                                 }.to_string()),
                         )),
                 )
-                .child(self.grouped_changes(cx))
+                .child(self.grouped_changes(window, cx))
                 .into_any_element();
         };
         let busy = s.busy;
         let (error, done) = (s.error.clone(), s.done.clone());
         let all = st.staged.is_empty() && !st.changes.is_empty();
         let has_message = !self.message.read(cx).value().trim().is_empty();
-        let can_commit =
-            has_message && (!st.staged.is_empty() || !st.changes.is_empty()) && busy.is_none();
+        let can_commit = has_message
+            && (!st.staged.is_empty() || !st.changes.is_empty())
+            && st.conflicts.is_empty()
+            && busy.is_none();
         let commit_label = match busy {
             Some("Commit") => "Committing…",
             Some("Drafting") => "Drafting…",
@@ -668,6 +817,16 @@ impl Render for SourceControl {
                     .gap(sp(2))
                     .px(sp(3))
                     .pb(sp(3))
+                    .when(per_repository, |d| {
+                        d.child(
+                            div()
+                                .type_style(contextual_theme::type_style::CODE_SMALL)
+                                .text_color(hsla(c.ink))
+                                .child(SharedString::from(format!(
+                                    "Branch & pull request: {repository_name}"
+                                ))),
+                        )
+                    })
                     .child(
                         div()
                             .flex()
@@ -719,8 +878,10 @@ impl Render for SourceControl {
                                 )
                             }),
                     )
-                    .child(Textarea::new(&self.message))
-                    .child(
+                    .when(!per_repository, |d| {
+                        d.child(Textarea::new(&self.message))
+                    })
+                    .when(!per_repository, |d| d.child(
                         div().flex().flex_col().child(
                             Button::new("commit", commit_label)
                                 .icon(IconName::Check)
@@ -732,8 +893,8 @@ impl Render for SourceControl {
                                 .disabled(!can_commit)
                                 .on_click(cx.listener(|t, _, w, cx| t.commit(w, cx))),
                         ),
-                    )
-                    .when(all && busy.is_none(), |d| {
+                    ))
+                    .when(!per_repository && all && busy.is_none(), |d| {
                         d.child(
                             div()
                                 .type_style(contextual_theme::type_style::UI_SMALL)
@@ -741,7 +902,7 @@ impl Render for SourceControl {
                                 .child("Nothing staged. Commit all includes every change in this repository."),
                         )
                     })
-                    .when(show_push, |d| {
+                    .when(!per_repository && show_push, |d| {
                         d.child(
                             div().flex().flex_col().child(
                                 Button::new("push", push_label)
@@ -813,7 +974,7 @@ impl Render for SourceControl {
                             })),
                     ),
             )
-            .child(self.grouped_changes(cx))
+            .child(self.grouped_changes(window, cx))
             .into_any_element()
     }
 }

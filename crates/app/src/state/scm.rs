@@ -327,19 +327,42 @@ impl ScmModel {
         );
     }
 
-    /// Commits the staged changes, or everything when nothing is staged (smart commit).
+    /// Commits the selected repository.
     pub fn commit(&mut self, message: String, cx: &mut Context<Self>) {
-        let all = self
-            .status
-            .as_ref()
-            .is_some_and(|s| s.staged.is_empty() && !s.changes.is_empty());
-        let (host, root) = (self.host.clone(), self.root(cx));
+        let root = self.root(cx);
+        self.commit_in(&root, message, cx);
+    }
+
+    /// Commits only the named repository, without changing the branch/PR selection.
+    pub fn commit_in(&mut self, root: &str, message: String, cx: &mut Context<Self>) {
+        let Some(status) = self.repository_statuses.get(root) else {
+            return;
+        };
+        if self.busy.is_some()
+            || message.trim().is_empty()
+            || !status.conflicts.is_empty()
+            || (status.staged.is_empty() && status.changes.is_empty())
+            || !self.repositories.iter().any(|repository| repository.root == root)
+        {
+            return;
+        }
+        let all = status.staged.is_empty() && !status.changes.is_empty();
+        let (host, root) = (self.host.clone(), root.to_string());
+        let scope = root.clone();
+        let error_scope = root.clone();
         self.act(
             "Commit",
-            async move { host.git_commit(CommitRequest { root, message, all }).await },
-            |this, r| {
+            async move {
+                host.git_commit(CommitRequest { root, message, all })
+                    .await
+                    .map_err(|mut error| {
+                        error.message = format!("{error_scope}: {}", error.message);
+                        error
+                    })
+            },
+            move |this, r| {
                 this.done = Some(format!(
-                    "Committed {} {} as {}.",
+                    "{scope}: committed {} {} as {}.",
                     r.files,
                     if r.files == 1 { "file" } else { "files" },
                     r.commit
@@ -350,11 +373,37 @@ impl ScmModel {
     }
 
     pub fn push(&mut self, cx: &mut Context<Self>) {
-        let (host, root) = (self.host.clone(), self.root(cx));
+        let root = self.root(cx);
+        self.push_in(&root, cx);
+    }
+
+    /// Pushes or publishes only the named repository's checked-out branch.
+    pub fn push_in(&mut self, root: &str, cx: &mut Context<Self>) {
+        if self.busy.is_some()
+            || !self.repositories.iter().any(|repository| repository.root == root)
+            || !self
+                .repository_statuses
+                .get(root)
+                .is_some_and(|status| status.branch.is_some())
+        {
+            return;
+        }
+        let (host, root) = (self.host.clone(), root.to_string());
+        let scope = root.clone();
+        let error_scope = root.clone();
         self.act(
             "Push",
-            async move { host.git_push(RootRequest { root }).await },
-            |this, r| this.done = Some(format!("Pushed {} to {}.", r.branch, r.upstream)),
+            async move {
+                host.git_push(RootRequest { root })
+                    .await
+                    .map_err(|mut error| {
+                        error.message = format!("{error_scope}: {}", error.message);
+                        error
+                    })
+            },
+            move |this, r| {
+                this.done = Some(format!("{scope}: pushed {} to {}.", r.branch, r.upstream))
+            },
             cx,
         );
     }

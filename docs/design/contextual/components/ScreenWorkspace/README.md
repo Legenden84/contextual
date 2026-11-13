@@ -75,9 +75,14 @@ The main workspace with a project open, files selected and a finished assistant 
 - With nested repositories, show their workspace-relative names, branches and pending
   file counts above the Git controls. Select the first discovered repository initially
   and retain the selection across rescans while it exists.
-- Repository selection scopes commit, push, branch and PR actions only. Chat, file
-  selection and Save/Undo remain workspace-wide. Commit-message drafts are retained
-  separately per repository.
+- With multiple or nested repositories, each repository group owns its commit-message
+  input and Commit / Commit all and Push / Publish controls. Show its checked-out branch
+  and upstream beside those controls. Each action explicitly targets the containing
+  repository, independent of the selected branch/PR scope.
+- Repository selection scopes branch switching, AI commit-message drafting and PR review.
+  Name that scope above the branch control. AI drafting fills that repository's input.
+  Chat, file selection and Save/Undo remain workspace-wide. Commit-message drafts are
+  retained separately per repository, including after a failed commit.
 - List pending files from all discovered repositories, grouped under repository names
   and file counts. Each group has independently collapsible Staged changes and Changes
   sections, its own conflict notice, and a clean-state message when empty.
@@ -87,7 +92,9 @@ The main workspace with a project open, files selected and a finished assistant 
 - A diff tab keeps its original repository even after another repository is selected.
   Branch and pull-request reviews name their repository; a PR review keeps that scope
   until closed. Never combine commits or pushes across repositories.
-- Keep branch selection, commit, push/publish and pull-request comparison together.
+- Keep each repository's commit and push/publish controls together with its branch and
+  upstream labels. Single-repository workspaces retain the compact combined workflow.
+  Never offer a workspace-wide commit or push.
 - The branch picker places a trash-can control at the right end of each local branch
   row, disabled for the current branch. Remote rows have no deletion action.
 - Deletion requires inline confirmation on that same row: “Delete locally?”, an
