@@ -1180,7 +1180,9 @@ impl ChatPanel {
                                                     .child(SharedString::from(label)),
                                             )
                                     })),
-                            ),
+                            )
+                            // Paint above the composer border and other chat controls.
+                            .map(gpui_kit::deferred),
                     )
                 })
                 .into_any_element(),
