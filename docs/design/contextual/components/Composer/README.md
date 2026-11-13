@@ -45,20 +45,17 @@ This is Markdown typing assistance, not a rich-text editor or formatting toolbar
 
 ## Activity and attachments
 
-A single activity indicator sits between the attachment control and Send/Stop. Its fixed-size
-code-flow mark has three horizontal strokes; a soft accent highlight passes through them in
-a 1.8-second loop. Only stroke opacity changes: no bouncing, rotation, animated text, glow or
-layout movement. The steady small-text label follows actual work: Preparing context, Waiting
-for response, Writing response, Reading files, Checking edits, Saving changes, Undoing changes
-or Stopping. Writing a response never means writing project files.
+Model activity appears beneath the active assistant reply's model header, not in the composer.
+This keeps the response area visibly active while waiting for text without duplicating its
+status beside Send/Stop. Labels describe observable work, never private model reasoning.
 
-Image preparation uses the same indicator. The native image picker and an over-limit read
-request instead show static states, Choose images and Waiting for your approval. Idle, completed
-and failed operations have no activity mark. The active assistant reply also shows its observable
-activity beneath the model header, so the response area never looks idle while waiting for text.
-Neither location invents a Thinking label or exposes private model reasoning.
-The mark keeps its animation identity across phase changes and has no independent background
-timer. Settings → Appearance → Reduce motion uses a static mark with the same readable labels.
+The composer reserves its status area between the attachment control and Send/Stop for image
+preparation and user decisions. Preparing images uses a fixed-size code-flow mark with three
+horizontal strokes; a soft accent highlight passes through them in a 1.8-second loop.
+Only stroke opacity changes: no bouncing, rotation, animated text, glow or layout movement.
+The native image picker and an over-limit read request show static states, Choose images and
+Waiting for your approval. Idle, completed and failed operations have no activity mark.
+Settings → Appearance → Reduce motion uses a static mark with the same readable label.
 
 An icon-only Lucide **brain** control sits at the right of the context bar above the message
 input, with the tooltip **Inspect conversation**. It opens the existing Inspect tab showing

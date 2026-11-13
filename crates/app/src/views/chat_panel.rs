@@ -1645,16 +1645,12 @@ impl Render for ChatPanel {
         let saving = chat.saving;
         let empty = chat.messages.is_empty();
         let reduce_motion = self.app.read(cx).settings.reduce_motion;
-        // One stable location for all foreground work. User decisions are not busy work,
-        // so approval and the native picker show a static mark rather than an animation.
+        // Model activity stays beneath the reply header; only attachment and approval
+        // states belong in the composer.
         let activity: Option<(SharedString, bool)> = chat
-            .activity_text()
-            .map(|text| (text.into(), true))
-            .or_else(|| {
-                chat.pending
-                    .as_ref()
-                    .map(|_| ("Waiting for your approval".into(), false))
-            })
+            .pending
+            .as_ref()
+            .map(|_| ("Waiting for your approval".into(), false))
             .or_else(|| {
                 if self.image_picker_open {
                     Some(("Choose images".into(), false))
