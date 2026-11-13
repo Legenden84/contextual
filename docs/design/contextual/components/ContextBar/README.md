@@ -16,8 +16,9 @@ accounting separately so streaming does not rescan the transcript.
 
 This is a heuristic estimate, not provider-reported usage or cumulative billed tokens.
 Text and image estimates are approximate. The display rounds to 100 tokens and the draft
-currently uses a fixed 96-token allowance rather than its actual typed length. Explain these
-limitations in the tooltip.
+currently uses a fixed 96-token allowance rather than its actual typed length.
+Keep the tooltip to three short lines: next-round input includes chat history; it is not
+billed usage and draft size is approximated; cost assumes 1,800 output tokens with no cache discount.
 
 Keep the summary focused on input context; do not show a completion-limit label or reasoning
 disclaimer. The send-time safety check reserves output and an estimation margin, so a request

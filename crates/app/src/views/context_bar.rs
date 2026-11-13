@@ -205,17 +205,9 @@ pub fn context_bar(
     let pct = (t.share * 100.0).round() as u64;
     let priced = deployment.priced();
     let detail = format!(
-        "Estimated input for the next API round, not cumulative billed usage. \
-         Includes earlier messages and replies, instructions, and new context. \
-         Saving or deselecting files does not erase earlier conversation.\n\n\
-         The draft uses a fixed allowance of {} tokens; it is not counted as you type. \
-         Text and image counts are approximate and the display rounds to 100 tokens. \
-         While streaming, the current input and reply are provisional; stopped or failed \
-         rounds are removed from the estimate.\n\n\
-         Cost assumes {} output tokens, no cache discount, and one API round. \
-         Automatic reads and edit repair can add more rounds. The send-time safety \
-         check can reject a request before the gauge reaches 100%.",
-        USER_MESSAGE_TOKENS,
+        "Estimated next-round input, including chat history.\n\
+         Not billed usage; draft size is approximated.\n\
+         Cost assumes {} output tokens, no cache discount.",
         fmt_n(EST_OUTPUT_TOKENS),
     );
 
