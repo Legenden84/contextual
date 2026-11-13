@@ -558,6 +558,19 @@ impl ChatModel {
         if self.streaming() || self.saving {
             return;
         }
+        if let Some(routing) = &env.routing
+            && let Some(name) = &routing.pinned
+            && routing.routing.get(name).is_none()
+        {
+            self.note(
+                format!(
+                    "Not sent: the selected model \"{name}\" is no longer configured. Choose another model or Auto."
+                ),
+                Tone::Warn,
+            );
+            cx.notify();
+            return;
+        }
         if self.command_running() {
             // Continuing would have to answer the running command's call.
             self.note(
@@ -1964,18 +1977,25 @@ impl ChatModel {
         env
     }
 
-    /// Several models: the next choice of the model picker, in the order Auto, then each
-    /// model from the least capable. Applies from the next message.
-    pub fn cycle_pinned_model(&mut self, routing: &Routing, cx: &mut Context<Self>) {
-        let at = self
-            .pinned_model
-            .as_deref()
-            .and_then(|name| routing.models.iter().position(|m| m.name == name));
-        self.pinned_model = match at {
-            None => routing.models.first(),
-            Some(i) => routing.models.get(i + 1),
+    /// Selects the model for new messages. `None` restores automatic routing.
+    pub fn set_pinned_model(
+        &mut self,
+        name: Option<&str>,
+        routing: &Routing,
+        cx: &mut Context<Self>,
+    ) {
+        if self.streaming() {
+            return;
         }
-        .map(|m| m.name.clone());
+        self.pinned_model = match name {
+            None => None,
+            Some(name) => {
+                let Some(model) = routing.get(name) else {
+                    return;
+                };
+                Some(model.name.clone())
+            }
+        };
         cx.notify();
     }
 

@@ -71,13 +71,23 @@ An icon-only **+** control beside Send opens a small attachment menu, initially 
 **Add attachment**. Enter or Space opens the menu and activates its item; Escape closes it.
 Clicking outside dismisses the menu. More attachment types can be added here later.
 
-When several models are configured, a ghost text button next to the **+** control shows the
-model for this chat: **Auto** (the routing model chooses for each message) or the label of a
-model the user picked. Pressing it moves to the next choice: Auto, then each model from the
-least capable. Its tooltip says what the current choice means. The choice applies from the
-next message, returns to Auto in a new or reopened chat, and the control is unavailable while
-a response is in progress. With one model there is no such control. The activity label while
-the routing model works is **Choosing a model**.
+When named models are configured, a ghost text button with a chevron next to the **+** control
+shows **Auto** or the model picked for this chat. It opens a selector containing **Auto** and
+one option for every configured model, ordered from least capable. Model options show their
+label and configured short name so deployments with the same label remain distinguishable.
+A check marks the current choice. Long lists scroll.
+
+Click, Enter, Space or an arrow key opens the selector at the current choice. Up/Down and
+Home/End move keyboard focus; Enter or Space selects. Escape closes without changing the
+choice, Tab closes and leaves the control, and clicking outside dismisses it.
+
+**Auto** lets the routing model choose for each new message. Choosing a specific model sends
+new messages directly to it without calling the router; that model can still request files.
+A selected model removed from settings is shown as unavailable: choose another model or Auto
+rather than silently routing the message. The choice applies from the next message and returns
+to Auto in a new or reopened chat. Follow-up rounds of an existing reply retain its model.
+The selector is unavailable while a response is in progress. A legacy single deployment has
+no selector. The activity label while automatic routing works is **Choosing a model**.
 
 The text box accepts images and copied image files through the normal paste shortcut.
 Image files can be dropped anywhere in the chat pane, including the thread and the composer.

@@ -58,6 +58,9 @@ pub struct ChatPanel {
     image_error: Option<String>,
     attachment_menu_open: bool,
     attachment_focus: FocusHandle,
+    model_menu_open: bool,
+    model_focus: FocusHandle,
+    model_option_focus: Vec<FocusHandle>,
     inspect_focus: FocusHandle,
     settings_prompt_open: bool,
     settings_prompt_focus: FocusHandle,
@@ -189,6 +192,7 @@ impl ChatPanel {
                 }
                 if replaced || chat.streaming() {
                     this.attachment_menu_open = false;
+                    this.model_menu_open = false;
                 }
                 if replaced {
                     this.command_edit = None;
@@ -259,6 +263,8 @@ impl ChatPanel {
             cx.observe(&diffs, |_, _, cx| cx.notify()),
             cx.observe(&project, |_, _, cx| cx.notify()),
             cx.observe(&app, |this, app, cx| {
+                // Settings may have replaced or reordered the configured models.
+                this.model_menu_open = false;
                 if app.read(cx).screen != crate::state::Screen::Workspace {
                     this.settings_prompt_open = false;
                 }
@@ -306,6 +312,9 @@ impl ChatPanel {
             image_error: None,
             attachment_menu_open: false,
             attachment_focus: cx.focus_handle(),
+            model_menu_open: false,
+            model_focus: cx.focus_handle(),
+            model_option_focus: Vec::new(),
             inspect_focus: cx.focus_handle(),
             settings_prompt_open: false,
             settings_prompt_focus: cx.focus_handle(),
@@ -852,6 +861,7 @@ impl ChatPanel {
                             t.choose_images(cx);
                             t.focus_input(window, cx);
                         } else {
+                            t.model_menu_open = false;
                             t.attachment_menu_open = true;
                             cx.notify();
                         }
@@ -864,6 +874,7 @@ impl ChatPanel {
                     .disabled(disabled)
                     .on_click(cx.listener(|t, _, window, cx| {
                         window.focus(&t.attachment_focus, cx);
+                        t.model_menu_open = false;
                         t.attachment_menu_open = !t.attachment_menu_open;
                         cx.notify();
                     })),
@@ -935,44 +946,243 @@ impl ChatPanel {
             .into_any_element()
     }
 
-    /// Several models: "Auto" (the routing model chooses for each message) or the model
-    /// picked for this chat. Pressing it moves to the next choice.
+    fn open_model_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.chat.read(cx).streaming() {
+            return;
+        }
+        let Some(routing) = self.app.read(cx).routing.as_ref() else {
+            return;
+        };
+        let count = routing.models.len() + 1;
+        let selected = self
+            .chat
+            .read(cx)
+            .pinned_model
+            .as_deref()
+            .and_then(|name| routing.get(name))
+            .and_then(|model| routing.models.iter().position(|m| m.name == model.name))
+            .map_or(0, |index| index + 1);
+        self.model_option_focus = (0..count).map(|_| cx.focus_handle()).collect();
+        self.attachment_menu_open = false;
+        self.model_menu_open = true;
+        window.focus(&self.model_option_focus[selected], cx);
+        cx.notify();
+    }
+
+    fn close_model_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.model_menu_open = false;
+        window.focus(&self.model_focus, cx);
+        cx.notify();
+    }
+
+    fn select_model(
+        &mut self,
+        name: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Resolve against today's settings, not the settings when the menu was rendered.
+        if let Some(routing) = self.app.read(cx).routing.clone() {
+            self.chat
+                .update(cx, |chat, cx| chat.set_pinned_model(name, &routing, cx));
+        }
+        self.close_model_menu(window, cx);
+    }
+
+    /// Auto routes new messages; an explicit choice sends them directly to that model.
     fn model_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let routing = self.app.read(cx).routing.clone()?;
+        let routing = self.app.read(cx).routing.as_ref()?;
         let chat = self.chat.read(cx);
         let pinned = chat
             .pinned_model
             .as_deref()
             .and_then(|name| routing.get(name));
-        let label = pinned.map_or_else(|| "Auto".to_string(), |m| m.label().to_string());
-        let tip = match pinned {
-            None => format!(
-                "Model: Auto. {} reads each message first and chooses the model that answers it. Press to pick a model yourself.",
-                routing.router().label()
+        let selected = pinned.map(|m| m.name.clone());
+        let label = match (pinned, chat.pinned_model.as_deref()) {
+            (Some(model), _) => model.label().to_string(),
+            (None, Some(name)) => format!("{name} (unavailable)"),
+            (None, None) => "Auto".to_string(),
+        };
+        let tip = match (pinned, chat.pinned_model.as_deref()) {
+            (Some(model), _) => format!(
+                "Model: {}. New messages go directly to this model without routing. Open to choose a model.",
+                model.label()
             ),
-            Some(m) => format!(
-                "Model: {}, for every message in this chat. Press for the next model or Auto.",
-                m.label()
+            (None, Some(_)) => {
+                "The selected model is no longer configured. Choose another model or Auto."
+                    .to_string()
+            }
+            (None, None) => format!(
+                "Model: Auto. {} chooses the model that answers each new message. Open to choose a model yourself.",
+                routing.router().label()
             ),
         };
         let disabled = chat.streaming();
+        let automatic = chat.pinned_model.is_none();
+        let choices = std::iter::once((None, "Auto".to_string()))
+            .chain(routing.models.iter().map(|model| {
+                (
+                    Some(model.name.clone()),
+                    format!("{} ({})", model.label(), model.name),
+                )
+            }));
+        let c = &cx.tokens().colors;
         Some(
             div()
                 .id("model-control-tooltip")
+                .relative()
                 .flex_none()
+                .track_focus(&self.model_focus)
+                .when(!disabled, |d| d.tab_index(0))
+                .rounded(px(contextual_theme::radius::SM))
+                .border_1()
+                .border_color(hsla(c.surface_200))
+                .focus(|s| s.border_color(hsla(c.focus_ring)))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down_out(cx.listener(|t, _, _, cx| {
+                    if t.model_menu_open {
+                        t.model_menu_open = false;
+                        cx.notify();
+                    }
+                }))
+                .on_key_down(cx.listener(|t, e: &KeyDownEvent, window, cx| {
+                    if matches!(e.keystroke.key.as_str(), "enter" | "space" | "down" | "up")
+                        && !t.chat.read(cx).streaming()
+                    {
+                        cx.stop_propagation();
+                        t.open_model_menu(window, cx);
+                    }
+                }))
                 .tooltip(move |window, cx| {
                     gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                 })
                 .child(
                     Button::new("model-control", label)
+                        .icon(IconName::ChevronDown)
                         .variant(ButtonVariant::Ghost)
                         .size(ButtonSize::Xs)
                         .disabled(disabled)
-                        .on_click(cx.listener(move |t, _, _, cx| {
-                            t.chat
-                                .update(cx, |chat, cx| chat.cycle_pinned_model(&routing, cx));
+                        .on_click(cx.listener(|t, _, window, cx| {
+                            if t.model_menu_open {
+                                t.close_model_menu(window, cx);
+                            } else {
+                                t.open_model_menu(window, cx);
+                            }
                         })),
                 )
+                .when(self.model_menu_open && !disabled, |d| {
+                    d.child(
+                        div()
+                            .id("model-menu")
+                            .absolute()
+                            .bottom(control_height() + sp(1))
+                            .left_0()
+                            .w(px(layout::EXPLORER_WIDTH))
+                            .p(sp(1))
+                            .rounded(px(contextual_theme::radius::MD))
+                            .border_1()
+                            .border_color(hsla(c.border_strong))
+                            .bg(hsla(c.surface_200))
+                            .shadow(vec![shadow(cx.tokens().shadows.popover)])
+                            .occlude()
+                            .child(
+                                div()
+                                    .id("model-options")
+                                    .max_h(control_height() * 8.0)
+                                    .overflow_y_scroll()
+                                    .children(choices.enumerate().map(|(index, (name, label))| {
+                                        let checked = match &name {
+                                            None => automatic,
+                                            Some(name) => selected.as_ref() == Some(name),
+                                        };
+                                        let keyboard_name = name.clone();
+                                        div()
+                                            .id(("model-option", index))
+                                            .when_some(
+                                                self.model_option_focus.get(index),
+                                                |d, focus| d.track_focus(focus),
+                                            )
+                                            .flex()
+                                            .items_center()
+                                            .gap(sp(2))
+                                            .min_h(control_height())
+                                            .px(sp(2))
+                                            .py(sp(1))
+                                            .rounded(px(contextual_theme::radius::SM))
+                                            .border_1()
+                                            .border_color(hsla(c.surface_200))
+                                            .text_color(hsla(c.ink))
+                                            .hover(|s| s.bg(hsla(c.surface_hover)))
+                                            .focus(|s| {
+                                                s.bg(hsla(c.surface_selected))
+                                                    .border_color(hsla(c.focus_ring))
+                                            })
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(move |t, _, window, cx| {
+                                                t.select_model(name.as_deref(), window, cx);
+                                            }))
+                                            .on_key_down(cx.listener(
+                                                move |t, e: &KeyDownEvent, window, cx| {
+                                                    let count = t.model_option_focus.len();
+                                                    let next = match e.keystroke.key.as_str() {
+                                                        "enter" | "space" => {
+                                                            cx.stop_propagation();
+                                                            t.select_model(
+                                                                keyboard_name.as_deref(),
+                                                                window,
+                                                                cx,
+                                                            );
+                                                            return;
+                                                        }
+                                                        "escape" => {
+                                                            cx.stop_propagation();
+                                                            t.close_model_menu(window, cx);
+                                                            return;
+                                                        }
+                                                        "tab" => {
+                                                            t.close_model_menu(window, cx);
+                                                            return;
+                                                        }
+                                                        "up" => {
+                                                            index.checked_sub(1).unwrap_or(count - 1)
+                                                        }
+                                                        "down" => (index + 1) % count,
+                                                        "home" => 0,
+                                                        "end" => count - 1,
+                                                        _ => return,
+                                                    };
+                                                    cx.stop_propagation();
+                                                    if let Some(focus) =
+                                                        t.model_option_focus.get(next)
+                                                    {
+                                                        window.focus(focus, cx);
+                                                    }
+                                                },
+                                            ))
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .w(sp(4))
+                                                    .when(checked, |d| {
+                                                        d.child(
+                                                            Icon::new(IconName::Check).size(sp(4)),
+                                                        )
+                                                    }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .whitespace_normal()
+                                                    .type_style(
+                                                        contextual_theme::type_style::CODE_SMALL,
+                                                    )
+                                                    .child(SharedString::from(label)),
+                                            )
+                                    })),
+                            ),
+                    )
+                })
                 .into_any_element(),
         )
     }
