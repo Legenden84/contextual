@@ -620,14 +620,25 @@ impl ChatModel {
                             model
                         }),
                 };
-                if let Some(model) = chosen {
-                    env.use_model(&model);
-                    if this
-                        .update(cx, |this, _| this.thread.use_model(&model.name))
-                        .is_err()
-                    {
-                        return;
-                    }
+                let Some(model) = chosen else {
+                    // No implicit answering deployment when routing requires a user choice.
+                    let _ = this.update(cx, |this, cx| {
+                        this.cancel = None;
+                        this.capacity_wait = None;
+                        if token.is_cancelled() {
+                            this.note(STOPPED, Tone::Warn);
+                        }
+                        this.save_thread(cx);
+                        cx.notify();
+                    });
+                    return;
+                };
+                env.use_model(&model);
+                if this
+                    .update(cx, |this, _| this.thread.use_model(&model.name))
+                    .is_err()
+                {
+                    return;
                 }
             }
             let Ok(job) = this.update(cx, |this, cx| {
@@ -813,8 +824,9 @@ impl ChatModel {
     /// with. Its rounds are a conversation of their own: they are kept for the Inspect view
     /// and shown as one row in the chat, and the model that answers never sees them.
     ///
-    /// When routing does not end in a decision, the chat stays on its model, or goes to the
-    /// most capable one: never to a cheaper guess. `None` when the turn was stopped.
+    /// An invalid reply gets one corrective round on the same router and context.
+    /// If routing still fails, keep the current offered model or ask the user to choose.
+    /// `None` means stopped or awaiting an explicit model choice; no answer is sent.
     async fn choose_model(
         this: &gpui_kit::WeakEntity<Self>,
         request: &str,
@@ -881,7 +893,9 @@ impl ChatModel {
         let (mut files_read, mut tokens_read) = (0usize, 0u64);
         let mut decision: Option<route::Decision> = None;
         let mut failure: Option<String> = None;
-        for round in 0..=LIMITS.rounds {
+        let mut round = 0;
+        let mut corrected = false;
+        loop {
             let alive = this.update(cx, |this, cx| {
                 this.live = Some(LiveRound {
                     input: prepared.input.clone(),
@@ -930,20 +944,44 @@ impl ChatModel {
                 scout.response_id = response_id;
                 scout.api = Some(api);
             }
-            if let Some(answer) = route::parse_route(&got.reply) {
-                match route::decide(&answer, &offered) {
-                    Some(d) => decision = Some(d),
-                    None => {
-                        failure = Some(format!(
-                            "The routing model named \"{}\", which is not one of the configured models.",
-                            answer.model
-                        ));
-                    }
+            let answer = route::parse_route(&got.reply);
+            let request = reads::parse_read_request(&got.reply);
+            let invalid = if let Some(answer) = answer {
+                if let Some(d) = route::decide(&answer, &offered) {
+                    decision = Some(d);
+                    break;
                 }
-                break;
+                Some(format!(
+                    "The routing model named \"{}\", which is not one of the offered models.",
+                    answer.model
+                ))
+            } else if request.is_none() || corrected {
+                Some("The routing model did not name a model.".to_string())
+            } else {
+                None
+            };
+            if let Some(message) = invalid {
+                if corrected {
+                    failure = Some(message);
+                    break;
+                }
+                corrected = true;
+                let selected = scout.file_versions.keys().cloned().collect();
+                prepared = chat::prepare_turn(
+                    &scout,
+                    &[],
+                    &selected,
+                    route::ROUTE_REPAIR_PROMPT,
+                    &[],
+                    0,
+                    TurnOptions {
+                        followup: true,
+                        ..TurnOptions::default()
+                    },
+                );
+                continue;
             }
-            let Some(request) = reads::parse_read_request(&got.reply) else {
-                failure = Some("The routing model did not name a model.".into());
+            let Some(request) = request else {
                 break;
             };
             if round == LIMITS.rounds {
@@ -1025,6 +1063,7 @@ impl ChatModel {
                     ..TurnOptions::default()
                 },
             );
+            round += 1;
         }
 
         let stopped = token.is_cancelled();
@@ -1056,8 +1095,33 @@ impl ChatModel {
                     d.raised_from,
                 ),
                 None => {
-                    let name = &route::fallback(&offered, previous.as_deref())?.name;
-                    (routing.get(name)?.clone(), Vec::new(), String::new(), None)
+                    let fallback = route::fallback(&offered, previous.as_deref())
+                        .and_then(|candidate| routing.get(&candidate.name));
+                    let Some(model) = fallback else {
+                        let cause = failure
+                            .as_deref()
+                            .unwrap_or("No routing decision was available.");
+                        // Keep the router's usage and read log, but do not manufacture a
+                        // routing result that claims an answering model was selected.
+                        if let Some(m) = position.and_then(|i| this.messages.get_mut(i)) {
+                            m.streaming = false;
+                            m.reads = (log != ReadLog::default()).then(|| log.clone());
+                            m.text = format!(
+                                "Routing failed: {cause}\n\nNo answering model was called. \
+                                 Choose a model using the selector beside +, then resend your request."
+                            );
+                            if let Some(u) = usage_total {
+                                let (meta, cost) = chat::usage_meta(&u, &router.deployment);
+                                m.meta = Some(meta);
+                                m.usage = Some(u);
+                                m.cost = cost;
+                            }
+                        }
+                        this.save_thread(cx);
+                        cx.notify();
+                        return None;
+                    };
+                    (model.clone(), Vec::new(), String::new(), None)
                 }
             };
             // Only files of this project that may be sent, within what one message may read.
@@ -1677,6 +1741,26 @@ impl ChatModel {
     /// A command started from this chat is running.
     pub fn command_running(&self) -> bool {
         self.running.is_some()
+    }
+
+    /// Refuses project navigation while work could be left unobserved or unfinished.
+    pub fn can_switch_project(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.streaming()
+            || self.saving
+            || self.command_running()
+            || self.command_cards.values().any(|card| card.starting)
+            || self.project.read(cx).commands.busy()
+        {
+            self.toast = Some(Toast {
+                title: "Project is busy".into(),
+                detail: "Wait for the current operation to finish, or stop it before switching projects. If a command's outcome is unknown, check it first.".into(),
+                error: true,
+                backup_id: None,
+            });
+            cx.notify();
+            return false;
+        }
+        true
     }
 
     /// Registers what to do when a command may have changed files: rescan the project,

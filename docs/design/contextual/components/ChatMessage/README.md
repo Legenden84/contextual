@@ -12,4 +12,12 @@ Only the trailing file action being written animates, using the quiet code-flow 
 
 With several models, each message of the user is followed by a short entry under the routing model's name: its context-read row if it read files, then a routing row, "Chose <model>" with what applies of "one tier above <model> (unsure)", "switched from <model>" and "<n> files handed over", the routing model's one-sentence reason below it in muted ink, and the handed-over paths in small code type. Its header carries the routing model's own tokens and cost. When routing fails, the row has a warning mark and says "Could not choose a model · using <model>" with the cause. The entry has no reply text. The answer follows under the chosen model's name. In Inspect, routing rounds carry a "routing" tag and every round names its model.
 
+An invalid routing reply receives one corrective follow-up using the same router and its
+existing context; the follow-up requires a decision without further file reads. Both rounds
+remain inspectable and their usage is included in the routing entry. If routing still fails,
+the chat keeps its current model only when that model is still offered. Otherwise the routing
+entry says that no answering model was called and asks the user to choose a model with the
+composer selector and resend the request. A routing failure never automatically selects the
+strongest model.
+
 A footer row summarises the detected changes with a Review diff button.

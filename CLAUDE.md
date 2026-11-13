@@ -13,8 +13,11 @@ variables; endpoint, key and API version are shared). No model is built in: depl
 limit and prices are what the user imports or types under Settings → Models. The routing model (`foundry.router`,
 `AZURE_OPENAI_ROUTER`) then reads each message first — the project tree and the files it asks
 for, in a conversation of its own — and names the model that answers and the files it starts
-with. Low confidence moves one tier up; a routing that fails stays on the chat's model or goes
-to the most capable one. Another model than the chat's last one is sent the whole transcript.
+with. Low confidence moves one tier up. An invalid routing reply gets one corrective round
+using the same router and context. If routing still fails, it keeps the chat's current model
+only when still offered; otherwise no answering model is called and the user chooses a model
+and resends the request. Failure never automatically selects the strongest model.
+Another model than the chat's last one is sent the whole transcript.
 The composer's model control pins a model for a chat instead.
 
 Native Rust app on GPUI for **Windows and macOS**; on Windows it also opens projects inside WSL

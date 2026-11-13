@@ -104,7 +104,14 @@ pub fn status_bar(app: &Entity<AppModel>, cx: &App) -> impl IntoElement + use<> 
         .type_style(contextual_theme::type_style::UI_SMALL)
         .text_color(hsla(c.ink_muted))
         .map(|d| match a.screen {
-            Screen::Welcome => d.child(foundry).child(div().flex_1()).child("No project"),
+            Screen::Welcome => d
+                .child(foundry)
+                .child(div().flex_1())
+                .child(if a.project.is_some() {
+                    "Project open"
+                } else {
+                    "No project"
+                }),
             _ => d
                 .when_some(branch, |d, b| {
                     d.child(

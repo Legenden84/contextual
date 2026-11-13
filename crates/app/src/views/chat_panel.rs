@@ -30,7 +30,7 @@ use crate::runtime;
 use crate::state::chat::{CenterView, ChatActivity, ChatModel, RoutingEnv, SendEnv};
 use crate::state::{AppModel, Project};
 use crate::theme::{ActiveTheme, ListZoom, TypeExt, control_height, hsla, px, shadow, sp};
-use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark, completed_mark};
+use crate::ui::{Button, ButtonSize, ButtonVariant, IconButton, activity_mark, completed_mark, logo};
 use crate::views::context_bar::{ContextCache, context_bar};
 use crate::views::diff_cache::{DiffCache, ensure_message, message_key};
 use crate::views::markdown::{CodeViews, ReplyCache, render_reply};
@@ -1679,22 +1679,51 @@ impl Render for ChatPanel {
             div()
                 .flex()
                 .flex_1()
+                .min_w_0()
                 .min_h_0()
                 .items_center()
                 .justify_center()
+                .p(sp(4))
                 .child(
                     div()
                         .flex()
                         .flex_col()
+                        .min_w_0()
                         .items_center()
-                        .gap(sp(2))
+                        .gap(sp(3))
+                        .text_center()
                         .type_style(contextual_theme::type_style::UI_PROSE)
                         .text_color(hsla(c.ink_muted))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(sp(3))
+                                .child(div().w(sp(8)).h(px(1.0)).bg(hsla(c.border_strong)))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .p(sp(4))
+                                        .rounded(px(contextual_theme::radius::LG))
+                                        .border_1()
+                                        .border_color(hsla(c.border))
+                                        .bg(hsla(c.surface_200))
+                                        .child(logo(32.0, cx)),
+                                )
+                                .child(div().w(sp(8)).h(px(1.0)).bg(hsla(c.border_strong))),
+                        )
                         .child(
                             div()
                                 .type_style(contextual_theme::type_style::UI_TITLE)
                                 .text_color(hsla(c.ink_strong))
                                 .child("Ask for a change"),
+                        )
+                        .child(
+                            div()
+                                .whitespace_normal()
+                                .child("Describe a change, then review and save what you want."),
                         ),
                 )
                 .into_any_element()

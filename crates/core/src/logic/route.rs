@@ -222,6 +222,14 @@ pub fn scout_followup(r: &Resolved, held_back: Option<&Resolved>, last_round: bo
     format!("# Requested context\n\n{}", parts.join("\n\n"))
 }
 
+/// One corrective follow-up for an invalid routing reply. It uses the same conversation,
+/// but requires a decision rather than spending another round reading files.
+pub const ROUTE_REPAIR_PROMPT: &str = "# Routing correction
+
+Your last reply did not contain a valid route block naming a candidate from Models. Do not answer the user's request or ask the user questions. Use the original request and the project context already supplied.
+
+Reply with only a fenced route block containing model, confidence, reason and files. The model must be an actual candidate name from Models. Choose the least capable candidate that can handle the task reliably; use low confidence if uncertain. Do not request more files in this corrective round.";
+
 /// What the routing model answered.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RouteRequest {
@@ -324,12 +332,14 @@ pub fn decide(req: &RouteRequest, candidates: &[Candidate]) -> Option<Decision> 
     })
 }
 
-/// The model to use when routing did not produce a decision: the one the conversation is
-/// already on, else the most capable one. Never a cheaper guess.
+/// Keep the conversation's current model when routing fails, only if it is still offered.
+/// Without that model, the user must choose: a format failure is not a capability assessment.
 pub fn fallback<'a>(candidates: &'a [Candidate], current: Option<&str>) -> Option<&'a Candidate> {
-    current
-        .and_then(|name| candidates.iter().find(|c| c.name == name))
-        .or_else(|| candidates.iter().max_by_key(|c| c.tier))
+    current.and_then(|name| {
+        candidates
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+    })
 }
 
 #[cfg(test)]
@@ -443,12 +453,31 @@ mod tests {
     }
 
     #[test]
-    fn failed_routing_never_guesses_cheaper() {
+    fn failed_routing_in_a_new_chat_requires_a_user_choice() {
+        assert_eq!(fallback(&all(), None), None);
+    }
+
+    #[test]
+    fn failed_routing_keeps_the_current_offered_model() {
         let c = all();
-        assert_eq!(fallback(&c, None).unwrap().name, "astra");
-        assert_eq!(fallback(&c, Some("terra")).unwrap().name, "terra");
-        assert_eq!(fallback(&c, Some("gone")).unwrap().name, "astra");
-        assert_eq!(fallback(&[], None), None);
+        assert_eq!(fallback(&c, Some("TERRA")).unwrap().name, "terra");
+    }
+
+    #[test]
+    fn failed_routing_with_an_unavailable_current_model_requires_a_user_choice() {
+        assert_eq!(fallback(&all(), Some("gone")), None);
+    }
+
+    #[test]
+    fn failed_routing_with_no_candidates_does_not_choose_a_model() {
+        assert_eq!(fallback(&[], Some("terra")), None);
+    }
+
+    #[test]
+    fn corrective_routing_requires_a_decision_using_existing_context() {
+        assert!(ROUTE_REPAIR_PROMPT.contains("actual candidate name from Models"));
+        assert!(ROUTE_REPAIR_PROMPT.contains("project context already supplied"));
+        assert!(ROUTE_REPAIR_PROMPT.contains("Do not request more files"));
     }
 
     #[test]

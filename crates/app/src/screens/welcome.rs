@@ -91,6 +91,7 @@ impl Render for WelcomeScreen {
         let recents = a.state.recents.clone();
         let error = a.error.clone();
         let opening = a.scanning;
+        let current_project = a.project.as_ref().map(|p| p.read(cx).name.clone());
         let app = self.app.clone();
 
         let steps: Vec<_> = STEPS
@@ -140,7 +141,15 @@ impl Render for WelcomeScreen {
                     .hover(|s| s.bg(hsla(c.surface_hover)))
                     .on_click(move |_, _, cx| {
                         app.update(cx, |a, cx| {
-                            a.open_folder(path.clone(), Some(location.clone()), cx)
+                            let current = a.project.as_ref().is_some_and(|project| {
+                                let project = project.read(cx);
+                                project.root == path && project.location == location
+                            });
+                            if current {
+                                a.resume_project(cx);
+                            } else {
+                                a.open_folder(path.clone(), Some(location.clone()), cx);
+                            }
                         })
                     })
                     .child(folder_glyph(false, cx))
@@ -255,6 +264,32 @@ impl Render for WelcomeScreen {
                                     .flex_none()
                                     .w(px(LEFT))
                                     .child(caption("START", cx))
+                                    .when_some(current_project, |d, name| {
+                                        let resume = self.app.clone();
+                                        d.child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(sp(2))
+                                                .mb(sp(4))
+                                                .child(
+                                                    Button::new("resume-project", "Return to project")
+                                                        .disabled(opening)
+                                                        .on_click(move |_, _, cx| {
+                                                            resume.update(cx, |a, cx| a.resume_project(cx))
+                                                        }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .type_style(contextual_theme::type_style::UI_SMALL)
+                                                        .text_color(hsla(c.ink_muted))
+                                                        .whitespace_normal()
+                                                        .child(SharedString::from(format!(
+                                                            "{name} stays open until you choose another project. Switching closes its workspace; unsent drafts and Undo are not retained."
+                                                        ))),
+                                                ),
+                                        )
+                                    })
                                     .child(
                                         div().flex().child(
                                             Button::new(

@@ -139,6 +139,11 @@ impl Render for Shell {
                 cx.stop_propagation();
             })
             .on_action(cx.listener(|this, _: &OpenFolder, _, cx| {
+                if let Some((_, workspace)) = &this.workspace
+                    && !workspace.update(cx, |workspace, cx| workspace.show_projects(cx))
+                {
+                    return;
+                }
                 this.app.update(cx, |a, cx| {
                     a.folder_dialog_open = true;
                     cx.notify();

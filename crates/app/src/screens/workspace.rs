@@ -503,6 +503,18 @@ impl WorkspaceScreen {
         }
     }
 
+    /// Show the project picker while retaining this workspace for a possible return.
+    pub fn show_projects(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.chat.update(cx, |chat, cx| chat.can_switch_project(cx)) {
+            return false;
+        }
+        self.app.update(cx, |app, cx| {
+            app.screen = crate::state::Screen::Welcome;
+            cx.notify();
+        });
+        true
+    }
+
     fn chat_geometry(
         &mut self,
         panes: &ChatLayout,
@@ -808,6 +820,14 @@ impl Render for WorkspaceScreen {
                             .border_t_1()
                             .border_color(hsla(c.border))
                     })
+                    .child(
+                        Button::new("projects", "Projects")
+                            .size(ButtonSize::Xs)
+                            .variant(ButtonVariant::Ghost)
+                            .on_click(cx.listener(|t, _, _, cx| {
+                                t.show_projects(cx);
+                            })),
+                    )
                     .when(!explorer_docked, |d| {
                         d.child(
                             Button::new(

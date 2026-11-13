@@ -282,6 +282,14 @@ impl AppModel {
         cx.notify();
     }
 
+    /// Returns to the still-open workspace without replacing its chat or draft.
+    pub fn resume_project(&mut self, cx: &mut Context<Self>) {
+        if self.project.is_some() && !self.scanning {
+            self.screen = Screen::Workspace;
+            cx.notify();
+        }
+    }
+
     pub fn close_project(&mut self, cx: &mut Context<Self>) {
         self.project = None;
         self.scm = None;
@@ -313,6 +321,9 @@ impl AppModel {
         location: Option<Location>,
         cx: &mut Context<Self>,
     ) {
+        if self.scanning {
+            return;
+        }
         let root = match location {
             Some(location) => ProjectRoot { location, path },
             None => match self.hosts.detect(&path) {
