@@ -529,7 +529,6 @@ impl SourceControl {
             || repositories
                 .first()
                 .is_some_and(|repository| !repository.path.is_empty());
-        let active_root = scm.repository_root().map(str::to_owned);
         let statuses = scm.repository_statuses.clone();
         let errors = scm.repository_errors.clone();
         let mut groups = Vec::with_capacity(repositories.len());
@@ -550,7 +549,6 @@ impl SourceControl {
             } else {
                 repository.path.clone()
             };
-            let selected = active_root.as_deref() == Some(repository.root.as_str());
             let group = div()
                 .id(SharedString::from(format!("scm-group:{}", repository.root)))
                 .flex()
@@ -565,8 +563,7 @@ impl SourceControl {
                             .py(sp(2))
                             .border_b_1()
                             .border_color(hsla(c.border))
-                            .bg(hsla(c.surface_100))
-                            .when(selected, |d| d.bg(hsla(c.surface_selected)))
+                            .bg(hsla(c.surface_selected))
                             .child(Icon::new(gpui_kit::assets::IconName::GitBranch).size(sp(4)))
                             .child(
                                 div()
